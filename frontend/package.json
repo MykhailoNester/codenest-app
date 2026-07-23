@@ -37,7 +37,7 @@
     "recharts": "^2.15.4",
     "remark-gfm": "4.0.1",
     "sonner": "^2.0.7",
-    "zustand": "^5.0.13"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
