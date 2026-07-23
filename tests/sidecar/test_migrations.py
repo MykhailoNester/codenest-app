@@ -27,9 +27,9 @@ async def test_providers_table_schema(migrated_db) -> None:
         "is_enabled",
         "created_at",
     }
-    assert required.issubset(
-        col_names
-    ), f"required columns missing from providers: {required - col_names}"
+    assert required.issubset(col_names), (
+        f"required columns missing from providers: {required - col_names}"
+    )
 
 
 @pytest.mark.asyncio
@@ -50,9 +50,9 @@ async def test_launch_presets_table_schema(migrated_db) -> None:
         "profile_id",
         "created_at",
     }
-    assert required.issubset(
-        col_names
-    ), f"required columns missing from launch_presets: {required - col_names}"
+    assert required.issubset(col_names), (
+        f"required columns missing from launch_presets: {required - col_names}"
+    )
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 import aiosqlite
 
@@ -102,7 +102,7 @@ async def list_recent_unread(
 
 
 async def mark_read(db: aiosqlite.Connection, notification_id: int) -> dict | None:
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
     await db.execute(
         "UPDATE notifications SET read_at = ? WHERE id = ? AND read_at IS NULL",
         (now, notification_id),
@@ -116,7 +116,7 @@ async def mark_read(db: aiosqlite.Connection, notification_id: int) -> dict | No
 
 
 async def mark_all_read(db: aiosqlite.Connection) -> int:
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
     cursor = await db.execute(
         "UPDATE notifications SET read_at = ? WHERE read_at IS NULL", (now,)
     )

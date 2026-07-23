@@ -70,9 +70,9 @@ async def _insert_provider(
 async def test_clean_slate_zero_providers(migrated_db: aiosqlite.Connection):
     """E0.1 decision: fresh DB must ship with zero seeded provider rows."""
     providers = await provider_service.list_providers(migrated_db, only_enabled=False)
-    assert (
-        providers == []
-    ), f"expected empty providers list on fresh DB, got {[p.name for p in providers]}"
+    assert providers == [], (
+        f"expected empty providers list on fresh DB, got {[p.name for p in providers]}"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +48,7 @@ def _publish(message: dict) -> None:
 
 
 def _now() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds")
+    return datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
 
 
 _profile_cache: dict[str, str] = {}
@@ -491,7 +491,7 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
     await db.commit()
     await _broadcast(db, session_id, event_id, "stop")
 
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     total_row = await db.execute(
         "SELECT SUM(cost_usd) as total FROM agent_sessions WHERE DATE(last_event_at) = ?",
         (today,),

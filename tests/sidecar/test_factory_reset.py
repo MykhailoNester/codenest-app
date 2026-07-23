@@ -202,17 +202,17 @@ async def test_factory_reset_wipes_user_data_and_restores_seed(
         # ------------------------------------------------------------------
 
         # providers / provider_models / profiles must be zero
-        assert (
-            await _count(migrated_db, "providers") == 0
-        ), "providers must be 0 after reset"
-        assert (
-            await _count(migrated_db, "provider_models") == 0
-        ), "provider_models must be 0 after reset"
+        assert await _count(migrated_db, "providers") == 0, (
+            "providers must be 0 after reset"
+        )
+        assert await _count(migrated_db, "provider_models") == 0, (
+            "provider_models must be 0 after reset"
+        )
         # bootstrap() recreates the default 'Home Base' grouping profile
         # (see test_profiles_grouping); a reset therefore leaves exactly that one.
-        assert (
-            await _count(migrated_db, "profiles") == 1
-        ), "only the default Home Base profile should exist after reset"
+        assert await _count(migrated_db, "profiles") == 1, (
+            "only the default Home Base profile should exist after reset"
+        )
         prof_cur = await migrated_db.execute("SELECT name FROM profiles")
         assert {r[0] for r in await prof_cur.fetchall()} == {"Home Base"}
 
@@ -228,9 +228,9 @@ async def test_factory_reset_wipes_user_data_and_restores_seed(
         )
         projects = [(r[0], r[1], r[2]) for r in await cur.fetchall()]
         project_names = {p[1] for p in projects}
-        assert (
-            "Unassigned" in project_names
-        ), f"Unassigned missing from projects: {projects}"
+        assert "Unassigned" in project_names, (
+            f"Unassigned missing from projects: {projects}"
+        )
         assert "Command Center" in project_names, f"Command Center missing: {projects}"
         assert len(projects) == 2, f"Expected exactly 2 projects, got: {projects}"
 
@@ -256,9 +256,9 @@ async def test_factory_reset_wipes_user_data_and_restores_seed(
             "SELECT value FROM workspace_state WHERE key = 'onboarding_completed'"
         )
         row = await cur.fetchone()
-        assert (
-            row is None
-        ), f"onboarding_completed must be absent after reset, got value={row[0] if row else None!r}"
+        assert row is None, (
+            f"onboarding_completed must be absent after reset, got value={row[0] if row else None!r}"
+        )
 
     finally:
         # Restore settings so other tests are not affected

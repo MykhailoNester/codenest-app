@@ -222,8 +222,7 @@ async def set_enabled(
     # from the (enabled, signature_status, trust_mode) tuple so a strict-mode
     # untrusted plugin never momentarily shows as `loaded` between two writes.
     await db.execute(
-        "UPDATE plugins SET enabled = ?, updated_at = CURRENT_TIMESTAMP "
-        "WHERE id = ?",
+        "UPDATE plugins SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (1 if enabled else 0, plugin_id),
     )
     await db.commit()

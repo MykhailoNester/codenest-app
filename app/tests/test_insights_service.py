@@ -152,6 +152,6 @@ async def test_rule_that_didnt_fire_today_can_fire_later_same_day(db):
     await _insert_session(db, session_id="a3", cost=8.0, days_ago=1, model="opus")
     second = await insights_service.generate_and_publish(db)
     keys_second = {p["rule_key"] for p in second}
-    assert keys_second == {
-        "provider_dominant_share"
-    }, f"expected only provider_dominant_share, got {keys_second}"
+    assert keys_second == {"provider_dominant_share"}, (
+        f"expected only provider_dominant_share, got {keys_second}"
+    )

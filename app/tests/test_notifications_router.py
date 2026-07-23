@@ -99,5 +99,5 @@ def test_stream_endpoint_exists(test_app):
     # .get(timeout=) and .stream() both hang because the endpoint only flushes
     # once an event arrives. Assert the route is registered instead of opening
     # the stream.
-    paths = {getattr(r, "path", None) for r in test_app.app.routes}
+    paths = test_app.app.openapi()["paths"]
     assert "/api/v1/notifications/stream" in paths

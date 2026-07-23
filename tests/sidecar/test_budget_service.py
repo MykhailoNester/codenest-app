@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import aiosqlite
 import pytest
@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from app.services import budget_service
 
-_NOW = datetime.utcnow().isoformat(sep=" ")
+_NOW = datetime.now(UTC).replace(tzinfo=None).isoformat(sep=" ")
 _OLD = "2000-01-01 00:00:00"
 
 

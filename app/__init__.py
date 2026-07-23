@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -119,36 +121,13 @@ async def _watch_parent_pid(parent_pid: int) -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Codenest", version=_APP_VERSION)
-
-    @app.exception_handler(Exception)
-    async def _unhandled_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
-        # Log the full traceback server-side; return a generic message to the
-        # client so internal paths, schema details, or library internals are
-        # never leaked over the (unauthenticated) localhost API.
-        logger.exception(
-            "unhandled exception on %s %s", request.method, request.url.path
-        )
-        return JSONResponse({"detail": "Internal server error"}, status_code=500)
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
-            "http://localhost:1420",  # Vite dev server
-            "http://127.0.0.1:1420",
-            "tauri://localhost",  # Tauri production
-        ],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     schedule_task: asyncio.Task | None = None  # type: ignore[type-arg]
     insights_task: asyncio.Task | None = None  # type: ignore[type-arg]
 
-    @app.on_event("startup")
-    async def startup():
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        nonlocal schedule_task, insights_task
+
         from .config import settings as _settings
 
         logger.info(
@@ -191,12 +170,10 @@ def create_app() -> FastAPI:
         # Schedule tick — disable via env for tests that don't
         # want a background loop touching their DB.
         if os.environ.get("CODENEST_DISABLE_SCHEDULE_TICK") != "1":
-            nonlocal schedule_task
             schedule_task = asyncio.create_task(_schedule_tick_loop())
             logger.info("schedule tick loop armed (%.1fs)", _SCHEDULE_TICK_SECONDS)
         # Insights tick — same disable env as schedule tick.
         if os.environ.get("CODENEST_DISABLE_SCHEDULE_TICK") != "1":
-            nonlocal insights_task
             insights_task = asyncio.create_task(_insights_tick_loop())
             logger.info("insights tick loop armed (%.1fs)", _INSIGHTS_TICK_SECONDS)
 
@@ -231,8 +208,8 @@ def create_app() -> FastAPI:
 
         asyncio.create_task(_deferred_bootstrap())
 
-    @app.on_event("shutdown")
-    async def shutdown():
+        yield
+
         for task in (schedule_task, insights_task):
             if task is not None:
                 task.cancel()
@@ -241,6 +218,31 @@ def create_app() -> FastAPI:
                 except (asyncio.CancelledError, Exception):
                     pass
         await close_db()
+
+    app = FastAPI(title="Codenest", version=_APP_VERSION, lifespan=lifespan)
+
+    @app.exception_handler(Exception)
+    async def _unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        # Log the full traceback server-side; return a generic message to the
+        # client so internal paths, schema details, or library internals are
+        # never leaked over the (unauthenticated) localhost API.
+        logger.exception(
+            "unhandled exception on %s %s", request.method, request.url.path
+        )
+        return JSONResponse({"detail": "Internal server error"}, status_code=500)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:1420",  # Vite dev server
+            "http://127.0.0.1:1420",
+            "tauri://localhost",  # Tauri production
+        ],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health", tags=["system"])
     async def health() -> dict:

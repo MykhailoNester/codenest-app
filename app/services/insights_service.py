@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Awaitable, Callable
 
 import aiosqlite
@@ -131,7 +131,7 @@ async def rule_budget_burn_high(
     except Exception:
         # Tolerates older DB snapshots where the budgets table isn't migrated yet.
         return None
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     for b in summary:
         if b["percent"] < BURN_HIGH_PERCENT:
             continue
@@ -224,7 +224,7 @@ def _parse_db_ts(raw: str | None) -> datetime | None:
 
 
 def _utc_day_key() -> str:
-    return datetime.utcnow().date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 async def generate_and_publish(

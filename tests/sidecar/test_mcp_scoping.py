@@ -192,9 +192,9 @@ async def test_materialize_respects_exclude_slugs(migrated_db, tmp_path, monkeyp
     )
     payload = json.loads(pathlib.Path(path).read_text())
     assert srv_keep["slug"] in payload["mcpServers"], "kept server must be in config"
-    assert (
-        srv_drop["slug"] not in payload["mcpServers"]
-    ), "excluded server must be absent"
+    assert srv_drop["slug"] not in payload["mcpServers"], (
+        "excluded server must be absent"
+    )
 
 
 @pytest.mark.asyncio

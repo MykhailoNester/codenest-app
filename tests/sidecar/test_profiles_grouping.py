@@ -219,9 +219,9 @@ async def test_list_profiles_project_count(
     profiles = await list_profiles(migrated_db)
     home_base = next((p for p in profiles if p["id"] == default_id), None)
     assert home_base is not None
-    assert (
-        home_base["project_count"] == 2
-    ), f"expected 2 projects attached to Home Base, got {home_base['project_count']}"
+    assert home_base["project_count"] == 2, (
+        f"expected 2 projects attached to Home Base, got {home_base['project_count']}"
+    )
     # Other profiles have 0
     for p in profiles:
         if p["id"] != default_id:

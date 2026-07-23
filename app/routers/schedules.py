@@ -411,7 +411,9 @@ async def api_set_retention(request: Request) -> JSONResponse:
     if not (1 <= days <= 365):
         raise HTTPException(status_code=400, detail="'retention_days' must be 1–365")
     db = await get_db()
-    now = __import__("datetime").datetime.utcnow().isoformat(timespec="seconds")
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
     await db.execute(
         """INSERT INTO app_settings (key, value_json, updated_at)
            VALUES ('schedule_transcript_retention_days', ?, ?)

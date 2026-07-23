@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 
 import aiosqlite
 from fastapi import HTTPException
@@ -207,7 +207,7 @@ async def upsert_setting(db: aiosqlite.Connection, key: str, value_json: str) ->
         _validate_terminal_setting(key, value_json)
     if key == "enabled_features":
         _validate_features_setting(value_json)
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
     await db.execute(
         """INSERT INTO app_settings (key, value_json, updated_at)
            VALUES (?, ?, ?)

@@ -83,9 +83,9 @@ async def test_onboarding_complete_persists_across_connection_close(
     conn2 = await _open_db(db_path)
     try:
         val = await ws_state.get(conn2, "onboarding_completed")
-        assert (
-            val == "true"
-        ), f"onboarding_completed should survive connection close; got {val!r}"
+        assert val == "true", (
+            f"onboarding_completed should survive connection close; got {val!r}"
+        )
         # Mirror the router comparison to catch any future type drift.
         assert (val == "true") is True
     finally:

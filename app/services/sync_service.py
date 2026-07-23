@@ -30,7 +30,7 @@ import os
 import shutil
 import tarfile
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -89,7 +89,7 @@ def _plugins_path() -> Path:
 
 
 def _utc_stamp() -> str:
-    return datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 # ─── Target CRUD ────────────────────────────────────────────────────────────
@@ -286,7 +286,9 @@ async def create_snapshot(db: aiosqlite.Connection, target_id: int) -> dict[str,
 
         manifest = {
             "version": SNAPSHOT_VERSION,
-            "created_at_utc": datetime.utcnow().isoformat(timespec="seconds"),
+            "created_at_utc": datetime.now(UTC)
+            .replace(tzinfo=None)
+            .isoformat(timespec="seconds"),
             "sources": sources,
             "db_sha256": db_sha,
             "plugins_sha256": plugins_sha,
@@ -322,7 +324,7 @@ async def create_snapshot(db: aiosqlite.Connection, target_id: int) -> dict[str,
         action=_ACTION_CREATE,
     )
     async with db.execute(
-        "SELECT id FROM sync_snapshots WHERE target_id = ? " "ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM sync_snapshots WHERE target_id = ? ORDER BY id DESC LIMIT 1",
         (target_id,),
     ) as cur:
         row = await cur.fetchone()

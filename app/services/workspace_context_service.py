@@ -117,8 +117,7 @@ def build_session_context(projects: list[tuple[str, str]]) -> str:
     if not projects:
         return "Codenest command-center workspace: no projects imported yet."
     lines = [
-        "Codenest command-center workspace. Imported projects and their "
-        "absolute paths:"
+        "Codenest command-center workspace. Imported projects and their absolute paths:"
     ]
     lines += [f"- {name}: {path}" for name, path in projects]
     lines.append(

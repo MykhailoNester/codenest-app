@@ -7,9 +7,9 @@ _URL_MAP = {
     "project": lambda r: f"/projects/{r['id']}",
     "doc": lambda r: f"/docs?id={r['id']}",
     "inbox": lambda r: f"/inbox?id={r['id']}",
-    "event": lambda r: f"/sessions/{r['session_id']}"
-    if r.get("session_id")
-    else "/sessions",
+    "event": lambda r: (
+        f"/sessions/{r['session_id']}" if r.get("session_id") else "/sessions"
+    ),
 }
 
 _BRANCH_SQL = {

@@ -614,13 +614,13 @@ async def test_list_runs_linked_session_not_duplicated_end_to_end(
     )
     row = matching[0]
     assert row["row_kind"] == "run", "Unified row must be row_kind='run', not 'observe'"
-    assert (
-        row["pane_id"] == pane_id
-    ), "run row must carry the PTY pane_id for Focus/Stop"
+    assert row["pane_id"] == pane_id, (
+        "run row must carry the PTY pane_id for Focus/Stop"
+    )
     # The session enrichment from the hook must be present on the single row.
-    assert (
-        row["session_status"] == "active"
-    ), "Session enrichment must be available on the run row (joined from agent_sessions)"
+    assert row["session_status"] == "active", (
+        "Session enrichment must be available on the run row (joined from agent_sessions)"
+    )
 
 
 @pytest.mark.asyncio

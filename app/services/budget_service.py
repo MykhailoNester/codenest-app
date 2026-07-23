@@ -19,7 +19,7 @@ block new sessions once a matching budget is at or above 100%.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 import aiosqlite
@@ -43,13 +43,13 @@ def period_bounds(period: Period, now: datetime | None = None) -> tuple[str, str
 
     Bounds are inclusive-start / exclusive-end ISO timestamps in **UTC**
     naive form so they line up with ``agent_sessions.started_at``, which
-    ``agent_service`` writes via ``datetime.utcnow().isoformat(...)``.
+    ``agent_service`` writes as naive UTC ISO timestamps.
 
     - daily: UTC midnight today → UTC midnight tomorrow
     - weekly: UTC Monday 00:00 → next UTC Monday 00:00
     - monthly: UTC 1st of this month 00:00 → UTC 1st of next month 00:00
     """
-    moment = now or datetime.utcnow()
+    moment = now or datetime.now(UTC).replace(tzinfo=None)
     today = moment.date()
     if period == "daily":
         start = datetime.combine(today, datetime.min.time())
