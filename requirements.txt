@@ -1,7 +1,7 @@
 fastapi==0.115.0
 uvicorn==0.30.6
 aiosqlite==0.20.0
-platformdirs>=4.0
+platformdirs>=4.11.0
 croniter>=6.0
 
 # Dev tooling
