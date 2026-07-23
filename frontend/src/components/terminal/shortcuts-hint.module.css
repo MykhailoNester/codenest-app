@@ -1,0 +1,133 @@
+.trigger {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-3, var(--fg-2));
+  cursor: pointer;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition:
+    background 80ms,
+    color 80ms;
+  margin-left: auto;
+}
+
+.trigger:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-1);
+}
+
+/* Backdrop — semi-transparent overlay that closes the panel on click */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+}
+
+/* Floating panel — anchored bottom-right of the tab bar area */
+.panel {
+  position: fixed;
+  bottom: 1rem;
+  right: 1.25rem;
+  z-index: 7001;
+  width: 320px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-3, 8px);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+  font-size: 12.5px;
+  color: var(--fg-1);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-1);
+}
+
+.title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
+  letter-spacing: 0.01em;
+}
+
+.close {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-2);
+  cursor: pointer;
+  padding: 0 0.3rem;
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 3px;
+}
+
+.close:hover {
+  color: var(--fg-1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 14px;
+  gap: 10px;
+}
+
+.row:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.keys {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-2);
+  min-width: 20px;
+  text-align: center;
+  box-shadow: 0 1px 0 var(--line-1);
+  white-space: nowrap;
+}
+
+.desc {
+  flex: 1 1 auto;
+  text-align: right;
+  color: var(--fg-2);
+  font-size: 12px;
+}

@@ -1,0 +1,119 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  /* flex: 1 fills the remaining space in .d3-main after the OmniBar, giving
+     .frameWrap an accurate getBoundingClientRect() that exactly matches the
+     visible area the native overlay should cover. */
+  flex: 1 1 auto;
+  min-height: 0;
+  color: var(--fg-1);
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--line-1);
+  background: rgba(20, 20, 28, 0.6);
+}
+
+.input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-1);
+  color: var(--fg-0);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.input:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.btn {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-1);
+  border: 1px solid var(--line-1);
+}
+
+.detect {
+  font-size: 11px;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+
+.detectOk {
+  color: #86efac;
+}
+
+.frameWrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* .frame intentionally removed — the native child webview replaces the iframe */
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--fg-3);
+  font-size: 13px;
+  padding: 24px;
+  text-align: center;
+}
+
+.history {
+  position: absolute;
+  top: 56px;
+  right: 24px;
+  z-index: 4;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  width: 320px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.historyRow {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--fg-1);
+  cursor: pointer;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.historyRow:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.historyRow:last-child {
+  border-bottom: 0;
+}
+
+.historyMeta {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  margin-top: 2px;
+}

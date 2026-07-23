@@ -1,0 +1,136 @@
+/* ── Projects page ──────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+/* ── Workspace card ─────────────────────────────────────────────────── */
+
+.cardWorkspace {
+  border: 1px solid var(--accent, #6366f1);
+  border-radius: 8px;
+  padding: 16px 20px;
+  background: var(--bg-2);
+}
+
+.workspaceBadge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent, #6366f1);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* ── Card action area ───────────────────────────────────────────────── */
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Manage cluster (edit + delete) ─────────────────────────────────── */
+
+.manageCluster {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* ── Edit modal overlay ─────────────────────────────────────────────── */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modalBox {
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  padding: 24px;
+  width: 480px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.modalTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin-bottom: 16px;
+}
+
+.formGrid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.formField {
+  margin-bottom: 10px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  color: var(--fg-3);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  color: var(--fg-0);
+  border-radius: 6px;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.modalFooter {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.errorText {
+  font-size: 12px;
+  color: #ef4444;
+  margin-top: 8px;
+}

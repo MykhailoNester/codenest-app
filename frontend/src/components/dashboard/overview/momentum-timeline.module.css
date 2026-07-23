@@ -1,0 +1,92 @@
+.panel {
+  background: rgba(11, 14, 24, 0.55);
+  border: 1px solid var(--line-1);
+  border-radius: 16px;
+  padding: 16px 20px 12px;
+  backdrop-filter: blur(20px);
+  position: relative;
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.sectionLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--fg-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionLabel::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.legend {
+  display: flex;
+  gap: 14px;
+  font-size: 10.5px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendGlyph {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+.legendGlyph.commit {
+  background: var(--accent);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.legendGlyph.session {
+  background: var(--violet);
+  border-radius: 50%;
+}
+
+.legendGlyph.task {
+  background: var(--ok);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.timeline {
+  width: 100%;
+}
+
+.timeline svg {
+  width: 100%;
+  height: 130px;
+  display: block;
+}
+
+.foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  padding: 6px 4px 0;
+}

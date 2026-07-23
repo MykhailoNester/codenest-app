@@ -1,0 +1,133 @@
+.barDrag {
+  outline: 2px dashed rgba(59, 130, 246, 0.6);
+  outline-offset: -2px;
+  background: rgba(59, 130, 246, 0.08) !important;
+}
+
+.bar {
+  /* OmniBar is a flex child of `.d3-omni-row` (defined in d3-creative.css).
+     It must grow to fill the remaining horizontal space in that row while
+     the NotificationBell and Launch button sit to its right.
+     `position: relative` anchors the `.suggestions` popover (`top: 100%`)
+     to the bar itself rather than the row or .d3-main.
+     `z-index` lifts the bar and its absolute children above page content
+     (cards, charts, etc.) that may create their own stacking contexts. */
+  position: relative;
+  z-index: 20;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-1);
+  color: var(--fg-0);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.input:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.kind {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  min-width: 80px;
+  text-align: right;
+}
+
+.kindSlash {
+  color: #f59e0b;
+}
+.kindReference {
+  color: #a855f7;
+}
+.kindSearch {
+  color: #38bdf8;
+}
+.kindPrompt {
+  color: #86efac;
+}
+.kindEmpty {
+  color: var(--fg-4);
+}
+
+.suggestions {
+  position: absolute;
+  top: 100%;
+  left: 24px;
+  right: 24px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  margin-top: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.suggestion {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--fg-1);
+  cursor: pointer;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.suggestion:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.suggestion:last-child {
+  border-bottom: 0;
+}
+
+.suggestionMeta {
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+
+.hint {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+
+.kbdHint {
+  display: inline-block;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  line-height: 1.5;
+  background: var(--bg-3, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--line-2, rgba(255, 255, 255, 0.12));
+  border-radius: 3px;
+  color: var(--fg-3);
+  vertical-align: middle;
+}
+
+.actionHint {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  font-size: 10.5px;
+  color: var(--fg-4);
+  white-space: nowrap;
+  pointer-events: none;
+  /* z-index below the suggestions popover (100) but above page content */
+  z-index: 21;
+}

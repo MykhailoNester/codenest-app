@@ -1,0 +1,70 @@
+.wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.trigger {
+  background: none;
+  border: none;
+  color: var(--fg-3);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: background 0.1s;
+}
+
+.trigger:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 8999;
+}
+
+.dropdown {
+  z-index: 9000;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  min-width: 168px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.item {
+  background: none;
+  border: none;
+  color: var(--fg-1);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 7px 10px;
+  text-align: left;
+  border-radius: 5px;
+  transition: background 0.1s;
+  width: 100%;
+}
+
+.item:hover:not(:disabled) {
+  background: var(--bg-3);
+}
+
+.item:disabled {
+  color: var(--fg-4);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.itemDanger {
+  color: #ef4444;
+}
+
+.itemDanger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+}

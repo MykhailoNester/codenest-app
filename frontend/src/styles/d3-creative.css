@@ -1,0 +1,1392 @@
+/* Direction 3 — CREATIVE (network constellation) */
+
+.d3-shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  background: #06070d;
+  color: var(--fg-1);
+  height: 100%;
+  width: 100%;
+  font-size: 12.5px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Side
+ *
+ * `backdrop-filter: blur(20px)` was removed here (and on every other
+ * full-size panel below). When the orbs behind the side bar repaint —
+ * or the page above the panel re-renders — WebKit re-samples and
+ * re-blurs the panel's full footprint. Combined across the four large
+ * panels on the Command Center page that single-handedly drove the
+ * Graphics and Media subprocess to ~5 cores. The opaque-ish rgba
+ * background gives the same visual without the per-frame convolution.
+ */
+.d3-side {
+  background: rgba(8, 10, 18, 0.92);
+  border-right: 1px solid var(--line-1);
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  z-index: 2;
+}
+.d3-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 4px 4px;
+}
+.d3-brand__mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-1);
+}
+.d3-brand__name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fg-0);
+}
+.d3-brand__sub {
+  font-size: 11px;
+  color: var(--fg-3);
+  margin-top: 1px;
+  font-family: var(--font-mono);
+}
+
+.d3-side__h {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-4);
+  font-weight: 600;
+  padding: 6px 6px;
+}
+
+.d3-side__provider {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.d3-prov {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  opacity: 0.5;
+  border: 1px solid transparent;
+}
+.d3-prov.is-on {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.02);
+  border-color: var(--line-1);
+}
+.d3-prov__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.d3-prov__n {
+  font-size: 12px;
+  color: var(--fg-1);
+  font-weight: 500;
+}
+.d3-prov__m {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  margin-top: 1px;
+  font-family: var(--font-mono);
+}
+.d3-prov__count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 7px;
+  border-radius: 999px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.d3-side__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.d3-side__group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.d3-side__group + .d3-side__group {
+  margin-top: 6px;
+}
+.d3-side__grouphead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: var(--fg-4);
+  text-align: left;
+  cursor: pointer;
+}
+.d3-side__grouphead:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg-2);
+}
+.d3-side__grouphead svg {
+  transition: transform 0.15s ease;
+  flex: 0 0 auto;
+}
+.d3-side__grouphead.is-open svg {
+  transform: rotate(90deg);
+}
+.d3-nav {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 9px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  text-align: left;
+}
+.d3-nav:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg-0);
+}
+.d3-nav.is-active {
+  background: linear-gradient(
+    90deg,
+    rgba(59, 130, 246, 0.18),
+    rgba(168, 85, 247, 0.1)
+  );
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--fg-0);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+}
+
+.d3-side__foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.d3-budget {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+.d3-budget__row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--fg-3);
+  margin-bottom: 5px;
+}
+.d3-budget__row .tabular {
+  color: var(--fg-1);
+  font-weight: 500;
+}
+.d3-budget__bar {
+  height: 4px;
+  background: var(--bg-3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.d3-budget__bar > div {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #a855f7);
+  border-radius: inherit;
+}
+
+.d3-side__user {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 6px;
+}
+.d3-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 12px;
+  color: #fff;
+  flex: 0 0 30px;
+}
+.d3-side__userstack {
+  flex: 1;
+  min-width: 0;
+}
+.d3-side__username {
+  font-size: 12.5px;
+  color: var(--fg-1);
+  font-weight: 500;
+}
+.d3-side__usersub {
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+
+/* Main */
+.d3-main {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* parent never scrolls; children own their overflow */
+}
+
+/* Direct flex children must not introduce an implicit min-height that
+   causes the column to overflow. */
+.d3-main > * {
+  min-height: 0;
+}
+
+/* Top chrome row — OmniBar + NotificationBell + Launch button.
+   Rendered as the first child of .d3-main so it sits above the Topbar
+   title/crumbs with no vertical overlap. The OmniBar (.bar) grows to fill
+   remaining width; action buttons are `flex: 0 0 auto` and stay on the right.
+   `z-index: 20` ensures the suggestions popover floats above page content. */
+.d3-omni-row {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px;
+  background: rgba(20, 20, 28, 0.72);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line-1);
+}
+
+/* Scrollable page wrapper — applied to the root element of every non-terminal
+   page so that page content can scroll while the OmniBar stays fixed in flow
+   at the top of the flex column. */
+.d3-page-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+/*
+ * Background orbs were originally `filter: blur(120px)` on a 520×520
+ * element. WebKit re-runs the blur convolution every frame the page
+ * repaints, and any backdrop-filter panel above it must resample the
+ * blurred pixels — that combination was pegging the WebKit Graphics
+ * and Media subprocess at 4–5 cores during normal Command Center use.
+ *
+ * The same visual is now produced by a radial gradient (cheap raster)
+ * with `will-change: transform` so the compositor parks the orb on
+ * its own layer and skips repaints when only sibling content updates.
+ */
+.d3-bg-orb {
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 0;
+  will-change: transform;
+  contain: paint;
+}
+.d3-bg-orb--1 {
+  top: -160px;
+  left: -120px;
+  background: radial-gradient(
+    circle at center,
+    rgba(59, 130, 246, 0.55) 0%,
+    rgba(59, 130, 246, 0.22) 35%,
+    rgba(59, 130, 246, 0) 70%
+  );
+}
+.d3-bg-orb--2 {
+  top: 100px;
+  right: -160px;
+  opacity: 0.4;
+  background: radial-gradient(
+    circle at center,
+    rgba(168, 85, 247, 0.55) 0%,
+    rgba(168, 85, 247, 0.22) 35%,
+    rgba(168, 85, 247, 0) 70%
+  );
+}
+.d3-bg-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+  mask-image: radial-gradient(
+    ellipse 80% 60% at 50% 30%,
+    black 50%,
+    transparent 100%
+  );
+  z-index: 0;
+}
+
+.d3-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 28px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  flex: 0 0 auto;
+}
+.d3-top__left {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+.d3-top__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding-bottom: 2px;
+}
+.d3-top__crumbs {
+  font-size: 11px;
+  color: var(--fg-3);
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+.d3-top__title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--fg-0);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.d3-top__faded {
+  color: var(--fg-3);
+  font-weight: 400;
+}
+.d3-pulse-dot {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.d3-pulse-dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: rgba(34, 197, 94, 0.5);
+  animation: d3-pulse 1.6s infinite ease-out;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+@keyframes d3-pulse {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.d3-cmd-pill {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  min-width: 360px;
+}
+.d3-cmd-pill span {
+  flex: 1;
+}
+.d3-cmd-pill kbd {
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  color: var(--fg-2);
+}
+
+/* .d3-top__actions — removed; NotificationBell and Launch now live in .d3-omni-row (shell.tsx) */
+.d3-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  color: var(--fg-1);
+  font-size: 12.5px;
+  font-weight: 500;
+  position: relative;
+}
+.d3-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--line-3);
+}
+.d3-btn--ghost {
+  background: transparent;
+  border-color: var(--line-1);
+  color: var(--fg-2);
+}
+.d3-btn--primary {
+  background: linear-gradient(135deg, var(--accent), #6e7cff);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  box-shadow:
+    0 4px 16px rgba(59, 130, 246, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.d3-btn__badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  background: var(--err);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 600;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+/* Hero */
+.d3-hero {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 14px;
+  padding: 6px 28px 18px;
+}
+.d3-hero__net {
+  background: rgba(11, 14, 24, 0.55);
+  border: 1px solid var(--line-1);
+  border-radius: 14px;
+  padding: 12px 16px 16px;
+  position: relative;
+  overflow: hidden;
+}
+.d3-hero__chrome {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.d3-h {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.d3-hero__legend {
+  display: flex;
+  gap: 12px;
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+.d3-leg-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.d3-net {
+  width: 100%;
+  height: 320px;
+  display: block;
+}
+.d3-net__pulse {
+  animation: d3-net-pulse 2s infinite ease-out;
+  transform-origin: center;
+  transform-box: fill-box;
+  will-change: transform, opacity;
+}
+@keyframes d3-net-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+@keyframes d3-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.d3-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: d3-spin 0.6s linear infinite;
+}
+
+.d3-hero__metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: min-content;
+  gap: 10px;
+  align-content: start;
+}
+.d3-metric {
+  background: rgba(11, 14, 24, 0.85);
+  border: 1px solid var(--line-1);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.d3-metric--big {
+  grid-column: span 2;
+}
+.d3-metric__label {
+  font-size: 11px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.d3-metric__value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--fg-0);
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin-top: 4px;
+}
+.d3-metric__u {
+  font-size: 13px;
+  color: var(--fg-3);
+  font-weight: 500;
+}
+.d3-metric__delta {
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+.d3-quickspawn {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+.d3-quickspawn__btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-1);
+  border-radius: 7px;
+  color: var(--fg-2);
+  font-size: 11.5px;
+  text-align: left;
+}
+.d3-quickspawn__btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--ac);
+}
+.d3-quickspawn__avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  flex: 0 0 18px;
+}
+
+/* Content */
+.d3-content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 14px;
+  padding: 0 28px 24px;
+}
+.d3-list {
+  background: rgba(11, 14, 24, 0.85);
+  border: 1px solid var(--line-1);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+.d3-list__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.d3-list__filters {
+  display: flex;
+  gap: 4px;
+}
+.d3-tag {
+  background: transparent;
+  border: 1px solid var(--line-1);
+  color: var(--fg-3);
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.d3-tag.is-on {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--fg-0);
+}
+
+.d3-list__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.d3-card {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+}
+.d3-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ac, var(--fg-4));
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.d3-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--line-2);
+}
+.d3-card.is-selected {
+  background: rgba(59, 130, 246, 0.06);
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.06);
+}
+.d3-card.is-selected::before {
+  opacity: 1;
+  background: var(--accent);
+}
+
+.d3-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.d3-card__agent {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.d3-card__avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex: 0 0 26px;
+}
+.d3-card__name {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--fg-0);
+}
+.d3-card__role {
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+
+.d3-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.d3-status--active {
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--ok);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+.d3-status--idle {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--warn);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+.d3-status--ended {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+}
+.d3-status__pulse {
+  position: relative;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.d3-status__pulse::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.45;
+  animation: d3-pulse 1.6s infinite ease-out;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
+.d3-card__task {
+  font-size: 12.5px;
+  color: var(--fg-1);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.d3-card__foot {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.d3-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-1);
+  border-radius: 4px;
+  color: var(--fg-2);
+}
+.d3-tag__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.d3-card__cost {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
+.d3-card__sparkrow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 2px;
+}
+.d3-mini {
+  display: flex;
+  gap: 1px;
+  height: 18px;
+  flex: 1;
+  align-items: flex-end;
+}
+.d3-mini__b {
+  flex: 1;
+  min-height: 1px;
+  border-radius: 1px;
+  opacity: 0.7;
+}
+.d3-card__time {
+  font-size: 10.5px;
+  color: var(--fg-4);
+}
+
+/* Replay panel */
+.d3-replay {
+  background: rgba(11, 14, 24, 0.85);
+  border: 1px solid var(--line-1);
+  border-radius: 14px;
+  padding: 14px 16px;
+  min-width: 0;
+  overflow: hidden;
+}
+.d3-replay__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.d3-replay__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin-top: 4px;
+  letter-spacing: -0.015em;
+}
+
+.d3-scrub {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+}
+.d3-scrub__time {
+  font-size: 10.5px;
+  color: var(--fg-4);
+}
+.d3-scrub__track {
+  position: relative;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 5px;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  padding: 4px 6px;
+}
+.d3-scrub__tick {
+  flex: 1;
+  min-height: 2px;
+  border-radius: 1px;
+  opacity: 0.7;
+}
+.d3-scrub__cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+.d3-scrub__cursor::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+.d3-scrub__controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-top: 6px;
+  padding: 0 38px;
+  justify-content: center;
+}
+.d3-scrub__speed {
+  font-size: 11px;
+  color: var(--fg-3);
+  margin-left: 6px;
+}
+
+.d3-replay__log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.d3-replay__row {
+  display: grid;
+  grid-template-columns: 38px auto 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.d3-replay__time {
+  color: var(--fg-4);
+}
+.d3-replay__tool {
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+.d3-replay__msg {
+  color: var(--fg-2);
+  font-size: 10.5px;
+}
+.d3-replay__row--clickable {
+  width: 100%;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.d3-replay__row--clickable:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.d3-replay__row--clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.d3-radial {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.d3-radial__row {
+  display: grid;
+  grid-template-columns: 80px 1fr 28px;
+  gap: 10px;
+  align-items: center;
+  font-size: 11px;
+}
+.d3-radial__name {
+  color: var(--fg-2);
+  font-size: 11px;
+}
+.d3-radial__track {
+  background: rgba(255, 255, 255, 0.04);
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.d3-radial__fill {
+  height: 100%;
+  border-radius: inherit;
+}
+.d3-radial__n {
+  text-align: right;
+  color: var(--fg-1);
+}
+
+/* Focus rings — keyboard navigation */
+.d3-nav:focus-visible,
+.d3-btn:focus-visible,
+.d3-cmd-pill:focus-visible,
+.d3-tag:focus-visible,
+.d3-card:focus-visible,
+.d3-quickspawn__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.d3-scrub__track:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+/* Pause all decorative loops when the window is hidden/minimized.
+   AppInner toggles data-app-hidden on <html> via document.visibilityState. */
+:root[data-app-hidden="true"] .d3-pulse-dot::after,
+:root[data-app-hidden="true"] .d3-status__pulse::after,
+:root[data-app-hidden="true"] .d3-net__pulse {
+  animation-play-state: paused;
+}
+
+/* ── Agent run rows (unified Agents panel) ───────────────────────── */
+
+.d3-agent-row {
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.15s;
+}
+
+.d3-agent-row:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.d3-agent-row--ended {
+  opacity: 0.65;
+}
+
+.d3-agent-row--drillable:hover {
+  border-color: var(--accent-line);
+  background: var(--bg-3);
+}
+
+.d3-agent-row--drillable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.d3-agent-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.d3-agent-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.d3-agent-row__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 9px;
+}
+
+.d3-agent-row__badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.d3-agent-row__project {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.d3-agent-row__model {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.d3-agent-row__prompt {
+  font-size: 12px;
+  color: var(--fg-2);
+  font-style: italic;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-width: 0;
+  width: 100%;
+}
+
+.d3-agent-row__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.d3-agent-row__tags {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.d3-agent-row__actions {
+  display: flex;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+/* prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .d3-pulse-dot::after,
+  .d3-status__pulse::after {
+    animation: none;
+    display: none;
+  }
+  .d3-net__pulse {
+    animation: none;
+    display: none;
+  }
+  .d3-bg-orb {
+    filter: none;
+    opacity: 0.08;
+  }
+  .d3-scrub__cursor {
+    box-shadow: none;
+  }
+  .d3-scrub__cursor::before {
+    display: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Work Board (kanban) — JetBrains-IDE inspired ───────────────────────── */
+.wb-board {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 16px;
+  align-items: stretch;
+}
+
+/* A column is a self-contained lane card, like an IDE tool-window panel. */
+.wb-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 252px;
+  flex: 1 1 252px;
+  max-width: 340px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  max-height: calc(100vh - 232px);
+  overflow: hidden;
+}
+.wb-col__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-1);
+}
+.wb-col__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+}
+.wb-col__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+.wb-col__count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  background: var(--bg-4);
+  border-radius: 5px;
+  padding: 1px 8px;
+  min-width: 24px;
+  text-align: center;
+}
+.wb-col__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 84px;
+}
+.wb-col__empty {
+  font-size: 12px;
+  color: var(--fg-4);
+  text-align: center;
+  padding: 18px 0;
+  border: 1px dashed var(--line-1);
+  border-radius: 8px;
+}
+
+/* Card — flat surface, left priority-accent stripe, subtle hover lift. */
+.wb-card {
+  position: relative;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  padding: 9px 11px 9px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+.wb-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--wb-accent, var(--fg-4));
+  border-radius: 8px 0 0 8px;
+}
+.wb-card:hover {
+  border-color: var(--line-3);
+  background: var(--bg-3);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+}
+.wb-card__title {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+}
+.wb-card__id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-4);
+  background: none;
+  border: none;
+  padding: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.wb-card__id:hover {
+  color: var(--accent);
+}
+.wb-card__name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--fg-0);
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.wb-card__name:hover {
+  color: var(--accent);
+}
+.wb-card__badges {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.wb-chip {
+  font-size: 10px;
+  font-weight: 500;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 1px 6px;
+  line-height: 1.55;
+}
+.wb-chip--project {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-card__foot {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.wb-select {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  padding: 3px 7px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.wb-select:hover {
+  border-color: var(--line-3);
+}
+
+/* "Run" tone for the launch button — JetBrains' green run-triangle idiom. */
+.d3-btn--run {
+  color: var(--ok);
+  border-color: rgba(34, 197, 94, 0.28);
+}
+.d3-btn--run:hover {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: var(--ok);
+}

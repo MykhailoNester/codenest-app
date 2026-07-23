@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas (Discussions)
+    url: https://github.com/MykhailoNester/codenest-app/discussions
+    about: Ask questions, share ideas, and discuss usage. Use the issue forms only for confirmed bugs and concrete feature requests.

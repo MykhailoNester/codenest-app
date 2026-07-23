@@ -1,0 +1,79 @@
+name: Bug report
+description: Report a problem with Codenest
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please fill in the details below so we can reproduce it.
+  - type: input
+    id: app-version
+    attributes:
+      label: Codenest version
+      description: From the DMG filename or the About window.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: macos-version
+    attributes:
+      label: macOS version
+      options:
+        - macOS 26 (Tahoe)
+        - macOS 15 (Sequoia)
+        - macOS 14 (Sonoma)
+        - macOS 13 (Ventura)
+        - macOS 12 (Monterey)
+        - macOS 11 (Big Sur)
+        - Other / older
+    validations:
+      required: true
+  - type: dropdown
+    id: chip
+    attributes:
+      label: Mac chip
+      options:
+        - Apple Silicon (M-series)
+        - Intel (x86_64)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the actual behaviour.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Release builds do not write a log file. Launch the app from Terminal so the
+        shell and sidecar print to the console, reproduce the issue, and paste the
+        output:
+
+            /Applications/Codenest.app/Contents/MacOS/Codenest
+
+        You can also filter for the `Codenest` process in Console.app. App data
+        (including the SQLite database) lives in
+        `~/Library/Application Support/com.codenest.dashboard/`.
+      render: shell
+    validations:
+      required: false

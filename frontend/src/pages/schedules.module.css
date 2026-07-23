@@ -1,0 +1,1051 @@
+/* ─── Page layout ─────────────────────────────────────────────────────────── */
+
+.page {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0;
+  height: 100%;
+  overflow: hidden;
+  color: var(--fg-1);
+}
+
+.listPane {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+  height: 100%;
+}
+
+.detailPane {
+  flex: 0 0 560px;
+  width: 560px;
+  border-left: 1px solid var(--line-1);
+  overflow-y: auto;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+/* ─── Status badges ───────────────────────────────────────────────────────── */
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-1);
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.statusGreen {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.statusRed {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.statusBlue {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.statusAmber {
+  color: #fcd34d;
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.statusOrange {
+  color: #fdba74;
+  background: rgba(249, 115, 22, 0.1);
+  border-color: rgba(249, 115, 22, 0.35);
+}
+
+.statusGrey {
+  color: var(--fg-3);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--line-1);
+}
+
+/* ─── Health strip ────────────────────────────────────────────────────────── */
+
+.healthStrip {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.healthDot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+/* ─── Type badge ──────────────────────────────────────────────────────────── */
+
+.typeBadge {
+  display: inline-block;
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.typeBadge_transcript { color: var(--fg-2); }
+.typeBadge_artifact   { color: #93c5fd; border-color: rgba(59, 130, 246, 0.3); }
+.typeBadge_summary    { color: #86efac; border-color: rgba(34, 197, 94, 0.3); }
+.typeBadge_notification { color: #fcd34d; border-color: rgba(251, 191, 36, 0.3); }
+
+/* ─── Schedule list table ─────────────────────────────────────────────────── */
+
+.tableWrapper {
+  overflow-x: auto;
+}
+
+.listTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.listTable thead tr {
+  border-bottom: 1px solid var(--line-2);
+}
+
+.listTable th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  padding: 8px 12px;
+  text-align: left;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+
+.listRow {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.listRow:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.listRow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.listRowSelected {
+  background: rgba(59, 130, 246, 0.07);
+}
+
+.listRowDisabled {
+  opacity: 0.55;
+}
+
+.listTable td {
+  padding: 9px 12px;
+  vertical-align: middle;
+}
+
+.listCellStatus   { width: 120px; }
+.listCellName     { min-width: 150px; }
+.listCellType     { width: 100px; }
+.listCellSchedule { min-width: 160px; color: var(--fg-1); font-size: 12.5px; }
+.listCellNext     { width: 88px; color: var(--fg-2); font-size: 12.5px; white-space: nowrap; }
+.listCellLast     { width: 88px; color: var(--fg-2); font-size: 12.5px; white-space: nowrap; }
+.listCellDuration { width: 76px; color: var(--fg-2); font-size: 12.5px; }
+.listCellToggle   { width: 66px; }
+.listCellProject  { width: 90px; }
+.listCellActions  { width: 96px; }
+
+.rowName {
+  font-weight: 500;
+  color: var(--fg-0);
+  font-size: 13px;
+}
+
+.rowSub {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  margin-top: 2px;
+}
+
+.projectTag {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  padding: 1px 6px;
+}
+
+/* Enabled toggle button */
+.toggleBtn {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-1);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.toggleOn {
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.toggleOff {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-3);
+}
+
+.toggleBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Row quick-action buttons */
+.rowActions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.actionBtn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-1);
+  color: var(--fg-2);
+  border-radius: var(--r-1);
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.actionBtn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-0);
+}
+
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.actionBtnDanger {
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.actionBtnDanger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* ─── Schedule detail panel ───────────────────────────────────────────────── */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.detailHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.detailHeaderLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.detailName {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.detailMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.detailMetaText {
+  color: var(--fg-2);
+}
+
+.enabledPill {
+  font-size: 10.5px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line-1);
+  font-weight: 500;
+}
+
+.enabledOn {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.enabledOff {
+  color: var(--fg-3);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.detailActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Prompt preview */
+.promptDetails {
+  margin: 10px 18px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.promptSummary {
+  padding: 7px 12px;
+  font-size: 12px;
+  color: var(--fg-2);
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+.promptSummary:hover {
+  color: var(--fg-0);
+}
+
+.promptPre {
+  margin: 0;
+  padding: 10px 12px 12px;
+  font-size: 12px;
+  color: var(--fg-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  border-top: 1px solid var(--line-1);
+  line-height: 1.6;
+}
+
+/* Health strip row */
+.detailSection {
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* Section label — used in detail panel and as form-section headers */
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+/* Detail body: run history + output pane */
+.detailBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overflow: hidden;
+  gap: 0;
+}
+
+.runsColumn {
+  flex: 0 0 auto;
+  padding: 12px 18px 10px;
+  border-bottom: 1px solid var(--line-1);
+  max-height: 228px;
+  overflow-y: auto;
+}
+
+.runsColumn > .sectionLabel {
+  margin-bottom: 8px;
+}
+
+.outputColumn {
+  flex: 1 1 auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Run history table inside detail */
+.runsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.runsTable th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  padding: 4px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.runsTable td {
+  padding: 6px 10px;
+  vertical-align: middle;
+}
+
+.runRow {
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  transition: background 0.1s;
+}
+
+.runRow:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.runRow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.runRowSelected {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.runTrigger,
+.runTime,
+.runDuration,
+.runCost {
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+
+.emptyRuns {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  padding: 14px 0;
+  text-align: center;
+}
+
+/* ─── Adaptive output pane ────────────────────────────────────────────────── */
+
+.outputPane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.outputHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--line-1);
+  flex-shrink: 0;
+}
+
+.outputLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  letter-spacing: 0.02em;
+}
+
+.outputLink {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  word-break: break-all;
+  flex: 1 1 auto;
+}
+
+.outputLink:hover {
+  color: var(--fg-1);
+}
+
+.outputEmpty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--fg-3);
+  padding: 28px;
+}
+
+/* Summary PASS/FAIL card */
+.summaryCard {
+  margin: 14px 18px;
+  padding: 14px 16px;
+  border-radius: var(--r-3);
+  border: 1px solid var(--line-1);
+}
+
+.summaryPass {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.06);
+}
+
+.summaryFail {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.summaryTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.summaryGlyph {
+  font-size: 17px;
+}
+
+.summaryPass .summaryGlyph { color: #86efac; }
+.summaryFail .summaryGlyph { color: #fca5a5; }
+
+.summaryStatus {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg-0);
+}
+
+.summaryMeta {
+  font-size: 12px;
+  color: var(--fg-2);
+}
+
+.summaryText {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--fg-1);
+  line-height: 1.55;
+  font-family: var(--font-mono);
+}
+
+/* Transcript */
+.transcriptPre {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 12px 18px;
+  font-size: 12px;
+  color: var(--fg-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  overflow-y: auto;
+  line-height: 1.6;
+}
+
+.artifactPre {
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+}
+
+.transcriptLoading,
+.transcriptEmpty,
+.transcriptRunning {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fg-3);
+  padding: 28px;
+}
+
+.runningDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+/* ─── Cron builder ────────────────────────────────────────────────────────── */
+
+.cronBuilder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cronRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Inline label used inside the cron builder rows (Repeat / Time / On / Day / Every / Cron) */
+.cronLabel {
+  font-size: 13px;
+  color: var(--fg-1);
+  font-weight: 500;
+  flex-shrink: 0;
+  width: 52px;
+  text-align: right;
+}
+
+/* Field labels used in formField blocks — sentence-case, readable */
+.fieldLabel {
+  font-size: 12.5px;
+  color: var(--fg-1);
+  font-weight: 500;
+  display: block;
+  white-space: nowrap;
+  margin-bottom: 1px;
+}
+
+/* Helper text below a field (replaces parenthetical label qualifiers) */
+.fieldHelper {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.fieldHint {
+  font-size: 12px;
+  color: var(--fg-3);
+}
+
+.timePicker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.timeSep {
+  color: var(--fg-2);
+  font-size: 15px;
+}
+
+/* Day-of-week chips */
+.dayChips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.dayChip {
+  font-size: 12px;
+  padding: 4px 9px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: all 0.12s;
+  font-weight: 500;
+}
+
+.dayChip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-0);
+}
+
+.dayChipOn {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--fg-0);
+  font-weight: 600;
+}
+
+/* Cron preview bar */
+.previewBar {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--r-2);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-2);
+  flex-wrap: wrap;
+  min-height: 38px;
+  margin-top: 6px;
+}
+
+.previewIcon {
+  color: var(--accent);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.previewDesc {
+  color: var(--fg-0);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.previewSep {
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+.previewFires {
+  color: var(--fg-2);
+  font-size: 12px;
+}
+
+.previewCron {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-2);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 7px;
+  border-radius: var(--r-1);
+  margin-left: auto;
+  letter-spacing: 0.01em;
+}
+
+.previewLoading {
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+.previewError {
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+/* ─── Form modal ──────────────────────────────────────────────────────────── */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-4);
+  width: 640px;
+  max-width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-3);
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line-1);
+  flex-shrink: 0;
+}
+
+.modalTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin: 0;
+}
+
+.modalBody {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line-1);
+  flex-shrink: 0;
+}
+
+/* Form section block with header rule */
+.formSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Section header: label + hairline rule — IDE-style divider */
+.formSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+
+.formSectionHeader .sectionLabel {
+  flex-shrink: 0;
+}
+
+.formSectionRule {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--line-1);
+}
+
+/* Padded card wrapping section content */
+.formSectionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.formField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.formFieldFull {
+  grid-column: 1 / -1;
+}
+
+.inputRow {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.inputRow .input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Advanced details/summary — collapsible section */
+.advancedSection {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.advancedSummary {
+  padding: 10px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-2);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.advancedSummary:hover {
+  color: var(--fg-0);
+}
+
+.advancedSection[open] .formGrid {
+  padding: 0 14px 14px;
+}
+
+/* ─── Shared form controls ────────────────────────────────────────────────── */
+
+.input,
+.select,
+.textarea {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-2);
+  color: var(--fg-0);
+  border-radius: var(--r-1);
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.12s;
+}
+
+.input:hover,
+.select:hover,
+.textarea:hover {
+  border-color: var(--line-3);
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+/* Monospace inputs: custom cron expression, allowed-tools */
+.inputMono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+}
+
+.selectNarrow {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-2);
+  color: var(--fg-0);
+  border-radius: var(--r-1);
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.selectNarrow:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 88px;
+  line-height: 1.55;
+}
+
+/* ─── Buttons ─────────────────────────────────────────────────────────────── */
+
+.btnPrimary {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: var(--r-2);
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btnPrimary:hover {
+  filter: brightness(1.1);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  padding: 6px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 500;
+}
+
+.btnGhost:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--fg-0);
+}
+
+.btnGhost:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btnClose {
+  background: transparent;
+  border: 0;
+  color: var(--fg-3);
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 5px;
+}
+
+.btnClose:hover {
+  color: var(--fg-1);
+}
+
+/* ─── Live terminal attach ────────────────────────────────────────────────── */
+
+.liveTermContainer {
+  flex: 1 1 auto;
+  min-height: 200px;
+  background: var(--bg-0);
+  border-radius: var(--r-1);
+  overflow: hidden;
+  padding: 4px;
+}
+
+.outputHint {
+  font-size: 11px;
+  color: var(--fg-4);
+  font-style: italic;
+  margin-left: auto;
+}
+
+/* ─── Empty state ─────────────────────────────────────────────────────────── */
+
+.empty {
+  font-size: 13px;
+  color: var(--fg-3);
+  padding: 48px 40px;
+  text-align: center;
+  border: 1px dashed var(--line-1);
+  border-radius: var(--r-3);
+}

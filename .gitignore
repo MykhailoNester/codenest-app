@@ -1,0 +1,51 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node / pnpm / Vite
+node_modules/
+frontend/dist/
+*.log
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+
+# PyInstaller sidecar binaries (built locally; never committed)
+binaries/
+src-tauri/binaries/
+# Packaged PyInstaller onedir sidecar archive (built by scripts/build-sidecar.sh; never committed)
+src-tauri/resources/sidecar.tar.gz
+src-tauri/resources/sidecar/
+
+# Env
+.env
+scripts/.env
+
+# OS
+.DS_Store
+
+# Editors / IDEs (local state — never committed)
+.idea/
+.vscode/
+*.swp
+.claude/settings.local.json
+
+# SQLite — DB files and backups are local state, never committed
+data/*.db
+data/*.db.bak*
+data/*.db.corrupted
+data/*.recovered.sql
+data/*.sql
+*.db-wal
+*.db-shm
+# Stray root-level DB from running the sidecar standalone without a path
+/app.db
+
+# PyInstaller working directory
+/build/

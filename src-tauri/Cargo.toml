@@ -1,0 +1,62 @@
+[package]
+name = "app"
+version = "0.1.0"
+description = "Codenest — desktop command center for AI agent teams"
+authors = ["Mykhailo Nester"]
+license = "LicenseRef-FSL-1.1-ALv2"
+repository = "https://github.com/MykhailoNester/codenest-app"
+edition = "2021"
+rust-version = "1.88.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# Name the binary "Codenest" so the dev process (and the macOS dock label in
+# `tauri dev`, which uses the raw binary filename) reads "Codenest" rather than
+# the package name. Matches `mainBinaryName` in tauri.conf.json. Declaring this
+# explicit target with path = src/main.rs disables auto-discovery of the
+# package-named "app" binary, so only "Codenest" is built.
+[[bin]]
+name = "Codenest"
+path = "src/main.rs"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.1", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+# `unstable` — embedded child-webview API (Preview tab); do not remove.
+# `protocol-asset` — asset:// protocol used by the screenshot-ring window to
+#   load captured PNGs from $TMPDIR/codenest-shots/.
+tauri = { version = "2.11.1", features = ["macos-private-api", "unstable", "protocol-asset", "tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-drag = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-log = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-window-state = "2"
+portable-pty = "0.8"
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+libc = "0.2"
+url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+
+# macOS-only: direct AppKit/NSView frame manipulation for the Preview tab
+# child webview positioning (bypasses wry's set_bounds to avoid the race where
+# a queued async message reads a stale parent height).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSEvent"] }
+objc2-foundation = "0.3"
+# core-graphics: required by capture_screenshot to flip NSEvent::mouseLocation
+# from AppKit's bottom-left origin to the top-left origin Tauri uses.
+# Already present as a transitive dep (via the drag crate); declared here to
+# make the direct usage explicit and to pin to the version in the lock.
+core-graphics = "0.24"

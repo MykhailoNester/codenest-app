@@ -1,0 +1,37 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`DocRowActionsMenu > matches snapshot when exists: false 1`] = `
+<div>
+  <div
+    class="_wrapper_8d6cbc"
+  >
+    <button
+      aria-expanded="false"
+      aria-haspopup="menu"
+      aria-label="Document actions"
+      class="_trigger_8d6cbc"
+      type="button"
+    >
+      •••
+    </button>
+  </div>
+</div>
+`;
+
+exports[`DocRowActionsMenu > matches snapshot when exists: true 1`] = `
+<div>
+  <div
+    class="_wrapper_8d6cbc"
+  >
+    <button
+      aria-expanded="false"
+      aria-haspopup="menu"
+      aria-label="Document actions"
+      class="_trigger_8d6cbc"
+      type="button"
+    >
+      •••
+    </button>
+  </div>
+</div>
+`;

@@ -1,0 +1,132 @@
+/* Codenest design tokens — shared across all directions */
+:root {
+  /* Neutrals — slate cool */
+  --bg-0: #07090d;
+  --bg-1: #0b0e14;
+  --bg-2: #11151d;
+  --bg-3: #161b25;
+  --bg-4: #1d2330;
+  --bg-5: #252c3b;
+
+  --line-1: rgba(255, 255, 255, 0.06);
+  --line-2: rgba(255, 255, 255, 0.1);
+  --line-3: rgba(255, 255, 255, 0.16);
+
+  --fg-0: #f5f7fa;
+  --fg-1: #e3e7ee;
+  --fg-2: #b0b7c4;
+  --fg-3: #7a8290;
+  --fg-4: #555c69;
+
+  /* Brand */
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.14);
+  --accent-line: rgba(59, 130, 246, 0.3);
+
+  /* Semantic */
+  --ok: #22c55e;
+  --ok-soft: rgba(34, 197, 94, 0.14);
+  --warn: #f59e0b;
+  --warn-soft: rgba(245, 158, 11, 0.14);
+  --err: #ef4444;
+  --err-soft: rgba(239, 68, 68, 0.14);
+  --info: #38bdf8;
+  --info-soft: rgba(56, 189, 248, 0.14);
+  --violet: #a855f7;
+  --violet-soft: rgba(168, 85, 247, 0.14);
+
+  /* Type */
+  --font-sans:
+    "Inter Tight", "SF Pro Display", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+
+  /* Radii */
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+  --r-4: 12px;
+  --r-5: 16px;
+
+  /* Shadows */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  color: var(--fg-1);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+/* Terminal ANSI palette — maps to xterm theme.black..brightWhite.
+   These are tuned for the dark theme; a light theme override would change them
+   via a [data-theme="light"] selector if one is ever added. */
+:root {
+  --term-ansi-0: #1a1d24; /* black         */
+  --term-ansi-1: #ef4444; /* red           */
+  --term-ansi-2: #22c55e; /* green         */
+  --term-ansi-3: #f59e0b; /* yellow        */
+  --term-ansi-4: #3b82f6; /* blue          */
+  --term-ansi-5: #a855f7; /* magenta       */
+  --term-ansi-6: #38bdf8; /* cyan          */
+  --term-ansi-7: #b0b7c4; /* white         */
+  --term-ansi-8: #555c69; /* bright black  */
+  --term-ansi-9: #f87171; /* bright red    */
+  --term-ansi-10: #4ade80; /* bright green  */
+  --term-ansi-11: #fcd34d; /* bright yellow */
+  --term-ansi-12: #60a5fa; /* bright blue   */
+  --term-ansi-13: #c084fc; /* bright magenta*/
+  --term-ansi-14: #7dd3fc; /* bright cyan   */
+  --term-ansi-15: #e3e7ee; /* bright white  */
+}
+
+/* utility */
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "ss02";
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.16);
+}

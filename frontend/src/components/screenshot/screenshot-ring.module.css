@@ -1,0 +1,410 @@
+/**
+ * Screenshot ring overlay — premium radial HUD styles.
+ *
+ * Architecture:
+ *   .root            — transparent full-viewport container (fills the 240×240 window)
+ *   .puck            — the visible floating disc: glassy bg + depth shadow
+ *   .accentRing      — animated conic-gradient stroke around the puck
+ *   .primaryAction   — the centred circular camera button
+ *   .capturingState  — animated pulse/spinner shown during screencapture -i
+ *   .errorState      — icon + message for permission errors
+ *   .dismiss         — small × close button in the top-right of the puck
+ *
+ * All sizes are intentionally in px because the window dimensions are fixed
+ * in Rust (RING_SIZE = 240 logical points) and are not responsive.
+ */
+
+/* ── Root ─────────────────────────────────────────────────────────────────── */
+
+.root {
+  /* Fills the entire frameless transparent Tauri window */
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Transparent — the puck below provides the actual background */
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Entrance: scale up from 0.7 + fade in */
+  animation: ringEntrance 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes ringEntrance {
+  from {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ── Puck ─────────────────────────────────────────────────────────────────── */
+
+.puck {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  /*
+   * Glassy dark surface:
+   *   - radial gradient gives a subtle top-centre highlight (depth)
+   *   - semi-transparent so blur works (if backdrop-filter is available)
+   *   - border as a soft inner rim
+   */
+  background: radial-gradient(
+    ellipse at 50% 30%,
+    rgba(29, 35, 48, 0.97) 0%,
+    rgba(11, 14, 20, 0.96) 70%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  /* Multi-layer shadow: close ambient + far glow */
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 8px 32px rgba(0, 0, 0, 0.7),
+    0 24px 64px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Subtle backdrop blur — harmless on unsupported browsers (degrades gracefully) */
+@supports (backdrop-filter: blur(1px)) {
+  .puck {
+    backdrop-filter: blur(12px) saturate(1.4);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
+    background: radial-gradient(
+      ellipse at 50% 30%,
+      rgba(29, 35, 48, 0.88) 0%,
+      rgba(11, 14, 20, 0.86) 70%
+    );
+  }
+}
+
+/* ── Animated accent ring ─────────────────────────────────────────────────── */
+
+/*
+ * Sits behind the puck as an absolutely-positioned sibling (rendered via
+ * .ringWrapper).  The conic-gradient animates by rotating the pseudo-element.
+ */
+.ringWrapper {
+  position: absolute;
+  /* Slightly larger than the puck to form the visible stroke */
+  width: 212px;
+  height: 212px;
+  border-radius: 50%;
+}
+
+.ringWrapper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--ring-angle, 0deg),
+    transparent 0deg,
+    rgba(59, 130, 246, 0) 60deg,
+    rgba(59, 130, 246, 0.55) 150deg,
+    rgba(168, 85, 247, 0.7) 200deg,
+    rgba(59, 130, 246, 0.55) 250deg,
+    rgba(59, 130, 246, 0) 300deg,
+    transparent 360deg
+  );
+  /* Mask to show only the 2px outer annulus */
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: ringRotate 4s linear infinite;
+  opacity: 0.85;
+}
+
+@keyframes ringRotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* In the capturing phase the ring pulses faster and brighter */
+.ringWrapperCapturing::before {
+  animation: ringRotate 1.2s linear infinite;
+  opacity: 1;
+  background: conic-gradient(
+    from var(--ring-angle, 0deg),
+    transparent 0deg,
+    rgba(59, 130, 246, 0) 30deg,
+    rgba(56, 189, 248, 0.8) 120deg,
+    rgba(59, 130, 246, 0.9) 180deg,
+    rgba(56, 189, 248, 0.8) 240deg,
+    rgba(59, 130, 246, 0) 330deg,
+    transparent 360deg
+  );
+}
+
+/* ── Primary action button (camera) ─────────────────────────────────────────*/
+
+.primaryAction {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: none;
+  /* Layered gradient gives a "lit from above" look */
+  background: linear-gradient(
+    160deg,
+    rgba(59, 130, 246, 0.22) 0%,
+    rgba(59, 130, 246, 0.1) 100%
+  );
+  box-shadow:
+    0 0 0 1.5px rgba(59, 130, 246, 0.35),
+    0 4px 16px rgba(59, 130, 246, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: var(--fg-0, #f5f7fa);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    background 120ms ease;
+  /* Inner label */
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: var(--font-sans);
+}
+
+.primaryAction:hover {
+  transform: scale(1.06);
+  background: linear-gradient(
+    160deg,
+    rgba(59, 130, 246, 0.34) 0%,
+    rgba(59, 130, 246, 0.18) 100%
+  );
+  box-shadow:
+    0 0 0 1.5px rgba(59, 130, 246, 0.55),
+    0 6px 24px rgba(59, 130, 246, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.primaryAction:active {
+  transform: scale(0.95);
+  background: linear-gradient(
+    160deg,
+    rgba(59, 130, 246, 0.45) 0%,
+    rgba(59, 130, 246, 0.25) 100%
+  );
+  box-shadow:
+    0 0 0 1.5px rgba(59, 130, 246, 0.7),
+    0 2px 8px rgba(59, 130, 246, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.primaryAction:focus-visible {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 3px;
+}
+
+.actionLabel {
+  /* Rendered below the icon inside the button */
+  line-height: 1;
+}
+
+/* ── Camera SVG icon ─────────────────────────────────────────────────────────*/
+
+.cameraIcon {
+  /* Inherits currentColor from button */
+  flex-shrink: 0;
+}
+
+/* ── Capturing state ─────────────────────────────────────────────────────────*/
+
+.capturingInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.capturingLabel {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3, #7a8290);
+}
+
+/* Pulsing concentric rings */
+.pulseRing {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pulseRing::before,
+.pulseRing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent, #3b82f6);
+  animation: pulseExpand 1.6s ease-out infinite;
+}
+
+.pulseRing::after {
+  animation-delay: 0.8s;
+}
+
+.pulseCore {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent, #3b82f6);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+  animation: pulseBeat 1.6s ease-in-out infinite;
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes pulseExpand {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes pulseBeat {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+}
+
+/* ── Error state ─────────────────────────────────────────────────────────────*/
+
+.errorInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px;
+}
+
+.errorIcon {
+  color: var(--err, #ef4444);
+  flex-shrink: 0;
+}
+
+.errorText {
+  font-size: 10px;
+  font-weight: 450;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--fg-2, #b0b7c4);
+}
+
+/* Countdown progress arc shown during auto-dismiss */
+.errorDismissHint {
+  font-size: 9px;
+  color: var(--fg-4, #555c69);
+  letter-spacing: 0.04em;
+}
+
+/* ── Dismiss × button ────────────────────────────────────────────────────────*/
+
+.dismiss {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-3, #7a8290);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    background 100ms ease,
+    color 100ms ease,
+    transform 100ms ease;
+  /* Sits above the puck content */
+  z-index: 10;
+}
+
+.dismiss:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: var(--fg-0, #f5f7fa);
+  transform: scale(1.1);
+}
+
+.dismiss:active {
+  transform: scale(0.9);
+}
+
+/* ── Phase transition ────────────────────────────────────────────────────────*/
+
+/*
+ * Each phase content block fades in.  The exit-fade is handled by re-mounting
+ * (React replaces the node on phase change) combined with the entrance animation.
+ */
+.phaseContent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  animation: fadeIn 160ms ease-out both;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ── Radial slot layout (future multi-action readiness) ──────────────────────
+ *
+ * The primary action is currently centred.  When a second action is added,
+ * swap .primaryAction from absolute centering to `.radialSlots` flex layout —
+ * the grid below distributes N items evenly around a circle with CSS custom
+ * properties. (Not applied yet; kept here as a migration guide.)
+ */
+/* .radialSlots { --n: 1; } */
+/* .radialSlots > * { --i: 0; transform: rotate(calc(360deg / var(--n) * var(--i))) translateY(-68px) rotate(calc(-360deg / var(--n) * var(--i))); } */

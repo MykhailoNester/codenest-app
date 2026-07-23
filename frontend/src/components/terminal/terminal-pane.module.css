@@ -1,0 +1,226 @@
+.pane {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-1);
+  border-radius: var(--r-3, 8px);
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid transparent;
+  transition: border-color 100ms ease;
+  position: relative;
+}
+
+.paneFocused {
+  border-color: var(--accent);
+}
+
+.header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  background: var(--bg-2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+.title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  color: var(--fg-1);
+}
+
+/* Inline rename field. Needs explicit form-control colors so the typed text
+   stays high-contrast — reusing .title (a span style) left WebKit to apply its
+   default field colors, rendering the text near-invisible. Mirrors the
+   tab-bar .titleInput pattern. */
+.titleInput {
+  flex: 0 0 auto;
+  background: var(--bg-1);
+  color: var(--fg-1);
+  -webkit-text-fill-color: var(--fg-1);
+  caret-color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font: inherit;
+  padding: 0 0.25rem;
+  min-width: 8rem;
+}
+
+.cwd {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--fg-2);
+  opacity: 0.85;
+}
+
+.profile {
+  flex: 0 0 auto;
+  background: var(--bg-1);
+  color: var(--fg-2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: not-allowed;
+}
+
+.close {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-2);
+  cursor: pointer;
+  padding: 0 0.4rem;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-1);
+}
+
+.iconBtn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-2);
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.iconBtn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-1);
+}
+
+.terminal {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  /*
+   * xterm.js mounts directly into this element.  FitAddon computes available
+   * rows/cols by reading getComputedStyle(container).height and subtracting the
+   * .xterm element's own CSS padding.  Any CSS padding on THIS container is NOT
+   * subtracted by FitAddon, so if padding is non-zero FitAddon over-counts rows
+   * and the terminal renders content beyond the element's content-box boundary.
+   * Combined with `overflow: hidden` that clips the last row(s) to produce the
+   * "bottom rows cut off" symptom.  Keep padding = 0 here; visual spacing
+   * between the header and the canvas comes from the 1 px header border-bottom
+   * and the outer paneArea padding (0.5 rem on all sides).
+   */
+  overflow: hidden;
+  background: var(--bg-1);
+  padding: 0;
+}
+
+.terminal :global(.xterm) {
+  width: 100%;
+  height: 100%;
+}
+
+.terminal :global(.xterm-viewport) {
+  border-radius: var(--r-3, 8px);
+}
+
+/* Paste-confirmation modal */
+
+.pasteOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pasteModal {
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-4);
+  box-shadow: var(--shadow-3);
+  padding: 20px 24px;
+  width: 420px;
+  max-width: 90vw;
+}
+
+.pasteModal h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.pastePreview {
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 160px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+}
+
+.pasteActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pasteBtnCancel {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 80ms;
+}
+
+.pasteBtnCancel:hover {
+  background: var(--bg-4);
+}
+
+.pasteBtnConfirm {
+  padding: 6px 14px;
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: opacity 80ms;
+}
+
+.pasteBtnConfirm:hover {
+  opacity: 0.88;
+}

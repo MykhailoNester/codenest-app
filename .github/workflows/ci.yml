@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check-all (aarch64)
+    # macos-latest is Apple Silicon (arm64). To add an Intel lane, duplicate this
+    # job on `runs-on: macos-13` (native x86_64) — the PyInstaller sidecar cannot
+    # be cross-compiled, so each arch needs its own native runner.
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Create Python venv
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Must run before any cargo/tauri step: tauri-build validates the literal
+      # bundle resource src-tauri/resources/sidecar.tar.gz at compile time.
+      - name: Build sidecar
+        run: bash scripts/build-sidecar.sh
+
+      - name: Python gate
+        run: |
+          source .venv/bin/activate
+          make check-python
+          make test-python
+
+      - name: Frontend gate
+        run: |
+          make check-frontend
+          make test-frontend
+          make build-frontend
+
+      - name: Rust gate
+        run: make check-rust

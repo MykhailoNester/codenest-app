@@ -1,0 +1,17 @@
+/* Phase 0 baseline. Direction-3 (tokens.css + d3-creative.css) carries the
+ * full visual language; this file only normalizes html/body so the canvas
+ * fills the window. */
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  font-family: var(--font-sans, "Inter", system-ui, -apple-system, sans-serif);
+  background: var(--bg-base, #0b0d12);
+  color: var(--text-primary, #e7e9ee);
+}
+
+code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}

@@ -1,0 +1,321 @@
+/* ─── Page shell ─────────────────────────────────────────────────────────── */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 24px 32px;
+  color: var(--fg-1);
+}
+
+/* ─── Section ────────────────────────────────────────────────────────────── */
+
+.section {
+  padding: 20px 0;
+  border-top: 1px solid var(--line-1);
+}
+
+.section:first-of-type {
+  border-top: none;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+  margin: 0 0 14px;
+  letter-spacing: -0.01em;
+}
+
+/* ─── Utility text ───────────────────────────────────────────────────────── */
+
+.muted {
+  color: var(--fg-4);
+  font-size: 12px;
+}
+
+.warn {
+  color: #f97316;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ─── Paths definition list ──────────────────────────────────────────────── */
+
+.paths {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 20px;
+  row-gap: 8px;
+  margin: 0;
+}
+
+.paths dt {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-3);
+  display: flex;
+  align-items: center;
+}
+
+.paths dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.paths dd code {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-2);
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
+  border-radius: 4px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* ─── Health issues table ────────────────────────────────────────────────── */
+
+.tableWrapper {
+  overflow-x: auto;
+  border-radius: 6px;
+  border: 1px solid var(--line-1);
+}
+
+.issues {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.issues th {
+  text-align: left;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-3);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-1);
+  white-space: nowrap;
+}
+
+.issues td {
+  padding: 7px 12px;
+  color: var(--fg-2);
+  border-bottom: 1px solid var(--line-1);
+  vertical-align: middle;
+}
+
+.issues tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.issues tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.issues td code {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+/* ─── Org Agents list ────────────────────────────────────────────────────── */
+
+.orgAgents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.orgAgents li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.orgAgents li strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+/* ─── Project rows ───────────────────────────────────────────────────────── */
+
+.projectRow {
+  border: 1px solid var(--line-1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.projectRowHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  flex-wrap: wrap;
+}
+
+.projectRowHeader:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.disclosure {
+  font-size: 10px;
+  color: var(--fg-4);
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.projectName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.agentCount {
+  font-size: 11px;
+  color: var(--fg-3);
+  padding: 1px 6px;
+  border: 1px solid var(--line-1);
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.path {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-4);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.rowActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* ─── Agent list (expanded project) ─────────────────────────────────────── */
+
+.agentListWrapper {
+  border-top: 1px solid var(--line-1);
+  padding: 8px 14px 12px 36px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.agentList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agentList li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.agentName {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-1);
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.model {
+  font-size: 11px;
+  color: var(--fg-3);
+  padding: 1px 5px;
+  border: 1px solid var(--line-1);
+  border-radius: 3px;
+}
+
+.verify {
+  font-size: 11px;
+  color: var(--fg-4);
+}
+
+.disabledBadge {
+  font-size: 10px;
+  color: var(--fg-4);
+  padding: 1px 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+}
+
+/* ─── Buttons ────────────────────────────────────────────────────────────── */
+
+.primaryBtn {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.primaryBtn:hover {
+  opacity: 0.88;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ghostBtn {
+  background: transparent;
+  color: var(--fg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.ghostBtn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg-0);
+}
+
+.ghostBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

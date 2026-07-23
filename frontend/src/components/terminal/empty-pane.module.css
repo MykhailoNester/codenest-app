@@ -1,0 +1,49 @@
+.pane {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: var(--bg-2);
+  gap: 12px;
+  padding: 24px;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.projectName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+
+.providerName {
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+.openBtn {
+  margin-top: 4px;
+  padding: 6px 16px;
+  background: var(--accent-soft, rgba(99, 102, 241, 0.15));
+  border: 1px solid var(--accent);
+  border-radius: var(--r-2);
+  color: var(--accent);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.openBtn:hover {
+  background: var(--accent-soft-hover, rgba(99, 102, 241, 0.25));
+}
+
+.openBtn:active {
+  opacity: 0.8;
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "document-open",
+  "description": "Allows opening, revealing, and reading registered document files",
+  "windows": ["main"],
+  "permissions": [
+    "opener:allow-open-path",
+    "opener:allow-open-url",
+    "opener:allow-reveal-item-in-dir"
+  ]
+}

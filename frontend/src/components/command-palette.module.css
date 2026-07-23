@@ -1,0 +1,6 @@
+.snippet mark {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--fg-0);
+  border-radius: 2px;
+  padding: 0 1px;
+}

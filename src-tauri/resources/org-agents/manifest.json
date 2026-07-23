@@ -1,0 +1,29 @@
+{
+  "version": "2026.07.07-1",
+  "agents": [
+    {
+      "name": "atlas-recruiter",
+      "filename": "atlas-recruiter.md",
+      "display_name": "Atlas · Recruiting & Team Architect",
+      "description": "Head of HR and Agent Architect at Codenest; designs new AI agent teammates inside imported projects and promotes them into the shared workspace set.",
+      "model": "sonnet",
+      "sha256": "81eb593b6cc31710e876d25e9966c37f4b77b25975f98cb3d538c99f6cafb8dd"
+    },
+    {
+      "name": "orion-ops",
+      "filename": "orion-ops.md",
+      "display_name": "Orion · IT & Workflow Operations",
+      "description": "IT Agent and Workflow Specialist; the sole gateway for all Codenest dashboard database operations.",
+      "model": "sonnet",
+      "sha256": "fc0762a8ba4b4a381a59d0047959b195dae37f7eeb30b54b17bd76e9650719b9"
+    },
+    {
+      "name": "vega-research",
+      "filename": "vega-research.md",
+      "display_name": "Vega · Lead Researcher",
+      "description": "Lead Researcher and Chief Knowledge Officer; produces deep, cross-referenced research reports written into project repos.",
+      "model": "opus",
+      "sha256": "74ce289346c75fca5c8818c61d06c04e9a63f3d5a2bf63cba43a17dea4c0f142"
+    }
+  ]
+}

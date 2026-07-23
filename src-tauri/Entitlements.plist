@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Screen Recording: required by screencapture(1) interactive mode (-i).
+    macOS will prompt the user on first use; subsequent launches are remembered.
+  -->
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Codenest needs screen recording permission to let you select a region for the screenshot capture shortcut.</string>
+
+  <!--
+    Accessibility: required by the global-hotkey crate's CGEventTap (used for
+    media-key hotkeys). Standard hotkeys via Carbon RegisterEventHotKey do not
+    need this, but the plugin installs the tap unconditionally so the entitlement
+    must be present in notarized builds.
+  -->
+  <key>NSAccessibilityUsageDescription</key>
+  <string>Codenest needs accessibility permission to register the global screenshot capture keyboard shortcut.</string>
+</dict>
+</plist>

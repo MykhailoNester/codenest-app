@@ -1,0 +1,19 @@
+{
+  "name": "codenest",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codenest — Tauri 2 + React + FastAPI desktop command center",
+  "license": "LicenseRef-FSL-1.1-ALv2",
+  "repository": "https://github.com/MykhailoNester/codenest-app",
+  "scripts": {
+    "tauri:dev": "pnpm tauri dev",
+    "tauri:build": "pnpm tauri build",
+    "typecheck": "pnpm --filter frontend run typecheck",
+    "lint": "pnpm --filter frontend run lint",
+    "format": "pnpm --filter frontend run format",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

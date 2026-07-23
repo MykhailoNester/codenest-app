@@ -1,0 +1,134 @@
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1fr;
+  gap: 10px;
+}
+
+.tile {
+  background: rgba(11, 14, 24, 0.65);
+  border: 1px solid var(--line-1);
+  border-radius: 12px;
+  padding: 14px 16px;
+  backdrop-filter: blur(12px);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 96px;
+}
+
+/* Per-tile corner radial glow — color set via inline --kpi-glow CSS var */
+.tile::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 60%;
+  height: 100%;
+  background: radial-gradient(
+    ellipse 120px 80px at 100% 0%,
+    var(--kpi-glow, rgba(59, 130, 246, 0.1)),
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+.label {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--fg-0);
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.unit {
+  font-size: 13px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+.foot {
+  font-size: 11px;
+  color: var(--fg-3);
+  margin-top: auto;
+}
+
+.foot strong {
+  color: var(--fg-1);
+  font-weight: 500;
+}
+
+/* Attention chips */
+.chips {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chip.err {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--err);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.chip.warn {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--warn);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.chip.ok {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--ok);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+/* Budget progress bar */
+.budgetBar {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  margin-top: 8px;
+  overflow: hidden;
+  position: relative;
+}
+
+.budgetFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--violet));
+  border-radius: inherit;
+  box-shadow: 0 0 8px var(--accent);
+  max-width: 100%;
+}
+
+.noBudget {
+  font-size: 11px;
+  color: var(--fg-4);
+  margin-top: auto;
+  font-style: italic;
+}

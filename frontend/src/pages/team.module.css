@@ -1,0 +1,334 @@
+/* ── Agents page — JetBrains IDE-style compact list ─────────────────── */
+
+.page {
+  padding: 0 24px 24px;
+}
+
+/* ── Toolbar: filter + summary counts ───────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.search {
+  flex: 1;
+  min-width: 0;
+  max-width: 360px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  color: var(--fg-1);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--accent-line);
+  background: var(--bg-3);
+}
+
+.search::placeholder {
+  color: var(--fg-4);
+}
+
+.summary {
+  font-size: 11px;
+  color: var(--fg-3);
+  white-space: nowrap;
+  display: flex;
+  gap: 12px;
+}
+
+.summary b {
+  color: var(--fg-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Group (collapsible tree node) ──────────────────────────────────── */
+
+.group {
+  margin-bottom: 14px;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--fg-2);
+  border-radius: var(--r-1);
+}
+
+.groupHead:hover {
+  background: var(--bg-2);
+}
+
+.chevron {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-4);
+  transition: transform 0.12s ease;
+  transform: rotate(-90deg);
+}
+
+.chevron.open {
+  transform: rotate(0deg);
+}
+
+.groupIcon {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  color: var(--fg-3);
+}
+
+.groupName {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.groupName.workspace {
+  color: var(--accent);
+}
+
+.count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-4);
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+
+.groupLine {
+  flex: 1;
+  height: 1px;
+  background: var(--line-1);
+}
+
+/* ── List container ─────────────────────────────────────────────────── */
+
+.list {
+  margin-top: 6px;
+  margin-left: 18px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+
+.subHead {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  padding: 6px 12px 4px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-1);
+}
+
+.subHead:not(:first-child) {
+  border-top: 1px solid var(--line-1);
+}
+
+/* ── Row ─────────────────────────────────────────────────────────────── */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 12px;
+  min-height: 30px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.rowClickable {
+  cursor: pointer;
+}
+
+.rowClickable:hover {
+  background: var(--bg-3);
+}
+
+.rowClickable:focus-visible {
+  outline: none;
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* type glyph */
+.glyph {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.glyph svg {
+  width: 12px;
+  height: 12px;
+}
+
+.glyphOrg {
+  background: var(--violet-soft);
+  color: var(--violet);
+  border: 1px solid rgba(168, 85, 247, 0.28);
+}
+
+.glyphProject {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+}
+
+.glyphSkill {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.name {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-1);
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.runningDot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 5px var(--ok);
+}
+
+.desc {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--fg-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.descEmpty {
+  flex: 1;
+  min-width: 0;
+}
+
+/* right-aligned metadata cluster */
+.meta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.modelChip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-2);
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.kind {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+
+.shared {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+
+.shared::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.status {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--err);
+  background: var(--err-soft);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--r-1);
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.chevronRight {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-4);
+}
+
+/* ── States ─────────────────────────────────────────────────────────── */
+
+.state {
+  color: var(--fg-3);
+  font-size: 13px;
+  padding: 16px 0;
+}
+
+.empty {
+  color: var(--fg-3);
+  font-size: 13px;
+  padding: 40px 0;
+  text-align: center;
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "screenshot-ring",
+  "description": "Permissions for the screenshot-ring overlay window (ring menu + drag thumbnail).",
+  "windows": [
+    "screenshot-ring"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "drag:allow-start-drag"
+  ]
+}

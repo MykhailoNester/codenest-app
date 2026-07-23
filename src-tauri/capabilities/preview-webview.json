@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "preview-webview",
+  "description": "Allows the main window to manage the embedded preview child webview. The 'preview' child webview itself is intentionally excluded from all capabilities so remote sites cannot access window.__TAURI__.",
+  "windows": ["main"],
+  "permissions": [
+    "core:webview:allow-create-webview",
+    "core:webview:allow-set-webview-position",
+    "core:webview:allow-set-webview-size",
+    "core:webview:allow-webview-show",
+    "core:webview:allow-webview-hide",
+    "core:webview:allow-webview-close",
+    "core:webview:allow-set-webview-focus"
+  ]
+}

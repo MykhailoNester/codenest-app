@@ -1,0 +1,188 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+  color: var(--fg-1);
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  margin: 4px 0 0;
+}
+
+.sectionTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin: 0 0 6px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--fg-0);
+}
+
+.meta {
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.row label {
+  color: var(--fg-3);
+}
+
+.input {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-1);
+  color: var(--fg-0);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.textarea {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-1);
+  color: var(--fg-0);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  min-height: 64px;
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.btn {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-1);
+  border: 1px solid var(--line-1);
+}
+
+.btnDanger {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+
+.testOk {
+  font-size: 11.5px;
+  color: #86efac;
+}
+
+.testFail {
+  font-size: 11.5px;
+  color: #fca5a5;
+}
+
+.testTail {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--line-1);
+  border-radius: 4px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: auto;
+  color: var(--fg-2);
+}
+
+.empty {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed var(--line-1);
+  border-radius: 8px;
+}
+
+.createForm {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.full {
+  grid-column: 1 / -1;
+}

@@ -1,0 +1,134 @@
+.panel {
+  background: rgba(11, 14, 24, 0.55);
+  border: 1px solid var(--line-1);
+  border-radius: 16px;
+  padding: 16px 18px;
+  backdrop-filter: blur(20px);
+  position: relative;
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.sectionLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--fg-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionLabel::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tag {
+  font-size: 10.5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  margin-left: 8px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--line-1);
+  align-items: center;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row.workspace {
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.06), transparent);
+  padding-left: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  margin-bottom: 4px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot.act {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+
+.dot.idle {
+  background: var(--info);
+}
+
+.dot.warn {
+  background: var(--warn);
+}
+
+.dot.cold {
+  background: var(--fg-4);
+}
+
+.name {
+  font-size: 12.5px;
+  color: var(--fg-1);
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspaceBadge {
+  display: inline-block;
+  font-size: 9px;
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid var(--accent-line);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.count {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  min-width: 42px;
+  text-align: right;
+}

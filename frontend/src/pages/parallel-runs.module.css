@@ -1,0 +1,254 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+  color: var(--fg-1);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  margin: 4px 0 0;
+}
+
+.createForm {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldFull {
+  grid-column: 1 / -1;
+}
+
+.fieldLabel {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+
+.input,
+.select {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-1);
+  color: var(--fg-0);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+}
+
+.btn {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-1);
+  border: 1px solid var(--line-1);
+}
+
+.runList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.runCard {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.runCard:hover {
+  border-color: var(--line-2);
+}
+
+.runCardActive {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.badge {
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line-1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-1);
+}
+
+.badgeOpen {
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.badgeMerged {
+  border-color: rgba(59, 130, 246, 0.45);
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.badgeDiscarded {
+  border-color: var(--line-1);
+  color: var(--fg-3);
+}
+
+.runMeta {
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+
+.detail {
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.attempts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.attempt {
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 200px;
+}
+
+.attemptHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.attemptTitle {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--fg-0);
+}
+
+.diffFiles {
+  font-size: 11.5px;
+  color: var(--fg-2);
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.diffBody {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--line-1);
+  border-radius: 4px;
+  padding: 8px;
+  margin: 0;
+  white-space: pre;
+  max-height: 240px;
+  overflow: auto;
+  color: var(--fg-1);
+}
+
+.diffToggle {
+  background: transparent;
+  border: 0;
+  color: var(--fg-3);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.diffFile {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 6px;
+}
+
+.statusTag {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+
+.diffEmpty {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  font-style: italic;
+}
+
+.attemptActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+}
+
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+.empty {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  padding: 24px;
+  text-align: center;
+  border: 1px dashed var(--line-1);
+  border-radius: 8px;
+}

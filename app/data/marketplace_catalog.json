@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "slug": "official-code-reviewer",
+      "name": "Code Reviewer",
+      "type": "agent",
+      "source": "official",
+      "filename": "code-reviewer.md",
+      "summary": "Comprehensive code review covering quality, security, and best practices.",
+      "tags": ["review", "quality"],
+      "content": "---\nname: code-reviewer\ndescription: \"Reviews pending changes for quality, security vulnerabilities, and best practices. Produces actionable, prioritised feedback.\"\ntools: Read, Grep, Glob, Bash\n---\n\nYou are an experienced code reviewer. When invoked, inspect the diff for: correctness, security (injection, auth, secrets), performance, maintainability, and consistency with existing patterns. Report findings ranked critical → nit, each with a file:line citation.\n"
+    },
+    {
+      "slug": "official-test-engineer",
+      "name": "Test Engineer",
+      "type": "agent",
+      "source": "official",
+      "filename": "test-engineer.md",
+      "summary": "Test strategy, automation, coverage analysis, and CI testing.",
+      "tags": ["testing", "qa"],
+      "content": "---\nname: test-engineer\ndescription: \"Designs and implements automated tests, identifies coverage gaps, and integrates checks into CI.\"\ntools: Read, Write, Edit, Bash, Grep\n---\n\nYou are a senior QA engineer. For any change set, propose the minimum set of tests that proves the behaviour: unit where logic branches, integration where layers meet, and one end-to-end smoke. Prefer real dependencies over mocks at boundaries.\n"
+    },
+    {
+      "slug": "community-spec-writer",
+      "name": "Spec Writer",
+      "type": "agent",
+      "source": "community",
+      "filename": "spec-writer.md",
+      "summary": "Drafts product specs and acceptance criteria from a short brief.",
+      "tags": ["product", "docs"],
+      "content": "---\nname: spec-writer\ndescription: \"Turns a one-paragraph brief into a structured spec with user stories, acceptance criteria, edge cases, and a decomposition.\"\ntools: Read, Write, Edit\n---\n\nYou are a product writer. Always include: context, primary user, acceptance criteria (testable), edge cases, out-of-scope, and an implementation outline. Keep it under 400 words unless the brief explicitly asks for depth.\n"
+    },
+    {
+      "slug": "official-summarize",
+      "name": "Summarize",
+      "type": "command",
+      "source": "official",
+      "filename": "summarize.md",
+      "summary": "Generate a tight, structured summary of the current context.",
+      "tags": ["productivity"],
+      "content": "Summarize the current conversation or selected files into:\n\n1. **Goal** — one sentence on what we are trying to do.\n2. **State** — what has been done so far.\n3. **Open questions** — what remains uncertain.\n4. **Next step** — the single best next action.\n\nBe concise. No preamble.\n"
+    },
+    {
+      "slug": "community-pr-summary",
+      "name": "PR Summary",
+      "type": "command",
+      "source": "community",
+      "filename": "pr-summary.md",
+      "summary": "Generate a pull-request description from the staged diff.",
+      "tags": ["git", "review"],
+      "content": "Produce a pull-request description for the current branch.\n\nSections (markdown):\n- **What** — one paragraph on the change.\n- **Why** — the motivation / linked ticket.\n- **How** — bulleted list of the moving parts.\n- **Test plan** — checkboxes the reviewer can step through.\n\nKeep the title under 70 characters.\n"
+    },
+    {
+      "slug": "official-fast-search",
+      "name": "Fast Search",
+      "type": "skill",
+      "source": "official",
+      "filename": "fast-search.md",
+      "summary": "Heuristics for picking the right search tool fast.",
+      "tags": ["search"],
+      "content": "# Fast Search\n\nDecision tree for narrowing a query:\n\n- Exact symbol → `grep -rn <symbol>` from the repo root.\n- Filename guess → `git ls-files | grep <fragment>`.\n- Behaviour, no name → narrow by directory first (`grep -rn 'pattern' app/`).\n\nNever shell out to find from `/`; always start from `.`.\n"
+    },
+    {
+      "slug": "community-pre-commit-block-secrets",
+      "name": "Pre-commit: block secrets",
+      "type": "hook",
+      "source": "community",
+      "filename": "block-secrets.json",
+      "summary": "Aborts commits that contain obvious secret patterns.",
+      "tags": ["security", "hooks"],
+      "content": "{\n  \"event\": \"pre-commit\",\n  \"name\": \"block-secrets\",\n  \"description\": \"Refuse to commit when the staged diff matches common secret regexes.\",\n  \"patterns\": [\n    \"AKIA[0-9A-Z]{16}\",\n    \"ghp_[A-Za-z0-9]{36}\",\n    \"-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----\"\n  ],\n  \"on_match\": \"abort\"\n}\n"
+    },
+    {
+      "slug": "official-mcp-filesystem",
+      "name": "MCP: Filesystem",
+      "type": "mcp",
+      "source": "official",
+      "filename": "filesystem.json",
+      "summary": "Sandboxed filesystem MCP server (read/write under one allowed root).",
+      "tags": ["mcp", "filesystem"],
+      "content": "{\n  \"name\": \"filesystem\",\n  \"command\": \"npx\",\n  \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"${ALLOWED_ROOT}\"],\n  \"env\": {\n    \"ALLOWED_ROOT\": \"${HOME}/Projects\"\n  }\n}\n"
+    }
+  ]
+}
