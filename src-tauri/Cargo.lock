@@ -69,7 +69,7 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "core-graphics 0.24.0",
+ "core-graphics 0.25.0",
  "libc",
  "log",
  "objc2",

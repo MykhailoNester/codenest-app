@@ -59,4 +59,4 @@ objc2-foundation = "0.3"
 # from AppKit's bottom-left origin to the top-left origin Tauri uses.
 # Already present as a transitive dep (via the drag crate); declared here to
 # make the direct usage explicit and to pin to the version in the lock.
-core-graphics = "0.24"
+core-graphics = "0.25"
