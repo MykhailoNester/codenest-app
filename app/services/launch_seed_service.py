@@ -86,13 +86,13 @@ async def build_seed(
 
     title: str = row["title"]
     description: str | None = (
-        row["description"] if "description" in row.keys() else None
+        row["description"] if "description" in row.keys() else None  # noqa: SIM118
     )
     action_text: str | None = (
-        row["action_text"] if "action_text" in row.keys() else None
+        row["action_text"] if "action_text" in row.keys() else None  # noqa: SIM118
     )
     project_id_raw: int | None = (
-        row["project_id"] if "project_id" in row.keys() else None
+        row["project_id"] if "project_id" in row.keys() else None  # noqa: SIM118
     )
 
     # ── Resolve project ───────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ async def build_seed(
     # ── Load assignee's per-agent override as a fallback ───────────
     agent_override = None
     if source_kind == "task":
-        assignee_id_raw = row["assignee_id"] if "assignee_id" in row.keys() else None
+        assignee_id_raw = row["assignee_id"] if "assignee_id" in row.keys() else None  # noqa: SIM118
         if assignee_id_raw is not None:
             mcur = await db.execute(
                 "SELECT name FROM members WHERE id = ?", (assignee_id_raw,)

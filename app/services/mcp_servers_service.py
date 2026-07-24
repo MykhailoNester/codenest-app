@@ -319,7 +319,7 @@ async def test_server(db: aiosqlite.Connection, server_id: int) -> dict[str, Any
         proc.kill()
         try:
             _stdout, stderr = await proc.communicate()
-        except Exception:
+        except Exception:  # noqa: BLE001
             stderr = b""
         timed_out = True
 

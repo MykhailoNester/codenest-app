@@ -5,7 +5,7 @@ platformdirs>=4.11.0
 croniter>=6.2.4
 
 # Dev tooling
-ruff==0.15.22
+ruff==0.16.0
 mypy==1.13.0
 types-croniter>=6.2.4.20260711
 pyinstaller==6.20.0

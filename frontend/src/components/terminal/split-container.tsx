@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import type { ReactElement } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
 import type { LayoutNode } from "../../lib/layout-tree";
 import { collectLeafIds } from "../../lib/layout-tree";
 import { useTerminalStore } from "../../stores/terminal-store";
@@ -59,7 +59,7 @@ function SplitNode({
 }): ReactElement {
   const updateRatio = useTerminalStore((s) => s.updateRatio);
   const debounceRef = useRef<number | null>(null);
-  const direction = node.direction === "h" ? "horizontal" : "vertical";
+  const orientation = node.direction === "h" ? "horizontal" : "vertical";
 
   // Use the first leaf id of each child as stable identities for Panel and
   // for the PanelGroup key so react-resizable-panels remounts cleanly when
@@ -72,9 +72,16 @@ function SplitNode({
   // changes, forcing PanelGroup to remount with a fresh size registry.
   const groupKey = `${node.direction}-${leftLeafId}-${rightLeafId}`;
 
-  const handleLayout = (sizes: number[]): void => {
-    if (sizes.length < 2) return;
-    const ratio = (sizes[0] ?? 50) / 100;
+  // v4 reports layout as a { [panelId]: size } map rather than an ordered
+  // array. Derive the ratio from the two sibling sizes directly so it stays
+  // correct regardless of the unit the library reports (px vs %).
+  const handleLayout = (layout: Layout): void => {
+    const left = layout[leftLeafId];
+    const right = layout[rightLeafId];
+    if (left === undefined || right === undefined) return;
+    const total = left + right;
+    if (total <= 0) return;
+    const ratio = left / total;
     if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
       updateRatio(refLeafId, ratio);
@@ -85,21 +92,18 @@ function SplitNode({
   const initialSize = Math.round(node.ratio * 100);
 
   return (
-    <PanelGroup
-      key={groupKey}
-      direction={direction}
-      onLayout={handleLayout}
-      autoSaveId={undefined}
-    >
-      <Panel id={leftLeafId} defaultSize={initialSize} minSize={5}>
+    <Group key={groupKey} orientation={orientation} onLayoutChange={handleLayout}>
+      <Panel id={leftLeafId} defaultSize={`${initialSize}%`} minSize="5%">
         <SplitContainer node={node.children[0]} showHeader />
       </Panel>
-      <PanelResizeHandle
-        className={direction === "horizontal" ? styles.handleH : styles.handleV}
+      <Separator
+        className={
+          orientation === "horizontal" ? styles.handleH : styles.handleV
+        }
       />
-      <Panel id={rightLeafId} defaultSize={100 - initialSize} minSize={5}>
+      <Panel id={rightLeafId} defaultSize={`${100 - initialSize}%`} minSize="5%">
         <SplitContainer node={node.children[1]} showHeader />
       </Panel>
-    </PanelGroup>
+    </Group>
   );
 }

@@ -149,7 +149,7 @@ async def api_cron_preview(request: Request) -> JSONResponse:
         if n < 1:
             raise HTTPException(status_code=400, detail="every_n_hours must be >= 1")
         interval_seconds = n * 3600
-        now = datetime.now()
+        now = datetime.now()  # noqa: DTZ005
         fires = [
             now + timedelta(seconds=interval_seconds * (k + 1)) for k in range(count)
         ]
@@ -342,7 +342,7 @@ async def api_get_run_transcript(run_id: int) -> JSONResponse:
     abs_path = str(resolved)
 
     try:
-        with open(abs_path, "r", encoding="utf-8", errors="replace") as fh:
+        with open(abs_path, "r", encoding="utf-8", errors="replace") as fh:  # noqa: ASYNC230
             # Seek to tail — last 256 KB only.
             fh.seek(0, os.SEEK_END)
             size = fh.tell()

@@ -165,7 +165,7 @@ async def test_sweep_times_out_overdue_running_row(
     sid = schedule["id"]
     # started_at well past the default max_runtime + grace.
     overdue = (
-        datetime.now()
+        datetime.now()  # noqa: DTZ005
         - timedelta(
             seconds=svc._DEFAULT_MAX_RUNTIME_SEC + svc._STALE_RUN_GRACE_SEC + 60
         )
@@ -193,7 +193,7 @@ async def test_sweep_ignores_recent_running_row(
 ) -> None:
     schedule = await _make_cron_schedule(migrated_db)
     sid = schedule["id"]
-    recent = datetime.now().isoformat(sep=" ", timespec="seconds")
+    recent = datetime.now().isoformat(sep=" ", timespec="seconds")  # noqa: DTZ005
     await migrated_db.execute(
         "INSERT INTO schedule_runs (schedule_id, trigger_kind, trigger, status, "
         "fired_at, started_at) VALUES (?, 'cron', 'manual', 'running', ?, ?)",
@@ -215,7 +215,7 @@ async def test_sweep_respects_per_schedule_max_runtime(
     await migrated_db.execute(
         "UPDATE schedules SET max_runtime_sec = 30 WHERE id = ?", (sid,)
     )
-    started = (datetime.now() - timedelta(seconds=200)).isoformat(
+    started = (datetime.now() - timedelta(seconds=200)).isoformat(  # noqa: DTZ005
         sep=" ", timespec="seconds"
     )
     await migrated_db.execute(
@@ -263,7 +263,7 @@ async def test_create_interval_anchors_from_now(
     assert sched["cron_expr"] is None
     assert sched["anchor_at"] is not None
     nfa = datetime.fromisoformat(sched["next_fire_at"])
-    delta = (nfa - datetime.now()).total_seconds()
+    delta = (nfa - datetime.now()).total_seconds()  # noqa: DTZ005
     # ~2h from creation (not aligned to a wall-clock boundary).
     assert 7100 < delta <= 7205
 
@@ -283,7 +283,7 @@ async def test_tick_interval_advances_by_interval(
     sched = await _make_interval_schedule(migrated_db, interval_seconds=3600)
     sid = sched["id"]
     # Force due: next_fire_at 10s in the past.
-    past = (datetime.now() - timedelta(seconds=10)).isoformat(
+    past = (datetime.now() - timedelta(seconds=10)).isoformat(  # noqa: DTZ005
         sep=" ", timespec="seconds"
     )
     await migrated_db.execute(
@@ -300,8 +300,8 @@ async def test_tick_interval_advances_by_interval(
     sched2 = await svc.get_schedule(migrated_db, sid)
     nfa = datetime.fromisoformat(sched2["next_fire_at"])
     # Advanced ~1 interval from the past slot → roughly an hour out, in the future.
-    assert nfa > datetime.now()
-    assert (nfa - datetime.now()).total_seconds() > 3000
+    assert nfa > datetime.now()  # noqa: DTZ005
+    assert (nfa - datetime.now()).total_seconds() > 3000  # noqa: DTZ005
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +314,7 @@ async def test_tick_fires_due_schedule(migrated_db: aiosqlite.Connection) -> Non
     schedule = await _make_cron_schedule(migrated_db)
     sid = schedule["id"]
     # Set next_fire_at to 1 hour ago so it's definitely due.
-    past = datetime.now() - timedelta(hours=1)
+    past = datetime.now() - timedelta(hours=1)  # noqa: DTZ005
     await _override_next_fire_at(migrated_db, sid, past)
 
     fired = await svc.tick(migrated_db)
@@ -334,7 +334,7 @@ async def test_tick_does_not_fire_future_schedule(
     schedule = await _make_cron_schedule(migrated_db)
     sid = schedule["id"]
     # next_fire_at in the future.
-    future = datetime.now() + timedelta(hours=2)
+    future = datetime.now() + timedelta(hours=2)  # noqa: DTZ005
     await _override_next_fire_at(migrated_db, sid, future)
 
     fired = await svc.tick(migrated_db)
@@ -345,7 +345,7 @@ async def test_tick_does_not_fire_future_schedule(
 async def test_tick_advances_next_fire_at(migrated_db: aiosqlite.Connection) -> None:
     schedule = await _make_cron_schedule(migrated_db, cron_expr="0 9 * * *")
     sid = schedule["id"]
-    past = datetime.now() - timedelta(hours=1)
+    past = datetime.now() - timedelta(hours=1)  # noqa: DTZ005
     await _override_next_fire_at(migrated_db, sid, past)
 
     await svc.tick(migrated_db)
@@ -357,7 +357,7 @@ async def test_tick_advances_next_fire_at(migrated_db: aiosqlite.Connection) -> 
     assert row is not None
     nfa = datetime.fromisoformat(str(row["next_fire_at"]))
     # The new next_fire_at must be in the future.
-    assert nfa > datetime.now()
+    assert nfa > datetime.now()  # noqa: DTZ005
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +369,7 @@ async def test_tick_advances_next_fire_at(migrated_db: aiosqlite.Connection) -> 
 async def test_tick_overlap_guard_skips(migrated_db: aiosqlite.Connection) -> None:
     schedule = await _make_cron_schedule(migrated_db)
     sid = schedule["id"]
-    past = datetime.now() - timedelta(hours=1)
+    past = datetime.now() - timedelta(hours=1)  # noqa: DTZ005
     await _override_next_fire_at(migrated_db, sid, past)
 
     # Insert an already-running row.
@@ -398,7 +398,7 @@ async def test_tick_overlap_guard_with_queued_row(
 ) -> None:
     schedule = await _make_cron_schedule(migrated_db)
     sid = schedule["id"]
-    past = datetime.now() - timedelta(hours=1)
+    past = datetime.now() - timedelta(hours=1)  # noqa: DTZ005
     await _override_next_fire_at(migrated_db, sid, past)
 
     # Insert an already-queued row (not yet claimed by the shell).
@@ -425,7 +425,7 @@ async def test_tick_staleness_guard_records_missed(
     schedule = await _make_cron_schedule(migrated_db)
     sid = schedule["id"]
     # Set next_fire_at to > 24 h ago.
-    very_old = datetime.now() - timedelta(hours=25)
+    very_old = datetime.now() - timedelta(hours=25)  # noqa: DTZ005
     await _override_next_fire_at(migrated_db, sid, very_old)
 
     fired = await svc.tick(migrated_db)
@@ -444,7 +444,7 @@ async def test_tick_staleness_guard_advances_next_fire(
 ) -> None:
     schedule = await _make_cron_schedule(migrated_db)
     sid = schedule["id"]
-    very_old = datetime.now() - timedelta(hours=48)
+    very_old = datetime.now() - timedelta(hours=48)  # noqa: DTZ005
     await _override_next_fire_at(migrated_db, sid, very_old)
 
     await svc.tick(migrated_db)
@@ -455,7 +455,7 @@ async def test_tick_staleness_guard_advances_next_fire(
         row = await cur.fetchone()
     assert row is not None
     nfa = datetime.fromisoformat(str(row["next_fire_at"]))
-    assert nfa > datetime.now()
+    assert nfa > datetime.now()  # noqa: DTZ005
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +543,7 @@ async def test_finish_run_computes_duration(migrated_db: aiosqlite.Connection) -
     sid = schedule["id"]
     run = await svc._insert_run(migrated_db, sid, "cron", "scheduled", status="running")
     # Backdate started_at by 5 seconds.
-    started = datetime.now() - timedelta(seconds=5)
+    started = datetime.now() - timedelta(seconds=5)  # noqa: DTZ005
     await migrated_db.execute(
         "UPDATE schedule_runs SET started_at = ? WHERE id = ?",
         (started.isoformat(sep=" ", timespec="seconds"), run["id"]),
@@ -729,13 +729,12 @@ async def test_fire_manual_reanchors_interval_schedule(
     schedule = await _make_interval_schedule(migrated_db, interval_seconds=7200)
     sid = schedule["id"]
     # Simulate a countdown that's nearly elapsed (next fire only 10 min out).
-    await _override_next_fire_at(
-        migrated_db, sid, datetime.now() + timedelta(seconds=600)
-    )
+    near = datetime.now() + timedelta(seconds=600)  # noqa: DTZ005
+    await _override_next_fire_at(migrated_db, sid, near)
 
-    before = datetime.now()
+    before = datetime.now()  # noqa: DTZ005
     result = await svc.fire_manual(migrated_db, sid)
-    after = datetime.now()
+    after = datetime.now()  # noqa: DTZ005
 
     nfa = datetime.fromisoformat(result["schedule"]["next_fire_at"])
     # Re-anchored to ~now + 2h, not the old 10-minute slot.
@@ -893,7 +892,7 @@ async def _make_finished_run(
     )
     run_id = run["id"]
 
-    finished = datetime.now() - timedelta(days=age_days)
+    finished = datetime.now() - timedelta(days=age_days)  # noqa: DTZ005
     finished_str = finished.isoformat(sep=" ", timespec="seconds")
     await db.execute(
         """

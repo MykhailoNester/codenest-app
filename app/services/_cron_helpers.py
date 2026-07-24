@@ -152,7 +152,7 @@ def _validate_cron(expr: str) -> None:
     try:
         # croniter accepts the expression in its constructor; an invalid one
         # raises a ValueError.
-        croniter(expr, datetime.now())
+        croniter(expr, datetime.now())  # noqa: DTZ005
     except (ValueError, KeyError) as exc:
         raise CronHelperError(f"invalid cron expression {expr!r}: {exc}") from exc
 
@@ -240,9 +240,8 @@ def describe_cron(expr: str) -> str:
             return f"At {time_str}, Mon–Fri"
 
         # Sat–Sun (range 0,6 or 6,0)
-        if dow_f in ("0,6", "6,0", "0-6", "6-0"):
-            if dow_f in ("0,6", "6,0"):
-                return f"At {time_str}, weekends"
+        if dow_f in ("0,6", "6,0", "0-6", "6-0") and dow_f in ("0,6", "6,0"):
+            return f"At {time_str}, weekends"
 
         # Comma-separated day list
         try:
@@ -288,6 +287,6 @@ def next_fire_times(
     """
     _validate_cron(expr)
     n = max(1, min(count, 10))
-    base = after or datetime.now()
+    base = after or datetime.now()  # noqa: DTZ005
     it = croniter(expr, base)
     return [it.get_next(datetime) for _ in range(n)]

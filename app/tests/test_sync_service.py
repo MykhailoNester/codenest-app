@@ -12,7 +12,6 @@ import pytest_asyncio
 
 from app.services import sync_service
 
-
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
 
 
@@ -136,7 +135,7 @@ async def test_list_snapshots_returns_newest_first(env):
     # second snapshot may collide. Write a fake second snapshot directly.
     import time
 
-    time.sleep(1.1)
+    time.sleep(1.1)  # noqa: ASYNC251
     second = await sync_service.create_snapshot(env["db"], target["id"])
     listed = await sync_service.list_snapshots(env["db"], target["id"])
     names = [s["file_name"] for s in listed]

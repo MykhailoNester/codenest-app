@@ -24,7 +24,6 @@ import app.database as db_module
 from app.routers import project_discovery as project_discovery_router
 from app.services import project_discovery_service
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

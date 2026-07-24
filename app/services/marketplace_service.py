@@ -238,7 +238,7 @@ async def install(
         if inserted:
             try:
                 await db.rollback()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         if tmp_path is not None and tmp_path.exists():
             try:
@@ -262,7 +262,7 @@ async def install(
                 raw_content=content,
                 installed_path=str(target),
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("mcp_servers registry update failed for %s: %s", slug, exc)
 
     return {

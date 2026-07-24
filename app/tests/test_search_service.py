@@ -1,10 +1,10 @@
 import pathlib
+
+import aiosqlite
 import pytest
 import pytest_asyncio
-import aiosqlite
 
 from app.services import search_service
-
 
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
 

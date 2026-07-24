@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import csv
 import io
-from typing import Any, AsyncIterator, Iterable, Literal
+from collections.abc import AsyncIterator, Iterable
+from typing import Any, Literal
 
 import aiosqlite
 from fastapi import HTTPException

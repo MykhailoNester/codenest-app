@@ -7,8 +7,7 @@ from datetime import datetime, timezone
 
 import aiosqlite
 
-from app.services import project_scanner_service
-from app.services import command_center_service
+from app.services import command_center_service, project_scanner_service
 
 logger = logging.getLogger(__name__)
 

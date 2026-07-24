@@ -1,8 +1,9 @@
+from datetime import date
 from typing import Any
 
 import aiosqlite
-from datetime import date
 from fastapi import HTTPException
+
 from .activity_service import log_activity
 from .task_service import create_task
 
@@ -57,7 +58,7 @@ async def create_item(db: aiosqlite.Connection, data: dict) -> int:
             data.get("status", "inbox"),
             data.get("action_text"),
             data.get("project_id"),
-            str(date.today()),
+            str(date.today()),  # noqa: DTZ011
         ),
     )
     await db.commit()
@@ -97,7 +98,7 @@ async def update_item(db: aiosqlite.Connection, item_id: int, data: dict):
 
     if "status" in data and data["status"] in ("review", "ready", "done"):
         fields.append("reviewed_date = ?")
-        params.append(str(date.today()))
+        params.append(str(date.today()))  # noqa: DTZ011
 
     if not fields:
         return
@@ -173,7 +174,7 @@ async def promote_to_task(db: aiosqlite.Connection, item_id: int, options: dict)
 
     await db.execute(
         "UPDATE workflow_items SET status = 'done', task_id = ?, reviewed_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (task_id, str(date.today()), item_id),
+        (task_id, str(date.today()), item_id),  # noqa: DTZ011
     )
     await db.commit()
     await log_activity(

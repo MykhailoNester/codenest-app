@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .database import init_db, close_db, get_db
+from .database import close_db, get_db, init_db
 
 _APP_VERSION = "0.1.0"
 
@@ -61,11 +61,11 @@ async def _schedule_tick_loop() -> None:
                     result = await schedule_service.prune_transcript_blobs(db)
                     if result["files_deleted"] or result["rows_cleared"]:
                         logger.info("transcript prune: %s", result)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     logger.warning("transcript prune failed (continuing): %s", exc)
         except _asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("schedule tick error (continuing): %s", exc)
         tick_count += 1
         await _asyncio.sleep(_SCHEDULE_TICK_SECONDS)
@@ -92,7 +92,7 @@ async def _insights_tick_loop() -> None:
                 logger.info("insights tick published %d card(s)", len(published))
         except _asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("insights tick error (continuing): %s", exc)
         await _asyncio.sleep(_INSIGHTS_TICK_SECONDS)
 
@@ -157,7 +157,7 @@ def create_app() -> FastAPI:
                 logger.info(
                     "schedule startup reaper: reaped %d orphaned run(s)", reaped
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("schedule startup reaper failed (continuing): %s", exc)
 
         # Only attach the watchdog when launched by the Rust shell; running
@@ -189,7 +189,7 @@ def create_app() -> FastAPI:
                 db = await get_db()
                 summary = await plugin_service.scan_and_load(db)
                 logger.info("plugin scan: %s", summary)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("plugin scan failed at startup (continuing): %s", exc)
 
         asyncio.create_task(_initial_plugin_scan())
@@ -203,7 +203,7 @@ def create_app() -> FastAPI:
                 db = await get_db()
                 result = await command_center_service.bootstrap(db, force=False)
                 logger.info("command-center bootstrap (deferred): %s", result)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("command-center bootstrap failed (continuing): %s", exc)
 
         asyncio.create_task(_deferred_bootstrap())
@@ -215,7 +215,7 @@ def create_app() -> FastAPI:
                 task.cancel()
                 try:
                     await task
-                except (asyncio.CancelledError, Exception):
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110
                     pass
         await close_db()
 
@@ -249,44 +249,44 @@ def create_app() -> FastAPI:
         return {"status": "ok", "version": _APP_VERSION}
 
     from .routers import (
+        agent_overrides,
+        agents,
+        attachments,
+        budgets,
         command_center,
         dashboard,
         dashboard_trends,
-        tasks,
-        inbox,
-        team,
         documents,
-        projects,
-        project_discovery,
-        taxonomies,
+        feed,
+        inbox,
+        insights,
+        integrations,
+        intent,
+        launch_overrides,
+        launch_presets,
+        launch_seed,
+        library,
         markdown_editor,
-        agents,
-        sessions,
-        profiles,
-        settings,
-        search,
+        marketplace,
+        mcp_servers,
         metrics,
         notifications,
-        providers,
-        launch_presets,
-        launch_overrides,
-        launch_seed,
-        system,
-        marketplace,
         parallel_runs,
-        mcp_servers,
-        agent_overrides,
-        schedules,
-        intent,
-        preview,
-        attachments,
-        library,
-        budgets,
-        feed,
-        insights,
         plugins,
-        integrations,
+        preview,
+        profiles,
+        project_discovery,
+        projects,
+        providers,
+        schedules,
+        search,
+        sessions,
+        settings,
         sync,
+        system,
+        tasks,
+        taxonomies,
+        team,
         workspace,
     )
 

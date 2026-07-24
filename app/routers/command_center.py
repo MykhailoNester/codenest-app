@@ -9,9 +9,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.services import command_center_service
-from app.services import project_import_service, project_scanner_service
-from app.services import project_service
+from app.services import (
+    command_center_service,
+    project_import_service,
+    project_scanner_service,
+    project_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -341,13 +344,15 @@ async def complete_onboarding() -> dict:
     grouping profile, and workspace symlinks created/changed during onboarding
     are reconciled immediately — without waiting for the next sidecar restart.
     """
-    from app.services import command_center_service, workspace_state_service as ws_state
+    from app.services import command_center_service
+    from app.services import workspace_state_service as ws_state
 
     db = await get_db()
     await ws_state.set(db, "onboarding_completed", "true")
+    # Reconcile is best-effort; never let its failure block onboarding.
     try:
         await command_center_service.bootstrap(db, force=False)
-    except Exception as exc:  # never let reconcile failure block onboarding
+    except Exception as exc:  # noqa: BLE001
         logger.warning("onboarding-complete bootstrap failed (continuing): %s", exc)
     return {"completed": True}
 
@@ -414,8 +419,8 @@ async def factory_reset() -> dict:
     ]
     for table in tables:
         try:
-            await db.execute(f"DELETE FROM {table}")  # noqa: S608 – controlled list
-        except Exception as exc:
+            await db.execute(f"DELETE FROM {table}")
+        except Exception as exc:  # noqa: BLE001
             # A table may not exist in an older DB version — tolerate that
             # gracefully but log it so silent failures are no longer invisible.
             logger.warning("factory_reset: DELETE FROM %s failed: %s", table, exc)

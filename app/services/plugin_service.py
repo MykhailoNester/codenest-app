@@ -25,12 +25,12 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import aiosqlite
 from fastapi import HTTPException
-
 
 log = logging.getLogger(__name__)
 

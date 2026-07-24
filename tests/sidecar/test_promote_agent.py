@@ -17,7 +17,6 @@ import pytest
 from app.services.command_center_service import promote_agent_to_org
 from app.services.org_agent_service import reconcile_stale
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -345,9 +344,9 @@ async def test_promote_agent_bundled_collision_raises(
     with (
         patch.object(real_settings, "ORG_AGENTS_DIR", org_dir),
         patch.object(real_settings, "WORKSPACE_ROOT", tmp_path / "workspace"),
+        pytest.raises(ValueError, match="bundled"),
     ):
-        with pytest.raises(ValueError, match="bundled"):
-            await promote_agent_to_org(migrated_db, pid, aid)
+        await promote_agent_to_org(migrated_db, pid, aid)
 
 
 @pytest.mark.asyncio
@@ -363,9 +362,9 @@ async def test_promote_agent_not_found_raises(
     with (
         patch.object(real_settings, "ORG_AGENTS_DIR", org_dir),
         patch.object(real_settings, "WORKSPACE_ROOT", tmp_path / "workspace"),
+        pytest.raises(ValueError, match="not found"),
     ):
-        with pytest.raises(ValueError, match="not found"):
-            await promote_agent_to_org(migrated_db, 9999, 9999)
+        await promote_agent_to_org(migrated_db, 9999, 9999)
 
 
 # ---------------------------------------------------------------------------

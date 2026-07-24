@@ -369,7 +369,7 @@ async def _reconcile_provider_profiles(db: aiosqlite.Connection) -> int:
             raw_env = prov["default_env_json"] or "{}"
             try:
                 env_map = _json.loads(raw_env)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 env_map = {}
             config_dir: str | None = env_map.get("CLAUDE_CONFIG_DIR")
 
@@ -431,7 +431,7 @@ async def _reconcile_provider_profiles(db: aiosqlite.Connection) -> int:
         # matches a profile's claude_config_dir but provider_id is still NULL.
         await _backfill_session_provider_ids(db)
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("provider-profile reconcile error (continuing): %s", exc)
 
     return created
@@ -462,7 +462,7 @@ async def _backfill_session_provider_ids(db: aiosqlite.Connection) -> None:
                 (provider_id, f"%{config_dir}%"),
             )
         await db.commit()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("session provider_id backfill error (continuing): %s", exc)
 
 
@@ -503,7 +503,7 @@ async def bootstrap(db: aiosqlite.Connection, *, force: bool = False) -> dict:
         await ws_state.set(db, "org_agents_version", version)
     except FileNotFoundError as exc:
         logger.warning("org-agent manifest not found: %s", exc)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("org-agent install/upgrade failed: %s", exc)
 
     regen = await regenerate_workspace_links(db)
@@ -596,7 +596,7 @@ async def regenerate_workspace_links(db: aiosqlite.Connection) -> dict:
         # projects skill was already staged into the swap above.)
         try:
             await workspace_context_service.regenerate(db)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("workspace context regen failed (continuing): %s", exc)
 
         total = sum(counts.values())

@@ -57,7 +57,7 @@ async def _resolve_profile_name(
         row = await db.execute("SELECT name FROM profiles WHERE id = ?", (profile_id,))
         result = await row.fetchone()
         return result["name"] if result else None
-    except Exception:
+    except Exception:  # noqa: BLE001
         # profiles table not available; filter is ignored
         return None
 
@@ -149,7 +149,7 @@ async def get_cost_metrics(
             """
             params = [interval, *extra_params]
             rows_cursor = await db.execute(sql, params)
-        except Exception:
+        except Exception:  # noqa: BLE001
             # profiles table not available: fall back to
             # grouping by raw profile string, identical to group_by=agent.
             sql = f"""

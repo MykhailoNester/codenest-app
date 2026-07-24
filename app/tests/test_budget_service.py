@@ -15,7 +15,6 @@ import pytest_asyncio
 
 from app.services import budget_service, notification_service
 
-
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
 
 
@@ -75,7 +74,7 @@ async def _insert_session(
 
 
 def test_daily_bounds_are_calendar_aligned():
-    moment = datetime(2026, 5, 15, 14, 23, 59)
+    moment = datetime(2026, 5, 15, 14, 23, 59)  # noqa: DTZ001
     start, end = budget_service.period_bounds("daily", now=moment)
     assert start == "2026-05-15 00:00:00"
     assert end == "2026-05-16 00:00:00"
@@ -83,21 +82,21 @@ def test_daily_bounds_are_calendar_aligned():
 
 def test_weekly_bounds_anchor_on_monday():
     # 2026-05-15 is a Friday → expect Monday 2026-05-11 to next Monday 2026-05-18
-    moment = datetime(2026, 5, 15, 12, 0, 0)
+    moment = datetime(2026, 5, 15, 12, 0, 0)  # noqa: DTZ001
     start, end = budget_service.period_bounds("weekly", now=moment)
     assert start.startswith("2026-05-11")
     assert end.startswith("2026-05-18")
 
 
 def test_monthly_bounds_handle_december_rollover():
-    moment = datetime(2026, 12, 17, 9, 0, 0)
+    moment = datetime(2026, 12, 17, 9, 0, 0)  # noqa: DTZ001
     start, end = budget_service.period_bounds("monthly", now=moment)
     assert start.startswith("2026-12-01")
     assert end.startswith("2027-01-01")
 
 
 def test_monthly_bounds_for_february():
-    moment = datetime(2026, 2, 5, 9, 0, 0)
+    moment = datetime(2026, 2, 5, 9, 0, 0)  # noqa: DTZ001
     start, end = budget_service.period_bounds("monthly", now=moment)
     assert start.startswith("2026-02-01")
     assert end.startswith("2026-03-01")
@@ -108,7 +107,7 @@ def test_monthly_bounds_for_february():
 
 @pytest.mark.asyncio
 async def test_burn_only_counts_sessions_in_period(db):
-    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)  # noqa: DTZ005
     yesterday = now - timedelta(days=2)
     await _insert_session(db, "s1", 0.5, now, profile="default")
     await _insert_session(db, "s2", 99.0, yesterday, profile="default")  # excluded
@@ -131,7 +130,7 @@ async def test_project_scope_filters_other_projects(db):
     await db.execute("INSERT INTO projects (id, name, path) VALUES (1001, 'A', '/a')")
     await db.execute("INSERT INTO projects (id, name, path) VALUES (1002, 'B', '/b')")
     await db.commit()
-    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)  # noqa: DTZ005
     await _insert_session(db, "a1", 5.0, now, project_id=1001)
     await _insert_session(db, "b1", 99.0, now, project_id=1002)
     budget = await budget_service.create_budget(
@@ -153,7 +152,7 @@ async def test_project_scope_filters_other_projects(db):
 
 @pytest.mark.asyncio
 async def test_thresholds_fire_once_per_period(db):
-    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)  # noqa: DTZ005
     await _insert_session(db, "s1", 0.55, now)  # 55% → fires 50%
     await budget_service.create_budget(
         db,
@@ -188,7 +187,7 @@ async def test_thresholds_fire_once_per_period(db):
 
 @pytest.mark.asyncio
 async def test_hard_stop_allows_when_under_limit(db):
-    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)  # noqa: DTZ005
     await _insert_session(db, "s1", 0.10, now)
     await budget_service.create_budget(
         db,
@@ -207,7 +206,7 @@ async def test_hard_stop_allows_when_under_limit(db):
 
 @pytest.mark.asyncio
 async def test_hard_stop_blocks_when_over_limit(db):
-    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)  # noqa: DTZ005
     await _insert_session(db, "s1", 2.00, now)
     await budget_service.create_budget(
         db,
@@ -226,7 +225,7 @@ async def test_hard_stop_blocks_when_over_limit(db):
 
 @pytest.mark.asyncio
 async def test_hard_stop_ignores_disabled_or_non_hard_stop(db):
-    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)  # noqa: DTZ005
     await _insert_session(db, "s1", 5.00, now)
     # over limit but hard_stop=False
     await budget_service.create_budget(
@@ -260,7 +259,7 @@ async def test_hard_stop_project_scope_only_matches_that_project(db):
     await db.execute("INSERT INTO projects (id, name, path) VALUES (1001, 'A', '/a')")
     await db.execute("INSERT INTO projects (id, name, path) VALUES (1002, 'B', '/b')")
     await db.commit()
-    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    now = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)  # noqa: DTZ005
     await _insert_session(db, "a1", 5.0, now, project_id=1001)
     await budget_service.create_budget(
         db,

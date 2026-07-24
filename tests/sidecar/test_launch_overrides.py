@@ -14,18 +14,18 @@ from __future__ import annotations
 
 import asyncio
 
+import aiosqlite
 import pytest
 import pytest_asyncio
-import aiosqlite
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.database as db_module
+from app.models.launch import LaunchOverrideUpsert
+from app.routers import inbox as inbox_router
 from app.routers import launch_overrides as overrides_router
 from app.routers import tasks as tasks_router
-from app.routers import inbox as inbox_router
 from app.services import launch_override_service
-from app.models.launch import LaunchOverrideUpsert
 
 # ---------------------------------------------------------------------------
 # Test app fixture

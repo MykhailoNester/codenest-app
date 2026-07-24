@@ -1,8 +1,9 @@
-import aiosqlite
 from datetime import date
-from .activity_service import log_activity
-from . import notification_service
 
+import aiosqlite
+
+from . import notification_service
+from .activity_service import log_activity
 
 _SORT_CLAUSES = {
     "created_at_asc": "t.created_at ASC",
@@ -124,10 +125,10 @@ async def update_task(db: aiosqlite.Connection, task_id: int, data: dict):
     if "status" in data:
         if data["status"] == "in-progress" and current["status"] != "in-progress":
             fields.append("started_date = ?")
-            params.append(str(date.today()))
+            params.append(str(date.today()))  # noqa: DTZ011
         elif data["status"] == "done" and current["status"] != "done":
             fields.append("completed_date = ?")
-            params.append(str(date.today()))
+            params.append(str(date.today()))  # noqa: DTZ011
 
     params.append(task_id)
     await db.execute(f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?", params)

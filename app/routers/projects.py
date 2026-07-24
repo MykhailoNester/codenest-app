@@ -2,15 +2,16 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
 from app.database import get_db
 from app.services.project_service import (
-    get_all_projects,
-    get_project,
     create_project,
     delete_project,
-    update_project,
+    get_all_projects,
+    get_project,
     get_project_stats,
     get_project_stats_bulk,
+    update_project,
 )
 
 router = APIRouter()

@@ -131,13 +131,16 @@ async def update_profile(
     fields = data.model_dump(exclude_unset=True)
     if not fields:
         return existing
-    if "name" in fields and fields["name"] != existing["name"]:
-        if await _name_exists(db, fields["name"], exclude_id=profile_id):
-            raise HTTPException(
-                status_code=409,
-                detail=f"profile name '{fields['name']}' already exists",
-            )
-    columns = ", ".join(f"{k} = ?" for k in fields.keys())
+    if (
+        "name" in fields
+        and fields["name"] != existing["name"]
+        and await _name_exists(db, fields["name"], exclude_id=profile_id)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"profile name '{fields['name']}' already exists",
+        )
+    columns = ", ".join(f"{k} = ?" for k in fields)
     params = list(fields.values()) + [profile_id]
     await db.execute(f"UPDATE profiles SET {columns} WHERE id = ?", params)
     await db.commit()

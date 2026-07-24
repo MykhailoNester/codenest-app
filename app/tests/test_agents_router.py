@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import pathlib
+
+import aiosqlite
 import pytest
 import pytest_asyncio
-import aiosqlite
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.routers import agents as agents_router
 import app.database as db_module
+from app.routers import agents as agents_router
 
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
 

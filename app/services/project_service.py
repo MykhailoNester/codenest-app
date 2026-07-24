@@ -1,5 +1,4 @@
 import aiosqlite
-
 from fastapi import HTTPException
 
 

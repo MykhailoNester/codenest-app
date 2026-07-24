@@ -27,8 +27,8 @@ os.environ.pop("CODENEST_DB_PATH", None)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.config import settings  # noqa: E402
-from app.database import close_db, get_db, init_db  # noqa: E402
+from app.config import settings
+from app.database import close_db, get_db, init_db
 
 DEMO_FILENAME = "codenest.demo.db"
 SEED_MARKER = "demo_seeded"

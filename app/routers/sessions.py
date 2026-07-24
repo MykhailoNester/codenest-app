@@ -22,7 +22,7 @@ async def list_sessions(
     limit: int = 100,
 ):
     db = await get_db()
-    from app.services.agent_service import list_sessions as _list  # noqa: PLC0415
+    from app.services.agent_service import list_sessions as _list
 
     rows = await _list(db, profile or None, status or None, limit)
     return [dict(r) for r in rows]

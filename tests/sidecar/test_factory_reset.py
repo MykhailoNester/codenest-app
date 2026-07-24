@@ -28,7 +28,7 @@ BUNDLE_DIR = (
 
 
 async def _count(db, table: str) -> int:
-    cur = await db.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608
+    cur = await db.execute(f"SELECT COUNT(*) FROM {table}")
     row = await cur.fetchone()
     assert row is not None
     return int(row[0])
@@ -183,10 +183,8 @@ async def test_factory_reset_wipes_user_data_and_restores_seed(
         logger = logging.getLogger("test_factory_reset")
         for table in tables:
             try:
-                await migrated_db.execute(
-                    f"DELETE FROM {table}"  # noqa: S608
-                )
-            except Exception as exc:
+                await migrated_db.execute(f"DELETE FROM {table}")
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("factory_reset: DELETE FROM %s failed: %s", table, exc)
         await migrated_db.commit()
 

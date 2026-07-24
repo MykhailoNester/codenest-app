@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from app.services._sql import slugify as _slugify_from_sql
@@ -115,6 +115,7 @@ def _get_git_remote(root: Path) -> str | None:
             capture_output=True,
             text=True,
             timeout=2,
+            check=False,
         )
         if result.returncode == 0:
             return result.stdout.strip() or None

@@ -37,7 +37,6 @@ from typing import Any
 import aiosqlite
 from fastapi import HTTPException
 
-
 log = logging.getLogger(__name__)
 
 

@@ -1,15 +1,16 @@
 """Smoke tests for notifications router."""
 
 import pathlib
+
+import aiosqlite
 import pytest
 import pytest_asyncio
-import aiosqlite
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import app.database as db_module
 from app.routers import notifications as notifications_router
 from app.services import notification_service
-import app.database as db_module
 
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
 

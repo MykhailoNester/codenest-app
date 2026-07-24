@@ -227,7 +227,7 @@ async def resolve_profile_to_provider(
         row = await cur.fetchone()
         if row and row["provider_id"] is not None:
             return int(row["provider_id"])
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         # DB unavailable mid-migration — never block hook ingest.
         pass
     # Fallback: legacy hardcoded name map

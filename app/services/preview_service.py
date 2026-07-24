@@ -52,13 +52,13 @@ async def _probe_port(port: int) -> bool:
     """
     try:
         fut = asyncio.open_connection("127.0.0.1", port)
-        reader, writer = await asyncio.wait_for(fut, timeout=_PROBE_TIMEOUT_SECONDS)
+        _reader, writer = await asyncio.wait_for(fut, timeout=_PROBE_TIMEOUT_SECONDS)
     except (OSError, asyncio.TimeoutError):
         return False
     writer.close()
     try:
         await writer.wait_closed()
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return True
 

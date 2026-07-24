@@ -11,7 +11,6 @@ from app.services.markdown_editor_service import MAX_CONTENT_BYTES
 
 from ._http import read_json_body
 
-
 router = APIRouter(prefix="/api/v1/markdown-files")
 
 

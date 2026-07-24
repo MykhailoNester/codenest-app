@@ -1,5 +1,7 @@
-import aiosqlite
 from datetime import date
+
+import aiosqlite
+
 from .activity_service import log_activity
 
 
@@ -25,7 +27,7 @@ async def create_member(db: aiosqlite.Connection, data: dict) -> int:
             data.get("department"),
             data.get("status", "active"),
             data.get("agent_file"),
-            data.get("joined_date", str(date.today())),
+            data.get("joined_date", str(date.today())),  # noqa: DTZ011
             data.get("subtype", "persona"),
         ),
     )

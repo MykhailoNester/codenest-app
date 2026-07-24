@@ -1,17 +1,17 @@
 """Integration tests for notification emitters wired into existing services."""
 
 import pathlib
+
+import aiosqlite
 import pytest
 import pytest_asyncio
-import aiosqlite
 
 from app.models.session_end_reason import EndCategory, classify
 from app.services import (
+    agent_service,
     notification_service,
     task_service,
-    agent_service,
 )
-
 
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
 

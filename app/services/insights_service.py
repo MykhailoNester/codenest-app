@@ -16,14 +16,14 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import aiosqlite
 
 from . import inbox_service
-
 
 log = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ async def rule_budget_burn_high(
 
     try:
         summary = await budget_service.burn_summary(db)
-    except Exception:
+    except Exception:  # noqa: BLE001
         # Tolerates older DB snapshots where the budgets table isn't migrated yet.
         return None
     now = datetime.now(UTC).replace(tzinfo=None)

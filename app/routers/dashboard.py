@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+
 from app.database import get_db
 from app.services.project_service import get_all_projects, get_project_stats_bulk
 from app.services.task_service import get_all_tasks

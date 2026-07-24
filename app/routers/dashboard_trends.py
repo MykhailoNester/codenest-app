@@ -26,7 +26,7 @@ router = APIRouter()
 
 def _date_series(days: int) -> list[str]:
     """Return an ascending list of ISO date strings for the last *days* days."""
-    today = date.today()
+    today = date.today()  # noqa: DTZ011
     return [(today - timedelta(days=days - 1 - i)).isoformat() for i in range(days)]
 
 

@@ -16,9 +16,9 @@ from typing import Any
 import aiosqlite
 from fastapi import HTTPException
 
-from . import attribution_service, budget_service, notification_service
 from app.models.session_end_reason import EndCategory, classify
 
+from . import attribution_service, budget_service, notification_service
 
 # ─── Pub/sub ────────────────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ async def _derive_profile(db: aiosqlite.Connection, transcript_path: str | None)
             "ORDER BY created_at ASC, id ASC"
         )
         profiles = await rows.fetchall()
-    except Exception:
+    except Exception:  # noqa: BLE001
         # DB unavailable (e.g. mid-migration) — never block hook ingest.
         return "unknown"
     for profile in profiles:
@@ -293,7 +293,7 @@ async def record_session_start(db: aiosqlite.Connection, payload: dict) -> None:
                     (pane_id, session_id),
                 )
                 await db.commit()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 # Column not yet present (migration pending) — non-fatal.
                 pass
 
@@ -538,7 +538,7 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
             project_id=scope["project_id"] if scope else None,
             profile=scope["profile"] if scope else None,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
 

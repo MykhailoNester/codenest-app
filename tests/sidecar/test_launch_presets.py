@@ -11,15 +11,15 @@ Covers:
 
 from __future__ import annotations
 
+import aiosqlite
 import pytest
 import pytest_asyncio
-import aiosqlite
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.database as db_module
-from app.routers import launch_presets as presets_router
 from app.models.launch import LaunchPresetCreate
+from app.routers import launch_presets as presets_router
 from app.services import launch_preset_service
 
 # ---------------------------------------------------------------------------
@@ -480,6 +480,7 @@ async def test_workspace_create_and_read_back(migrated_db: aiosqlite.Connection)
 async def test_workspace_rejects_duplicate_coords(migrated_db: aiosqlite.Connection):
     """LaunchPresetCreate must reject cells with duplicate (row, col) pairs."""
     from pydantic import ValidationError
+
     from app.models.launch import LaunchCell, LaunchPresetCreate
 
     proj_id = await _insert_project(migrated_db, "DupCoordsProject")
@@ -509,6 +510,7 @@ async def test_workspace_rejects_unknown_project_in_cell(
 ):
     """create_preset must return 400 when a cell references a non-existent project."""
     from fastapi import HTTPException
+
     from app.models.launch import LaunchCell, LaunchPresetCreate
     from app.services import launch_preset_service
 

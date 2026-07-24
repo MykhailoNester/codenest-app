@@ -1,16 +1,17 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
 from app.database import get_db
 from app.services.task_service import (
+    add_blocker,
+    change_task_status,
+    create_task,
+    delete_task,
     get_all_tasks,
     get_task,
-    create_task,
-    update_task,
-    change_task_status,
-    delete_task,
-    add_blocker,
-    remove_blocker,
     get_task_blockers,
+    remove_blocker,
+    update_task,
 )
 
 router = APIRouter()
@@ -89,7 +90,7 @@ async def api_add_blocker(task_id: int, request: Request):
     db = await get_db()
     try:
         data = await request.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return JSONResponse({"error": "invalid json body"}, status_code=400)
     raw = data.get("blocking_task_id") if isinstance(data, dict) else None
     if not isinstance(raw, int) or raw <= 0:

@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
 from app.database import get_db
 from app.services.team_service import (
+    create_member,
     get_all_members,
     get_member,
-    create_member,
     update_member,
 )
 

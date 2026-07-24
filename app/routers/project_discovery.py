@@ -39,7 +39,7 @@ class ImportRequest(BaseModel):
 
 @router.post("/scan")
 async def api_scan(
-    payload: ScanRequest | None = Body(default=None),
+    payload: ScanRequest | None = Body(default=None),  # noqa: B008
 ) -> JSONResponse:
     body = payload or ScanRequest()
     db = await get_db()

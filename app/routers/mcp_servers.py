@@ -114,7 +114,7 @@ async def api_set_scope(server_id: int, request: Request) -> JSONResponse:
     mode = str(body.get("scope_mode", "all"))
     raw_ids = body.get("project_ids", [])
     if not isinstance(raw_ids, list):
-        from fastapi import HTTPException as _HTTPException  # noqa: PLC0415
+        from fastapi import HTTPException as _HTTPException
 
         raise _HTTPException(status_code=400, detail="'project_ids' must be a list")
     project_ids = [int(pid) for pid in raw_ids]
@@ -146,7 +146,7 @@ async def api_materialize_mcp_config(project_id: int, request: Request) -> JSONR
     # Body is optional; an empty body (e.g. no Content-Type) is treated as {}.
     try:
         body = await read_json_body(request, _MAX_BODY)
-    except Exception:
+    except Exception:  # noqa: BLE001
         body = {}
     raw_exclude = body.get("exclude_slugs", [])
     exclude_slugs: list[str] = (

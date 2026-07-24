@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
 from app.database import get_db
 from app.services.inbox_service import (
-    get_all_items,
     create_item,
-    update_item,
     delete_item,
+    get_all_items,
     promote_to_task,
+    update_item,
 )
 
 router = APIRouter()
@@ -57,7 +58,7 @@ async def api_promote_item(item_id: int, request: Request):
     db = await get_db()
     try:
         data = await request.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         data = {}
     task_id = await promote_to_task(db, item_id, data)
     return JSONResponse({"task_id": task_id}, status_code=201)

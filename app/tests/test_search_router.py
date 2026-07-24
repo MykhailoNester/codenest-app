@@ -1,11 +1,12 @@
 import pathlib
-import pytest_asyncio
+
 import aiosqlite
+import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.routers import search as search_router
 import app.database as db_module
+from app.routers import search as search_router
 
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
 

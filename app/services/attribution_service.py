@@ -149,8 +149,8 @@ async def attribute_turn_cost(
             (
                 session_id,
                 project_id,
-                int(round(tokens_in * frac)),
-                int(round(tokens_out * frac)),
+                round(tokens_in * frac),
+                round(tokens_out * frac),
                 cost_usd * frac,
             ),
         )

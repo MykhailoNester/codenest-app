@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -105,11 +105,11 @@ async def hook_session_end(request: Request):
 async def _read_json(request: Request) -> dict:
     try:
         return await request.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         body = await request.body()
         try:
             return json.loads(body or b"{}")
-        except Exception:
+        except Exception:  # noqa: BLE001
             return {}
 
 
@@ -209,16 +209,9 @@ async def api_agent_sessions(name: str, limit: int = 50, offset: int = 0):
 
 @router.get("/api/v1/agents/{name}/events")
 async def api_agent_events(name: str, session_id: str, limit: int = 200):
-    from fastapi import HTTPException
-
     db = await get_db()
-    try:
-        events = await agent_service.list_events_for_session(
-            db, name, session_id, limit
-        )
-        return JSONResponse(events)
-    except HTTPException:
-        raise
+    events = await agent_service.list_events_for_session(db, name, session_id, limit)
+    return JSONResponse(events)
 
 
 @router.get("/api/v1/agents/sessions")
@@ -363,7 +356,7 @@ async def api_record_launch_event(request: Request):
             r = await row.fetchone()
             if r:
                 provider_id = r["id"]
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     project_id = payload.get("project_id")
@@ -507,7 +500,7 @@ async def api_launch(request: Request):
                 if p.startswith("/"):
                     return p
                 return os.path.join(fallback, p)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         return fallback
 
@@ -523,7 +516,7 @@ async def api_launch(request: Request):
 
     from datetime import datetime
 
-    name = f"codenest-agents-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    name = f"codenest-agents-{datetime.now().strftime('%Y%m%d-%H%M%S')}"  # noqa: DTZ005
     yaml_text = agent_service.build_warp_launch_yaml(
         name=name,
         work_count=work,

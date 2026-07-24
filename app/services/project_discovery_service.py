@@ -12,8 +12,9 @@ Two surfaces:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 import aiosqlite
 

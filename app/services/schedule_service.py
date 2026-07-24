@@ -97,7 +97,7 @@ async def get_schedule(db: aiosqlite.Connection, schedule_id: int) -> dict[str, 
 
 def _now() -> datetime:
     # Wrapped so tests can monkey-patch a fixed clock.
-    return datetime.now()
+    return datetime.now()  # noqa: DTZ005
 
 
 def _compute_next_fire(cron_expr: str, after: datetime | None = None) -> datetime:
@@ -789,7 +789,7 @@ async def tick(db: aiosqlite.Connection) -> int:
             await db.commit()
             fired += 1
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("schedule %s tick error (skipped): %s", sid, exc)
     return fired
 

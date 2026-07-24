@@ -20,7 +20,6 @@ from app.services._cron_helpers import (
     preset_to_cron,
 )
 
-
 # ---------------------------------------------------------------------------
 # CronHelperError is a ValueError
 # ---------------------------------------------------------------------------
@@ -296,25 +295,26 @@ def test_describe_invalid_cron_raises() -> None:
 
 
 def test_next_fire_times_returns_count() -> None:
-    after = datetime(2025, 1, 1, 8, 0, 0)
+    after = datetime(2025, 1, 1, 8, 0, 0)  # noqa: DTZ001
     times = next_fire_times("0 9 * * *", count=3, after=after)
     assert len(times) == 3
 
 
 def test_next_fire_times_default_count() -> None:
-    after = datetime(2025, 1, 1, 8, 0, 0)
+    after = datetime(2025, 1, 1, 8, 0, 0)  # noqa: DTZ001
     times = next_fire_times("0 9 * * *", after=after)
     assert len(times) == 3  # default is 3
 
 
 def test_next_fire_times_ascending_order() -> None:
-    after = datetime(2025, 1, 1, 8, 0, 0)
+    after = datetime(2025, 1, 1, 8, 0, 0)  # noqa: DTZ001
     times = next_fire_times("0 9 * * *", count=5, after=after)
     assert times == sorted(times)
 
 
 def test_next_fire_times_daily_values() -> None:
-    after = datetime(2025, 6, 1, 8, 0, 0)  # 08:00 → next fire at 09:00 same day
+    # 08:00 → next fire at 09:00 same day
+    after = datetime(2025, 6, 1, 8, 0, 0)  # noqa: DTZ001
     times = next_fire_times("0 9 * * *", count=3, after=after)
     assert times[0].hour == 9
     assert times[0].minute == 0
@@ -325,20 +325,20 @@ def test_next_fire_times_daily_values() -> None:
 
 def test_next_fire_times_clamp_max_count() -> None:
     # count > 10 should be silently clamped to 10.
-    after = datetime(2025, 1, 1, 0, 0, 0)
+    after = datetime(2025, 1, 1, 0, 0, 0)  # noqa: DTZ001
     times = next_fire_times("0 * * * *", count=50, after=after)
     assert len(times) == 10
 
 
 def test_next_fire_times_clamp_min_count() -> None:
-    after = datetime(2025, 1, 1, 0, 0, 0)
+    after = datetime(2025, 1, 1, 0, 0, 0)  # noqa: DTZ001
     times = next_fire_times("0 * * * *", count=0, after=after)
     assert len(times) == 1  # clamped to 1
 
 
 def test_next_fire_times_weekly_multi_day() -> None:
     # Mon/Wed/Fri — test that all 3 are different days-of-week.
-    after = datetime(2025, 6, 2, 8, 0, 0)  # Monday
+    after = datetime(2025, 6, 2, 8, 0, 0)  # Monday  # noqa: DTZ001
     times = next_fire_times("0 9 * * 1,3,5", count=3, after=after)
     assert len(times) == 3
     weekdays = {t.weekday() for t in times}

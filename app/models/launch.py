@@ -110,7 +110,7 @@ class LaunchPresetBase(BaseModel):
 
 class LaunchPresetCreate(LaunchPresetBase):
     @model_validator(mode="after")
-    def derive_dims_from_cells(self) -> "LaunchPresetCreate":
+    def derive_dims_from_cells(self) -> LaunchPresetCreate:
         """When cells are supplied, derive rows/cols and validate uniqueness."""
         if not self.cells:
             return self

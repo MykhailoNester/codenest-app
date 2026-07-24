@@ -14,7 +14,6 @@ import pytest_asyncio
 
 from app.services import insights_service
 
-
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
 
 

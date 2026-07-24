@@ -3,8 +3,8 @@ from datetime import datetime
 
 import aiosqlite
 
-from .activity_service import log_activity
 from ._sql import build_update
+from .activity_service import log_activity
 
 
 async def get_all_documents(
@@ -41,7 +41,7 @@ async def validate_document(db: aiosqlite.Connection, doc_id: int) -> dict | Non
     if exists:
         stat = os.stat(file_path)
         size_bytes = stat.st_size
-        mtime = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+        mtime = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")  # noqa: DTZ006
     return {
         "id": doc_id,
         "file_path": file_path,

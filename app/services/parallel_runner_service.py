@@ -199,7 +199,7 @@ async def create_run(
         # worktrees we managed to create.
         try:
             await db.rollback()
-        except Exception as rb_exc:
+        except Exception as rb_exc:  # noqa: BLE001
             logger.warning("rollback during create_run failure: %s", rb_exc)
         for worktree, branch, _ in created:
             await _cleanup_attempt(project_root, worktree, branch)

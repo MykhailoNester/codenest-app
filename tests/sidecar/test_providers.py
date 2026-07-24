@@ -11,9 +11,9 @@ Covers:
 
 from __future__ import annotations
 
+import aiosqlite
 import pytest
 import pytest_asyncio
-import aiosqlite
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

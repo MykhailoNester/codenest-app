@@ -73,6 +73,7 @@ def create_link(src: Path, dst: Path) -> LinkType:
             ["cmd", "/c", "mklink", "/J", str(dst), str(src)],
             capture_output=True,
             text=True,
+            check=False,
         )
         if result.returncode != 0:
             raise OSError(f"mklink junction failed: {result.stderr.strip()}")
