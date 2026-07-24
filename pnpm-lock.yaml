@@ -25,7 +25,7 @@ importers:
         version: 3.14.8(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tauri-apps/api':
         specifier: ^2
-        version: 2.11.0
+        version: 2.11.1
       '@tauri-apps/plugin-dialog':
         specifier: ^2
         version: 2.7.1
@@ -517,8 +517,8 @@ packages:
   '@tanstack/virtual-core@3.17.6':
     resolution: {integrity: sha512-h0/Ebo18CkOrChlQIhNtQkM5ySUnh/GumQ/D1st3hG2HWUPEF+ILUc2k29UtivCi/9G7w7G3/f7Xyd5cCFbKBw==}
 
-  '@tauri-apps/api@2.11.0':
-    resolution: {integrity: sha512-7CinYODhky9lmO23xHnUFv0Xt43fbtWMyxZcLcRBlFkcgXKuEirBvHpmtJ89YMhyeGcq20Wuc47Fa4XjyniywA==}
+  '@tauri-apps/api@2.11.1':
+    resolution: {integrity: sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==}
 
   '@tauri-apps/cli-darwin-arm64@2.11.1':
     resolution: {integrity: sha512-6eEKMBXsQPCuM1EmvrjT2+aBuxWQuFdKdW8pzNuNQtpq45nEEpBlD5gr8pUeAyOU1DQKlkFaEc/MPBxb/Pfjtg==}
@@ -2172,7 +2172,7 @@ snapshots:
 
   '@crabnebula/tauri-plugin-drag@2.1.0':
     dependencies:
-      '@tauri-apps/api': 2.11.0
+      '@tauri-apps/api': 2.11.1
 
   '@csstools/color-helpers@6.0.2': {}
 
@@ -2383,7 +2383,7 @@ snapshots:
 
   '@tanstack/virtual-core@3.17.6': {}
 
-  '@tauri-apps/api@2.11.0': {}
+  '@tauri-apps/api@2.11.1': {}
 
   '@tauri-apps/cli-darwin-arm64@2.11.1':
     optional: true
@@ -2434,11 +2434,11 @@ snapshots:
 
   '@tauri-apps/plugin-dialog@2.7.1':
     dependencies:
-      '@tauri-apps/api': 2.11.0
+      '@tauri-apps/api': 2.11.1
 
   '@tauri-apps/plugin-global-shortcut@2.3.2':
     dependencies:
-      '@tauri-apps/api': 2.11.0
+      '@tauri-apps/api': 2.11.1
 
   '@testing-library/dom@10.4.1':
     dependencies:
