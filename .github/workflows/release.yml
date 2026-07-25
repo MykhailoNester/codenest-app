@@ -91,19 +91,21 @@ jobs:
       - name: Build sidecar natively
         run: bash scripts/build-sidecar.sh
 
-      # tauri-action's published major tag is v0 (it supports Tauri 2). When the
-      # APPLE_* secrets are empty (forks, or before signing is configured), Tauri
-      # skips real signing and produces an ad-hoc-signed DMG.
+      # Signing is deliberately not wired up: releases are ad-hoc signed and
+      # users clear the quarantine flag themselves (see docs/install.md).
+      #
+      # Do NOT reintroduce `APPLE_*: ${{ secrets.APPLE_* }}` env entries here
+      # unconditionally. A secret that does not exist interpolates to an empty
+      # string rather than being omitted, and Tauri's bundler tests only for the
+      # variable's presence — an empty APPLE_CERTIFICATE makes it attempt
+      # `security import` with no certificate data and fail the bundle step with
+      # "SecKeychainItemImport: One or more parameters ... were not valid".
+      # When a Developer ID certificate is available, gate the env block behind
+      # `if: ${{ secrets.APPLE_CERTIFICATE != '' }}` on a separate step.
       - name: Build and attach DMG
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           releaseId: ${{ needs.draft.outputs.release_id }}
 
