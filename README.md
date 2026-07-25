@@ -3,14 +3,15 @@
 A cross-platform desktop command center for running and supervising AI agent
 teams — built and tested on macOS first.
 
-[![Release](https://img.shields.io/github/v/release/MykhailoNester/codenest)](https://github.com/MykhailoNester/codenest-app/releases)
-[![Downloads](https://img.shields.io/github/downloads/MykhailoNester/codenest/total)](https://github.com/MykhailoNester/codenest-app/releases)
+[![Release](https://img.shields.io/github/v/release/MykhailoNester/codenest-app)](https://github.com/MykhailoNester/codenest-app/releases)
+[![Downloads](https://img.shields.io/github/downloads/MykhailoNester/codenest-app/total)](https://github.com/MykhailoNester/codenest-app/releases)
 ![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-black)
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/MykhailoNester/codenest/ci.yml?label=CI)](https://github.com/MykhailoNester/codenest-app/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/MykhailoNester/codenest-app/ci.yml?branch=master&label=CI)](https://github.com/MykhailoNester/codenest-app/actions/workflows/ci.yml)
 
-<!-- hero demo GIF: docs/media/hero.gif -->
-<!-- <p align="center"><img src="docs/media/hero.gif" alt="Codenest demo" width="820"></p> -->
+<p align="center">
+  <img src="docs/media/hero.gif" alt="Codenest walkthrough — Command Center, Overview, Projects, Agents, Terminal, and Settings" width="860">
+</p>
 
 ## What is Codenest
 
@@ -92,9 +93,70 @@ are provisional and may change:
 - **Plugins** — plugin management.
 - **Sync** — synchronization settings.
 
-<!-- screenshot: docs/media/command-center.png -->
-<!-- screenshot: docs/media/work-board.png -->
-<!-- screenshot: docs/media/terminal.png -->
+## Screenshots
+
+**Command** — the Command Center: a live constellation of your projects and the
+agents attached to them, session counters, and a running activity feed.
+
+<p align="center">
+  <img src="docs/media/command-center.png" alt="Codenest Command Center — live constellation, session counters, running agents, and live activity feed" width="860">
+</p>
+
+Expand the constellation to full screen to pull agents and projects apart, pin
+nodes where you want them, and scrub across the last hour, day, or week.
+
+<p align="center">
+  <img src="docs/media/live-constellation.png" alt="Full-screen live constellation — you, your projects, and their agents as a force-directed graph" width="860">
+</p>
+
+**Overview** — a 24-hour pulse of cost, sessions, and completed tasks, plus an
+attention queue, budget burn, and a momentum timeline of commits and sessions.
+
+<p align="center">
+  <img src="docs/media/overview.png" alt="Codenest Overview — activity pulse, active tasks, attention queue, budget burn, and momentum timeline" width="860">
+</p>
+
+**Agents** — your team of agent definitions, grouped by scope. Codenest ships
+with three org agents (Atlas, Orion, Vega) shared across the workspace.
+
+<p align="center">
+  <img src="docs/media/agents.png" alt="Codenest Agents — Atlas, Orion, and Vega listed with their models and shared workspace scope" width="860">
+</p>
+
+<details>
+<summary>More screenshots — Launch, Projects, Budgets, first-run setup</summary>
+
+<br>
+
+**Launch Agent** — pick a project, provider, and profile, lay out a grid of
+panes, and launch embedded or as a popout window. Save any setup as a preset.
+
+<p align="center">
+  <img src="docs/media/launch-agent.png" alt="Launch Agent dialog — project, provider, pane grid, target, profile, and extra args" width="520">
+</p>
+
+**Projects** — the repositories your agents work in. Imported projects stay
+read-only sources; nothing is ever written into their folders.
+
+<p align="center">
+  <img src="docs/media/projects.png" alt="Codenest Projects — the Command Center workspace alongside an imported project" width="860">
+</p>
+
+**Budgets** — per-workspace or per-project spend caps by period, with an
+optional hard stop that blocks new sessions at 100%.
+
+<p align="center">
+  <img src="docs/media/budgets.png" alt="Codenest Budgets — new budget form and a monthly workspace budget with usage bar" width="860">
+</p>
+
+**First-run setup** — a seven-step wizard that creates the app-managed
+workspace, imports your projects, and connects your AI provider.
+
+<p align="center">
+  <img src="docs/media/first-run-setup.png" alt="Codenest first-run setup — step one explaining workspace and project session modes" width="860">
+</p>
+
+</details>
 
 ## How it works
 
