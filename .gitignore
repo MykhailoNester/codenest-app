@@ -34,6 +34,7 @@ scripts/.env
 .idea/
 .vscode/
 *.swp
+.claude/settings.json
 .claude/settings.local.json
 # Machine-specific config for the /ship pipeline; .example is committed instead
 .claude/pipeline.env
