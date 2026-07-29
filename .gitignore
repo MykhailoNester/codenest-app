@@ -35,6 +35,8 @@ scripts/.env
 .vscode/
 *.swp
 .claude/settings.local.json
+# Machine-specific config for the /ship pipeline; .example is committed instead
+.claude/pipeline.env
 
 # SQLite — DB files and backups are local state, never committed
 data/*.db
