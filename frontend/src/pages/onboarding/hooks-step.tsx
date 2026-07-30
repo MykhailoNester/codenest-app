@@ -1,5 +1,32 @@
 import { useState, type ReactElement } from "react";
-import { useHookSnippet, useHookStatus, useProviders, type Provider } from "../../lib/api";
+import {
+  SIDECAR_BASE_URL,
+  useHookSnippet,
+  useHookStatus,
+  useMintHookSelfTest,
+  useProviders,
+  useVerifyHooks,
+  fetchHookSelfTestReceipt,
+  type HookEventVerdict,
+  type HookSelfTestMint,
+  type HookSelfTestReceipt,
+  type HookSettingsVerify,
+  type HookVerifyReport,
+  type Provider,
+} from "../../lib/api";
+import {
+  isTauriAvailable,
+  runHookProbe,
+  type HookProbeResult,
+} from "../../lib/ipc";
+import {
+  classifyLiveProbe,
+  describeRequestFailure,
+  eventChipTone,
+  verifyBarCopy,
+  type LiveProbeOutcome,
+  type RequestFailure,
+} from "./hook-verify-copy";
 import styles from "./onboarding-page.module.css";
 
 // Fallback shown only while the sidecar snippet endpoint is loading or errors.
@@ -31,14 +58,26 @@ const FALLBACK_SNIPPET = `{
   }
 }`;
 
+function eventChipClassName(status: HookEventVerdict["status"]): string {
+  const tone = eventChipTone(status);
+  if (tone === "ok") return `${styles.eventChip} ${styles.eventChipOk}`;
+  if (tone === "warn") return `${styles.eventChip} ${styles.eventChipWarn}`;
+  return `${styles.eventChip} ${styles.eventChipErr}`;
+}
+
 // ─── Per-provider hook card ───────────────────────────────────────────────────
 
 interface ProviderCardProps {
   provider: Provider;
   index: number;
+  verify?: HookSettingsVerify;
 }
 
-function ProviderHookCard({ provider, index }: ProviderCardProps): ReactElement {
+function ProviderHookCard({
+  provider,
+  index,
+  verify,
+}: ProviderCardProps): ReactElement {
   const [copied, setCopied] = useState(false);
 
   const configHome = provider.default_env["CLAUDE_CONFIG_DIR"] ?? null;
@@ -47,7 +86,11 @@ function ProviderHookCard({ provider, index }: ProviderCardProps): ReactElement 
   const displaySnippet = snippetQ.data?.snippet ?? FALLBACK_SNIPPET;
   const settingsPath =
     snippetQ.data?.settings_path ??
-    (configHome ? `${configHome}/settings.json` : "<config home>/settings.json");
+    (configHome
+      ? `${configHome}/settings.json`
+      : "<config home>/settings.json");
+
+  const otherPath = verify?.found_elsewhere[0];
 
   const copy = async (): Promise<void> => {
     try {
@@ -184,6 +227,37 @@ function ProviderHookCard({ provider, index }: ProviderCardProps): ReactElement 
         </div>
         <code style={codeStyle}>{displaySnippet}</code>
       </div>
+
+      {/* Test hooks result — event chips + file/wrong-file detail. Absent
+          until the user has run Test hooks at least once. */}
+      {verify && (
+        <div style={{ marginTop: 14 }}>
+          <div className={styles.eventChips}>
+            {verify.events.map((ev) => (
+              <span
+                key={ev.event}
+                className={eventChipClassName(ev.status)}
+                title={ev.detail ?? undefined}
+              >
+                {ev.event}
+              </span>
+            ))}
+          </div>
+          {verify.detail && (
+            <p className={styles.hint} style={{ marginTop: 6 }}>
+              {verify.detail}
+            </p>
+          )}
+          {otherPath !== undefined && (
+            <p
+              className={styles.hint}
+              style={{ marginTop: 6, color: "var(--warn, #f59e0b)" }}
+            >
+              Found in <code>{otherPath}</code> — move it to the file above.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -205,7 +279,10 @@ export function HooksStep({
   // useState with lazy init runs exactly once, giving a stable ISO timestamp.
   const [mountedAt] = useState<string>(() => new Date().toISOString());
 
-  // Aggregate hook status — polling every 3 s while displayed.
+  // Aggregate hook status — polling every 3 s while displayed. Kept (see
+  // hook-verify-copy.ts) but no longer the only path to a green bar: it is a
+  // real positive signal if it ever fires, but the self-test below is what
+  // makes the bar reachable without a live Claude Code session.
   const statusQ = useHookStatus(mountedAt, true);
   const connected = statusQ.data?.connected ?? false;
 
@@ -215,13 +292,103 @@ export function HooksStep({
 
   // Providers that have a CLAUDE_CONFIG_DIR — these get cards.
   const wiredProviders = providers.filter(
-    (p) => typeof p.default_env["CLAUDE_CONFIG_DIR"] === "string" &&
+    (p) =>
+      typeof p.default_env["CLAUDE_CONFIG_DIR"] === "string" &&
       p.default_env["CLAUDE_CONFIG_DIR"].trim() !== "",
   );
   // Providers that are enabled but have no config home set.
   const unwiredProviders = providers.filter(
     (p) => !p.default_env["CLAUDE_CONFIG_DIR"]?.trim(),
   );
+
+  const [report, setReport] = useState<HookVerifyReport | undefined>(undefined);
+  const [live, setLive] = useState<LiveProbeOutcome | undefined>(undefined);
+  const [failure, setFailure] = useState<RequestFailure | undefined>(undefined);
+  const [probing, setProbing] = useState(false);
+
+  const verifyM = useVerifyHooks();
+  const mintM = useMintHookSelfTest();
+
+  const onTestHooks = async (): Promise<void> => {
+    setFailure(undefined);
+    // A prior live test's outcome (even an error) must not keep outranking a
+    // fresh, successful report — verifyBarCopy's priority puts `live` above
+    // `report`, so a stale outcome here would pin the bar red after a
+    // correct paste. Mirrors the reset onLiveTest already does for its own
+    // stale `failure`/`live` state.
+    setLive(undefined);
+    try {
+      const r = await verifyM.mutateAsync({
+        config_homes: wiredProviders.map(
+          (p) => p.default_env["CLAUDE_CONFIG_DIR"] ?? "",
+        ),
+      });
+      setReport(r);
+    } catch (e) {
+      setReport(undefined);
+      setFailure(describeRequestFailure("verify", e, SIDECAR_BASE_URL));
+    }
+  };
+
+  const onLiveTest = async (): Promise<void> => {
+    setFailure(undefined);
+    setLive(undefined);
+    if (!isTauriAvailable()) {
+      setFailure(
+        describeRequestFailure(
+          "probe",
+          new Error("the desktop shell is not available"),
+          SIDECAR_BASE_URL,
+        ),
+      );
+      return;
+    }
+    setProbing(true);
+    let mint: HookSelfTestMint;
+    try {
+      mint = await mintM.mutateAsync();
+    } catch (e) {
+      setFailure(describeRequestFailure("mint", e, SIDECAR_BASE_URL));
+      setProbing(false);
+      return;
+    }
+    try {
+      let probe: HookProbeResult;
+      try {
+        probe = await runHookProbe(mint.url, mint.max_time_seconds);
+      } catch (e) {
+        setFailure(describeRequestFailure("probe", e, SIDECAR_BASE_URL));
+        return;
+      }
+      let receipt: HookSelfTestReceipt;
+      try {
+        receipt = await fetchHookSelfTestReceipt(mint.token);
+        if (!receipt.received) {
+          // C (the curl POST) and D (this read) can race by a few ms — one
+          // retry after a short delay before concluding it never arrived.
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          receipt = await fetchHookSelfTestReceipt(mint.token);
+        }
+      } catch (e) {
+        setFailure(describeRequestFailure("receipt", e, SIDECAR_BASE_URL));
+        return;
+      }
+      setLive(classifyLiveProbe(probe, receipt, mint.url));
+    } finally {
+      setProbing(false);
+    }
+  };
+
+  const tauriAvailable = isTauriAvailable();
+  const barCopy = verifyBarCopy(report, live, connected, failure);
+  const verifyToneClass =
+    barCopy.tone === "ok"
+      ? styles.verifyOn
+      : barCopy.tone === "warn"
+        ? styles.verifyWarn
+        : barCopy.tone === "error"
+          ? styles.verifyErr
+          : styles.verifyIdle;
 
   return (
     <>
@@ -263,9 +430,20 @@ export function HooksStep({
           </div>
         )}
 
-        {wiredProviders.map((provider, i) => (
-          <ProviderHookCard key={provider.id} provider={provider} index={i} />
-        ))}
+        {wiredProviders.map((provider, i) => {
+          const configHome = provider.default_env["CLAUDE_CONFIG_DIR"] ?? "";
+          const verify =
+            report?.results.find((r) => r.config_home === configHome) ??
+            report?.results[i];
+          return (
+            <ProviderHookCard
+              key={provider.id}
+              provider={provider}
+              index={i}
+              verify={verify}
+            />
+          );
+        })}
 
         {/* Warn about providers that have no config home */}
         {unwiredProviders.length > 0 && (
@@ -310,16 +488,47 @@ export function HooksStep({
         powers per-file cost attribution.
       </p>
 
-      {/* Aggregate verification bar */}
+      {/* Actions — self-test the wiring without a Claude Code session. */}
       <div
-        className={connected ? `${styles.verify} ${styles.verifyOn}` : styles.verify}
+        style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}
       >
+        <div>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.btnGhost}`}
+            onClick={() => void onTestHooks()}
+            disabled={wiredProviders.length === 0 || verifyM.isPending}
+          >
+            {verifyM.isPending ? "Testing…" : "Test hooks"}
+          </button>
+          {wiredProviders.length === 0 && (
+            <p className={styles.hint} style={{ marginTop: 4 }}>
+              No provider has a config home yet — set CLAUDE_CONFIG_DIR on the
+              Providers page.
+            </p>
+          )}
+        </div>
+        <div>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.btnGhost}`}
+            onClick={() => void onLiveTest()}
+            disabled={!tauriAvailable || probing}
+          >
+            {probing ? "Running…" : "Run live test"}
+          </button>
+          {!tauriAvailable && (
+            <p className={styles.hint} style={{ marginTop: 4 }}>
+              The live test needs the desktop app.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Aggregate verification bar */}
+      <div className={`${styles.verify} ${verifyToneClass}`}>
         <span className={styles.verifyDot} />
-        <span className={styles.verifyText}>
-          {connected
-            ? "Hook received — Claude Code is connected to the sidecar."
-            : "Waiting for first hook ping… start a Claude Code session after pasting the block."}
-        </span>
+        <span className={styles.verifyText}>{barCopy.message}</span>
       </div>
     </>
   );

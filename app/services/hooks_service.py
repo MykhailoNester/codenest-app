@@ -14,12 +14,40 @@ the ``|| true`` makes curl always exit 0 so the hook silently no-ops instead.
 before the harness kills it — the sidecar is never on the critical path. Each
 event carries a ``"matcher": "*"`` so every session is captured regardless of
 cwd.
+
+Self-test verification
+-----------------------
+``hooks_status`` only ever goes green on an inbound ping from a *real* Claude
+Code session, which onboarding has no way to produce. This module also
+supports verifying the wiring without one:
+
+* ``verify_settings_files`` reads each configured ``settings.json`` off the
+  event loop (``asyncio.to_thread``, read-only — this module never writes a
+  user's file) and diffs its ``hooks`` block against what
+  ``build_hook_settings`` would emit, per event. It never returns file
+  contents, only the structural verdict.
+* ``mint_self_test`` / ``record_self_test`` / ``read_self_test`` back a true
+  end-to-end check: the frontend hands the minted URL to the Rust shell,
+  which spawns the same ``curl`` a real hook would run, so an inbound POST is
+  actually observed. Token state is an in-process ``OrderedDict`` (this is a
+  single uvicorn process, no ``--workers``) keyed on ``time.monotonic()`` — no
+  ``datetime`` is involved and no schema change is needed.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import re
+import secrets
+import time
+from collections import OrderedDict
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 import aiosqlite
 
@@ -58,6 +86,20 @@ def settings_json_path(config_home: str | None) -> str:
     return str(Path(home).expanduser() / "settings.json")
 
 
+def _curl_command_for_url(url: str) -> str:
+    """Shell command that POSTs the hook payload (stdin) to *url*.
+
+    Shared by the real hook builder (``_curl_command``) and the self-test
+    minter (``mint_self_test``) so the two can never drift apart — the
+    live-probe test asserts the two are the same command, URL substituted.
+    """
+    return (
+        f"curl -s --max-time {_CURL_MAX_TIME} -X POST "
+        "-H 'Content-Type: application/json' --data-binary @- "
+        f"{url} >/dev/null 2>&1 || true"
+    )
+
+
 def _curl_command(base: str, ep: str) -> str:
     """Shell command that POSTs the hook payload (stdin) to the sidecar.
 
@@ -67,11 +109,7 @@ def _curl_command(base: str, ep: str) -> str:
     Code never surfaces a hook error. Output is discarded (``>/dev/null 2>&1``)
     to keep ``SessionStart`` / ``UserPromptSubmit`` stdout out of the context.
     """
-    return (
-        f"curl -s --max-time {_CURL_MAX_TIME} -X POST "
-        "-H 'Content-Type: application/json' --data-binary @- "
-        f"{base}/api/v1/hooks/{ep} >/dev/null 2>&1 || true"
-    )
+    return _curl_command_for_url(f"{base}/api/v1/hooks/{ep}")
 
 
 def build_hook_settings(base_url: str | None = None) -> dict:
@@ -136,3 +174,431 @@ async def hooks_status(db: aiosqlite.Connection, since: str | None = None) -> di
     else:
         connected = sessions > 0
     return {"connected": connected, "sessions": sessions, "last_ping_at": last}
+
+
+# ─── settings.json hooks-block diff (self-test, part 1) ──────────────────────
+#
+# Pure functions below (no filesystem, no DB) so the diff logic itself is
+# exhaustively unit-testable; `_read_settings` / `verify_settings_files` are
+# the thin I/O layer that feeds them an already-parsed body.
+
+# Fixed mis-paste destinations. The sibling `<config_home>/settings.local.json`
+# is NOT here — it is derived from the target inside `_alternate_settings_paths`.
+_ALT_SETTINGS_CANDIDATES: tuple[str, ...] = (
+    "~/.claude/settings.json",
+    "~/.claude.json",
+)
+
+# ``~/.claude.json`` accumulates project history and is routinely
+# multi-megabyte on a real machine — it will usually be skipped as
+# "unreadable" below and so will rarely register as a `found_elsewhere` hit.
+# Accepted, not a bug: of the three mis-paste candidates it is the least
+# likely destination, and reading a multi-MB file synchronously (even off the
+# event loop) on every "Test hooks" click is not worth doing for that case.
+_MAX_SETTINGS_BYTES = 2 * 1024 * 1024
+
+# Hosts that resolve to "this machine" for the purposes of the diff — a
+# `settings.json` hand-wired with any of these must not be reported as a
+# mismatch against the sidecar's own base URL just because the literal host
+# string differs (see `_equivalent_base_urls`).
+_LOOPBACK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "[::1]"})
+
+# Canonical iteration order for the loopback aliases. `_LOOPBACK_HOSTS` above
+# is a set (membership only); str hashing is randomized per process, so an
+# order derived from iterating it would make a mismatch detail name a
+# different "expected" base URL from run to run. This keeps it deterministic.
+_LOOPBACK_HOST_ORDER: tuple[str, ...] = ("localhost", "127.0.0.1", "[::1]")
+
+
+def hook_endpoint_path(event: str) -> str | None:
+    """'SessionStart' -> '/api/v1/hooks/session-start'; None for unknown events."""
+    for known_event, ep in _HOOK_EVENTS:
+        if known_event == event:
+            return f"/api/v1/hooks/{ep}"
+    return None
+
+
+def _equivalent_base_urls(base_url: str) -> tuple[str, ...]:
+    """('http://localhost:8002',) -> the same URL with each loopback alias.
+
+    Returns a single-element tuple unchanged when *base_url*'s host is not one
+    of the loopback aliases (nothing to normalise). *base_url* itself is
+    always first, so callers that report "instead of <equivalents[0]>" always
+    name the base the sidecar is actually using.
+    """
+    parsed = urlsplit(base_url)
+    hostname = parsed.hostname or ""
+    host_token = f"[{hostname}]" if ":" in hostname else hostname
+    if host_token not in _LOOPBACK_HOSTS:
+        return (base_url,)
+    port_suffix = f":{parsed.port}" if parsed.port is not None else ""
+    ordered_hosts = [
+        host_token,
+        *(h for h in _LOOPBACK_HOST_ORDER if h != host_token),
+    ]
+    return tuple(f"{parsed.scheme}://{h}{port_suffix}" for h in ordered_hosts)
+
+
+def _endpoint_pattern(target_path: str) -> re.Pattern[str]:
+    """Regex matching *target_path* with a boundary so e.g. ``/stop`` does not
+    match inside a hypothetical ``/stop-foo``."""
+    return re.compile(re.escape(target_path) + r"(?![\w-])")
+
+
+def _extract_base(command: str, target_path: str) -> str | None:
+    """Best-effort extraction of the base URL a command actually targets, for
+    the "points at <found base> instead of <expected>" mismatch detail."""
+    match = re.search(
+        r"(https?://\S+?)" + re.escape(target_path) + r"(?![\w-])", command
+    )
+    return match.group(1) if match else None
+
+
+def _hook_is_ours(hook: dict[str, Any], pattern: re.Pattern[str]) -> bool:
+    """A hook dict "is ours" when its ``command`` or legacy ``url`` targets
+    one of our endpoints — regardless of whether it is otherwise well-formed."""
+    command = hook.get("command")
+    if isinstance(command, str) and pattern.search(command):
+        return True
+    url = hook.get("url")
+    return isinstance(url, str) and pattern.search(url) is not None
+
+
+def _verdict_for_hook(
+    hook: dict[str, Any],
+    matcher: object,
+    target_path: str,
+    equivalents: tuple[str, ...],
+) -> tuple[str, str | None]:
+    """Verdict for a single ours-matching hook already known to be wrapped in
+    a ``{matcher, hooks[]}`` entry."""
+    if hook.get("type") != "command":
+        return "mismatch", 'uses the legacy "http" hook type instead of "command"'
+
+    command = hook.get("command")
+    if not isinstance(command, str):
+        return "mismatch", "hook command is missing or not a string"
+
+    if not any(f"{base}{target_path}" in command for base in equivalents):
+        found = _extract_base(command, target_path)
+        expected = equivalents[0] if equivalents else ""
+        detail = (
+            f"points at {found} instead of {expected}"
+            if found
+            else f"command does not target {expected}"
+        )
+        return "mismatch", detail
+
+    if matcher != "*":
+        return "mismatch", f'hook matcher is "{matcher}", not "*"'
+
+    return "ok", None
+
+
+def _classify_event(
+    entries: object, event: str, equivalents: tuple[str, ...]
+) -> tuple[str, str | None]:
+    target_path = hook_endpoint_path(event)
+    assert target_path is not None  # event always comes from _HOOK_EVENTS
+    pattern = _endpoint_pattern(target_path)
+
+    if not isinstance(entries, list):
+        return "missing", None
+
+    best: tuple[str, str | None] | None = None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        wrapped = entry.get("hooks")
+        if isinstance(wrapped, list):
+            matcher = entry.get("matcher")
+            for hook in wrapped:
+                if not isinstance(hook, dict) or not _hook_is_ours(hook, pattern):
+                    continue
+                status, detail = _verdict_for_hook(
+                    hook, matcher, target_path, equivalents
+                )
+                if status == "ok":
+                    return "ok", None
+                if best is None:
+                    best = (status, detail)
+        elif _hook_is_ours(entry, pattern):
+            # Flat form: a hook dict directly in the event array, not wrapped
+            # in a {matcher, hooks[]} object — the pre-`build_hook_settings`
+            # shape some hand-edited files may still use.
+            return (
+                "malformed",
+                "hook entries must be wrapped in a {matcher, hooks[]} object",
+            )
+
+    return best if best is not None else ("missing", None)
+
+
+def _all_missing() -> list[dict[str, Any]]:
+    return [
+        {"event": event, "status": "missing", "detail": None}
+        for event, _ep in _HOOK_EVENTS
+    ]
+
+
+def classify_settings_hooks(
+    parsed: object, base_url: str
+) -> tuple[str, list[dict[str, Any]], str | None]:
+    """(file_status, per-event verdicts, detail) for an ALREADY-PARSED settings body.
+
+    file_status is one of 'ok' | 'partial' | 'absent'. Matching is containment,
+    not equality: a real settings.json will have other hooks, other matchers,
+    and other top-level keys, so this only asks "does *some* entry for this
+    event target our endpoint under a wildcard matcher".
+    """
+    if not isinstance(parsed, dict):
+        return "absent", _all_missing(), "settings.json does not contain a JSON object"
+
+    hooks_block = parsed.get("hooks")
+    if hooks_block is None:
+        return "absent", _all_missing(), 'no top-level "hooks" key'
+    if not isinstance(hooks_block, dict):
+        return "absent", _all_missing(), 'the top-level "hooks" key must be an object'
+
+    equivalents = _equivalent_base_urls(base_url)
+    verdicts: list[dict[str, Any]] = []
+    for event, _ep in _HOOK_EVENTS:
+        status, detail = _classify_event(hooks_block.get(event), event, equivalents)
+        verdicts.append({"event": event, "status": status, "detail": detail})
+
+    statuses = {v["status"] for v in verdicts}
+    if statuses == {"ok"}:
+        file_status = "ok"
+    elif statuses <= {"missing"}:
+        file_status = "absent"
+    else:
+        file_status = "partial"
+    return file_status, verdicts, None
+
+
+# ─── settings.json hooks-block diff (self-test, part 2: filesystem) ──────────
+
+
+def _read_settings(path: Path) -> tuple[str, object | None, str | None]:
+    """(status, parsed, detail) — status in
+    'ok' | 'missing_file' | 'invalid_json' | 'unreadable'. Blocking; called only
+    from the to_thread hop below. Only ever opens *path* for reading — there is
+    no write path anywhere in this module.
+    """
+    if not path.is_absolute():
+        return "unreadable", None, f"resolved path is not absolute: {path}"
+
+    if path.is_dir():
+        return "unreadable", None, f"{path} is a directory, not a file"
+
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError:
+        return "missing_file", None, None
+    except OSError as exc:
+        return "unreadable", None, str(exc)
+
+    if size > _MAX_SETTINGS_BYTES:
+        return (
+            "unreadable",
+            None,
+            f"{path} is larger than the {_MAX_SETTINGS_BYTES}-byte read limit",
+        )
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "missing_file", None, None
+    except UnicodeDecodeError:
+        return "unreadable", None, f"{path} is not valid UTF-8"
+    except OSError as exc:
+        return "unreadable", None, str(exc)
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return "invalid_json", None, f"could not parse JSON: {exc}"
+
+    return "ok", parsed, None
+
+
+def _alternate_settings_paths(target: Path) -> list[Path]:
+    """Bounded sibling scan for the "pasted into the wrong file" signal.
+
+    Checks the sibling `settings.local.json` next to *target*, plus the two
+    fixed candidates in `_ALT_SETTINGS_CANDIDATES` — the three plausible
+    mis-paste destinations. Walking the whole home directory would be slow and
+    invasive, so this stays a short, fixed list. Excludes *target* itself and
+    de-duplicates while preserving order.
+    """
+    candidates = [target.parent / "settings.local.json"]
+    candidates.extend(Path(p).expanduser() for p in _ALT_SETTINGS_CANDIDATES)
+    seen: set[Path] = {target}
+    result: list[Path] = []
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        result.append(candidate)
+    return result
+
+
+def _overall_status(results: list[dict[str, Any]]) -> str:
+    if not results:
+        return "absent"
+    if any(r["file_status"] in ("invalid_json", "unreadable") for r in results):
+        return "error"
+    if all(r["file_status"] == "ok" for r in results):
+        return "ok"
+    if all(r["file_status"] in ("absent", "missing_file") for r in results):
+        return "absent"
+    return "partial"
+
+
+def _verify_sync(config_homes: Sequence[str], base: str) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for config_home in config_homes:
+        target = Path(settings_json_path(config_home))
+        read_status, parsed, read_detail = _read_settings(target)
+
+        if read_status == "ok":
+            file_status, events, detail = classify_settings_hooks(parsed, base)
+        else:
+            file_status, events, detail = read_status, _all_missing(), read_detail
+
+        found_elsewhere: list[str] = []
+        if file_status != "ok":
+            for alt in _alternate_settings_paths(target):
+                alt_status, alt_parsed, _alt_detail = _read_settings(alt)
+                if alt_status != "ok":
+                    continue
+                _, alt_events, _alt_detail2 = classify_settings_hooks(alt_parsed, base)
+                if any(e["status"] != "missing" for e in alt_events):
+                    found_elsewhere.append(str(alt))
+
+        results.append(
+            {
+                "config_home": config_home,
+                "settings_path": str(target),
+                "file_status": file_status,
+                "detail": detail,
+                "events": events,
+                "found_elsewhere": found_elsewhere,
+            }
+        )
+
+    return {
+        "base_url": base,
+        "expected_events": [event for event, _ep in _HOOK_EVENTS],
+        "overall": _overall_status(results),
+        "results": results,
+    }
+
+
+async def verify_settings_files(
+    config_homes: Sequence[str], base_url: str | None = None
+) -> dict[str, Any]:
+    """Diff each config home's settings.json against `build_hook_settings()`.
+
+    Read-only, off the event loop (one `asyncio.to_thread` hop for the whole
+    request — precedent: `marketplace_service.py`'s `exists_flags`), so a slow
+    or huge settings.json never stalls any other request the sidecar is
+    handling.
+    """
+    return await asyncio.to_thread(
+        _verify_sync, list(config_homes), (base_url or sidecar_base_url()).rstrip("/")
+    )
+
+
+# ─── Self-test token state (self-test, part 3: the live probe) ───────────────
+#
+# In-process only — a migration for a 10-minute ephemeral nonce would be dead
+# weight, and "a freshly migrated DB ships empty" argues against a table whose
+# only content is transient. Safe because there is exactly one uvicorn process
+# (no `--workers`). All timing uses `time.monotonic()`, never `datetime`, so no
+# DTZ-rule suppression is needed anywhere in this module.
+
+_SELF_TEST_TTL_SECONDS = 600
+_SELF_TEST_MAX = 16
+
+
+@dataclass
+class _SelfTest:
+    created_at: float  # time.monotonic()
+    received_at: float | None = None
+
+
+_self_tests: OrderedDict[str, _SelfTest] = OrderedDict()
+
+
+def _prune_self_tests(now: float) -> None:
+    expired = [
+        token
+        for token, entry in _self_tests.items()
+        if now - entry.created_at > _SELF_TEST_TTL_SECONDS
+    ]
+    for token in expired:
+        del _self_tests[token]
+
+
+def mint_self_test(base_url: str | None = None) -> dict[str, Any]:
+    """Mint a one-shot probe token and the sidecar URL + curl command for it.
+
+    `command` is built via `_curl_command_for_url` — the same helper the real
+    hook command uses — so the live probe can never drift from what a pasted
+    hook actually runs. `max_time_seconds` is `_CURL_MAX_TIME`, handed to Rust
+    rather than duplicated there.
+    """
+    now = time.monotonic()
+    _prune_self_tests(now)
+    while len(_self_tests) >= _SELF_TEST_MAX:
+        _self_tests.popitem(last=False)  # evict oldest
+
+    token = secrets.token_hex(16)
+    _self_tests[token] = _SelfTest(created_at=now)
+
+    base = (base_url or sidecar_base_url()).rstrip("/")
+    url = f"{base}/api/v1/workspace/hooks/self-test/{token}"
+    return {
+        "token": token,
+        "url": url,
+        "max_time_seconds": _CURL_MAX_TIME,
+        "expires_in_seconds": _SELF_TEST_TTL_SECONDS,
+        "command": _curl_command_for_url(url),
+    }
+
+
+def record_self_test(token: str) -> bool:
+    """Mark *token* as received. Returns False for an unknown/expired token —
+    the ingest endpoint still answers `continue: true` either way; a probe
+    must never be able to block a real hook."""
+    now = time.monotonic()
+    _prune_self_tests(now)
+    entry = _self_tests.get(token)
+    if entry is None:
+        return False
+    entry.received_at = now
+    return True
+
+
+def read_self_test(token: str) -> dict[str, Any]:
+    """The self-test receipt. `known: False` for an unknown/expired token —
+    never an HTTP error, so any thrown error at this endpoint is genuinely a
+    transport/app failure (the property the frontend's failure mapping relies
+    on)."""
+    now = time.monotonic()
+    _prune_self_tests(now)
+    entry = _self_tests.get(token)
+    if entry is None:
+        return {"known": False, "received": False, "elapsed_ms": None}
+    received_at = entry.received_at
+    elapsed_ms = (
+        round((received_at - entry.created_at) * 1000)
+        if received_at is not None
+        else None
+    )
+    return {
+        "known": True,
+        "received": received_at is not None,
+        "elapsed_ms": elapsed_ms,
+    }

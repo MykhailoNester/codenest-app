@@ -539,6 +539,55 @@ export async function getRecentCommits(
 }
 
 // ---------------------------------------------------------------------------
+// Hook self-test probe
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a single live hook probe (a real `curl` POST run by the shell).
+ *
+ * Camel-case to match the Rust `HookProbeResult`
+ * (`#[serde(rename_all = "camelCase")]` in `src-tauri/src/commands/hooks.rs`).
+ */
+export interface HookProbeResult {
+  httpStatus: number | null;
+  exitCode: number | null;
+  curlMissing: boolean;
+  durationMs: number;
+  stderr: string;
+}
+
+/**
+ * Whether the Tauri bridge is available in the current runtime.
+ *
+ * False in a plain browser (e.g. Vite opened outside the shell) and under
+ * vitest, where `invoke` would otherwise throw. Same check as
+ * `stores/terminal-store.ts`'s `listen` guard.
+ */
+export function isTauriAvailable(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/**
+ * Run the same `curl` command a pasted Claude Code hook would run, against
+ * the sidecar's self-test endpoint (see `useMintHookSelfTest` in `api.ts`).
+ *
+ * Proves a shell-spawned `curl` can reach the sidecar — not just that the
+ * webview can. A plain `fetch()` from here would only prove the latter, and
+ * would pass even with `curl` missing from PATH.
+ *
+ * Rejects (does not swallow) when the Rust shell refuses the URL; the caller
+ * decides how to surface that.
+ */
+export async function runHookProbe(
+  url: string,
+  maxTimeSeconds: number,
+): Promise<HookProbeResult> {
+  return invoke<HookProbeResult>("run_hook_probe", {
+    args: { url, maxTimeSeconds },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Path existence checks
 // ---------------------------------------------------------------------------
 

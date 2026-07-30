@@ -776,10 +776,7 @@ export function useRichImportProjects(): UseMutationResult<
 // ─── Taxonomies ────────────────────────────────────────────────────
 
 export type TaxonomyKind =
-  | "task_status"
-  | "task_priority"
-  | "workflow_status"
-  | "workflow_priority";
+  "task_status" | "task_priority" | "workflow_status" | "workflow_priority";
 
 export interface Taxonomy {
   id: number;
@@ -1006,12 +1003,7 @@ export function useSaveMarkdownFile(): UseMutationResult<
 // ─── Marketplace / Agent Gallery ─────────────────────────────────────────────
 
 export type MarketplaceItemType =
-  | "agent"
-  | "skill"
-  | "subagent"
-  | "hook"
-  | "mcp"
-  | "command";
+  "agent" | "skill" | "subagent" | "hook" | "mcp" | "command";
 
 export interface MarketplaceItem {
   slug: string;
@@ -1766,8 +1758,7 @@ export function useScheduleRun(
 ): UseQueryResult<ScheduleRun, SidecarError> {
   return useQuery<ScheduleRun, SidecarError>({
     queryKey: ["schedule-run", runId ?? 0],
-    queryFn: () =>
-      fetchSidecar<ScheduleRun>(`/api/v1/schedules/runs/${runId}`),
+    queryFn: () => fetchSidecar<ScheduleRun>(`/api/v1/schedules/runs/${runId}`),
     enabled: typeof runId === "number" && runId > 0,
     staleTime: 10_000,
   });
@@ -1784,9 +1775,7 @@ export function useScheduleRunTranscript(
   return useQuery<RunTranscript, SidecarError>({
     queryKey: ["schedule-run-transcript", runId ?? 0],
     queryFn: () =>
-      fetchSidecar<RunTranscript>(
-        `/api/v1/schedules/runs/${runId}/transcript`,
-      ),
+      fetchSidecar<RunTranscript>(`/api/v1/schedules/runs/${runId}/transcript`),
     enabled: typeof runId === "number" && runId > 0,
     staleTime: 30_000,
   });
@@ -1865,11 +1854,7 @@ export function useSetScheduleRetention(): UseMutationResult<
 // ─── Omni-Bar Intent Classifier ──────────────────────────────────────────────
 
 export type IntentKind =
-  | "command-palette"
-  | "slash"
-  | "reference"
-  | "search"
-  | "prompt";
+  "command-palette" | "slash" | "reference" | "search" | "prompt";
 
 export interface IntentResult {
   kind: IntentKind;
@@ -2584,7 +2569,10 @@ export interface ConfigHomesResult {
   config_homes: string[];
 }
 
-export function useConfigHomes(): UseQueryResult<ConfigHomesResult, SidecarError> {
+export function useConfigHomes(): UseQueryResult<
+  ConfigHomesResult,
+  SidecarError
+> {
   return useQuery<ConfigHomesResult, SidecarError>({
     queryKey: ["providers", "config-homes"],
     queryFn: () =>
@@ -4186,14 +4174,11 @@ export function useToggleWorkspaceProjectSkill(): UseMutationResult<
     { projectId: number; skillId: number; enabled: boolean }
   >({
     mutationFn: ({ projectId, skillId, enabled }) =>
-      fetchSidecar(
-        `${CC_BASE}/projects/${projectId}/skills/${skillId}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled }),
-        },
-      ),
+      fetchSidecar(`${CC_BASE}/projects/${projectId}/skills/${skillId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      }),
     onSuccess: (_data, { projectId }) => {
       void qc.invalidateQueries({
         queryKey: ["workspace", "project", projectId, "skills"],
@@ -4303,6 +4288,97 @@ export function useHookStatus(
     enabled,
     refetchInterval: enabled ? 3000 : false,
   });
+}
+
+// ─── Hook self-test verification (Test hooks / Run live test) ───────────────
+//
+// Onboarding step 05's verify bar only ever went green on an inbound ping
+// from a real Claude Code session, which the wizard has no way to produce.
+// These back a self-test instead: `useVerifyHooks` diffs each configured
+// settings.json against what the sidecar would emit; `useMintHookSelfTest` +
+// `fetchHookSelfTestReceipt` back a true end-to-end probe (paired with
+// `runHookProbe` in `lib/ipc.ts`, which runs the actual curl).
+
+export interface HookEventVerdict {
+  event: string;
+  status: "ok" | "missing" | "mismatch" | "malformed";
+  detail: string | null;
+}
+
+export interface HookSettingsVerify {
+  config_home: string;
+  settings_path: string;
+  file_status:
+    | "ok"
+    | "partial"
+    | "absent"
+    | "missing_file"
+    | "invalid_json"
+    | "unreadable";
+  detail: string | null;
+  events: HookEventVerdict[];
+  found_elsewhere: string[];
+}
+
+export interface HookVerifyReport {
+  base_url: string;
+  expected_events: string[];
+  overall: "ok" | "partial" | "absent" | "error";
+  results: HookSettingsVerify[];
+}
+
+export function useVerifyHooks(): UseMutationResult<
+  HookVerifyReport,
+  SidecarError,
+  { config_homes: string[] }
+> {
+  return useMutation<
+    HookVerifyReport,
+    SidecarError,
+    { config_homes: string[] }
+  >({
+    mutationFn: (body) =>
+      fetchSidecar<HookVerifyReport>("/api/v1/workspace/hooks/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+  });
+}
+
+export interface HookSelfTestMint {
+  token: string;
+  url: string;
+  max_time_seconds: number;
+  expires_in_seconds: number;
+  command: string;
+}
+
+export function useMintHookSelfTest(): UseMutationResult<
+  HookSelfTestMint,
+  SidecarError,
+  void
+> {
+  return useMutation<HookSelfTestMint, SidecarError, void>({
+    mutationFn: () =>
+      fetchSidecar<HookSelfTestMint>("/api/v1/workspace/hooks/self-test", {
+        method: "POST",
+      }),
+  });
+}
+
+export interface HookSelfTestReceipt {
+  known: boolean;
+  received: boolean;
+  elapsed_ms: number | null;
+}
+
+export function fetchHookSelfTestReceipt(
+  token: string,
+): Promise<HookSelfTestReceipt> {
+  return fetchSidecar<HookSelfTestReceipt>(
+    `/api/v1/workspace/hooks/self-test/${encodeURIComponent(token)}`,
+  );
 }
 
 export function useImportPreview(): UseMutationResult<
@@ -4572,8 +4648,7 @@ export function useConfiguredAgents(): UseQueryResult<
 > {
   return useQuery<ConfiguredAgentsResult, SidecarError>({
     queryKey: ["command-center", "agents"],
-    queryFn: () =>
-      fetchSidecar<ConfiguredAgentsResult>(`${CC_BASE}/agents`),
+    queryFn: () => fetchSidecar<ConfiguredAgentsResult>(`${CC_BASE}/agents`),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });

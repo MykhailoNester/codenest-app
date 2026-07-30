@@ -837,6 +837,74 @@ select.fld option {
   flex: 1;
 }
 
+/* Idle — nothing has run yet. Deliberately NOT the pulsing amber (that reads
+   as "waiting on you", the exact false-hope signal this step used to send). */
+.verifyIdle {
+  border-color: var(--line-2);
+  background: rgba(255, 255, 255, 0.02);
+}
+.verifyIdle .verifyDot {
+  background: var(--fg-4, #6b7280);
+  box-shadow: none;
+  animation: none;
+}
+/* Warn — some events missing/stale, or the live test token expired. */
+.verifyWarn {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: var(--warn-soft, rgba(245, 158, 11, 0.14));
+}
+.verifyWarn .verifyDot {
+  background: var(--warn, #f59e0b);
+  box-shadow: 0 0 8px var(--warn, #f59e0b);
+  animation: none;
+}
+/* Error — a request failed (sidecar unreachable/errored, probe rejected) or
+   the live probe got a bad/no response. */
+.verifyErr {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: var(--err-soft, rgba(239, 68, 68, 0.14));
+}
+.verifyErr .verifyDot {
+  background: var(--err, #ef4444);
+  box-shadow: 0 0 8px var(--err, #ef4444);
+  animation: none;
+}
+
+/* Per-event chips on each provider card (Test hooks result). */
+.eventChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.eventChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+  background: rgba(255, 255, 255, 0.02);
+}
+.eventChipOk {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: var(--ok-soft, rgba(34, 197, 94, 0.12));
+  color: var(--ok, #22c55e);
+}
+.eventChipWarn {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: var(--warn-soft, rgba(245, 158, 11, 0.12));
+  color: var(--warn, #f59e0b);
+}
+.eventChipErr {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: var(--err-soft, rgba(239, 68, 68, 0.12));
+  color: var(--err, #ef4444);
+}
+
 /* ── Agents scope toggle ────────────────────────────────────────── */
 .segToggle {
   display: inline-flex;
@@ -1002,7 +1070,10 @@ select.fld option {
   .bgOrbBlue,
   .bgOrbViolet,
   .bgOrbCyan,
-  .verifyDot {
+  .verifyDot,
+  .verifyIdle .verifyDot,
+  .verifyWarn .verifyDot,
+  .verifyErr .verifyDot {
     animation: none;
   }
 }

@@ -12,6 +12,7 @@ use commands::browser::{
 };
 use commands::docs::{open_in_editor, open_path, read_file_text, reveal_in_finder};
 use commands::git::get_recent_commits;
+use commands::hooks::run_hook_probe;
 use commands::screenshot::{
     capture_screenshot, close_screenshot_ring, open_screenshot_ring, ring_capture,
 };
@@ -544,6 +545,7 @@ pub fn run() {
             close_screenshot_ring,
             ring_capture,
             get_schedule_run_pty_id,
+            run_hook_probe,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

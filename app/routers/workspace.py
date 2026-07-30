@@ -5,8 +5,15 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from app.database import get_db
+from app.models.hooks import (
+    HookSelfTestIngest,
+    HookSelfTestMint,
+    HookSelfTestReceipt,
+    HookVerifyReport,
+)
 from app.models.workspace import Workspace
 from app.services import hooks_service, workspace_context_service, workspace_service
 
@@ -49,3 +56,52 @@ async def get_hook_status(since: str | None = None) -> dict:
     """Verify signal. Pass ``since`` (a prior last_ping_at) to require a fresh ping."""
     db = await get_db()
     return await hooks_service.hooks_status(db, since)
+
+
+class HookVerifyRequest(BaseModel):
+    config_homes: list[str] = []
+
+
+@router.post("/hooks/verify")
+async def post_hook_verify(body: HookVerifyRequest) -> HookVerifyReport:
+    """Diff each requested config home's settings.json against build_hook_settings().
+
+    Never 4xx/5xx on bad user data — a missing file, unreadable file or invalid
+    JSON is a per-result ``file_status``, not an HTTP error, because each is a
+    real user situation the UI must explain rather than a request the client
+    got wrong.
+    """
+    return HookVerifyReport(
+        **await hooks_service.verify_settings_files(body.config_homes)
+    )
+
+
+@router.post("/hooks/self-test")
+async def post_hook_self_test_mint() -> HookSelfTestMint:
+    """Mint a one-shot self-test token for the Rust shell's live curl probe."""
+    return HookSelfTestMint(**hooks_service.mint_self_test())
+
+
+@router.post("/hooks/self-test/{token}")
+async def post_hook_self_test_ingest(token: str) -> HookSelfTestIngest:
+    """The curl target the live probe POSTs to. Body is ignored — curl's payload
+    is irrelevant to a self-test. Deliberately not routed through
+    ``agent_service``: a probe must never create an ``agent_sessions`` row.
+
+    Constructed via alias (``**{"continue": ...}``) rather than the
+    ``continue_`` field name: mypy synthesizes ``HookSelfTestIngest.__init__``
+    from the field's declared alias (PEP 681), independent of the model's
+    runtime ``populate_by_name`` setting, so ``continue_=...`` is rejected
+    statically even though pydantic itself would accept it.
+    """
+    return HookSelfTestIngest(
+        **{"continue": True, "recorded": hooks_service.record_self_test(token)}
+    )
+
+
+@router.get("/hooks/self-test/{token}")
+async def get_hook_self_test_receipt(token: str) -> HookSelfTestReceipt:
+    """The self-test receipt. Returns ``known: false`` for an unknown/expired
+    token rather than a 404, so a thrown error here is always a genuine
+    transport/app failure the frontend can map unambiguously."""
+    return HookSelfTestReceipt(**hooks_service.read_self_test(token))
