@@ -8,7 +8,7 @@ pub struct ReadFileTextResult {
     pub size_bytes: u64,
 }
 
-fn require_home_scope(path: &str) -> Result<(), String> {
+pub(crate) fn require_home_scope(path: &str) -> Result<(), String> {
     let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
     if !path.starts_with(&home) {
         return Err(format!("path is outside $HOME; refusing: {path}"));

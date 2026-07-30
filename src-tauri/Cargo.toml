@@ -47,6 +47,12 @@ base64 = "0.22"
 libc = "0.2"
 url = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+# Filesystem watching for the workspace navigator. The debouncer is what pairs
+# rename From/To into a single event via filesystem IDs; plain notify reports a
+# move as an unrelated remove + create. Default features give FSEvents on macOS
+# (one cheap kernel watch per tree) and inotify on Linux.
+notify = "8.2"
+notify-debouncer-full = "0.7"
 
 # macOS-only: direct AppKit/NSView frame manipulation for the Preview tab
 # child webview positioning (bypasses wry's set_bounds to avoid the race where

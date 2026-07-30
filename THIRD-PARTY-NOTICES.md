@@ -80,6 +80,8 @@ Runtime `[dependencies]`:
 | `libc` | MIT OR Apache-2.0 |
 | `url` | MIT OR Apache-2.0 |
 | `reqwest` | MIT OR Apache-2.0 |
+| `notify` | CC0-1.0 |
+| `notify-debouncer-full` | MIT OR Apache-2.0 |
 
 macOS target `[dependencies]` (`cfg(target_os = "macos")`):
 
