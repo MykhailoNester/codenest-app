@@ -532,14 +532,26 @@ async function finalize(prev, t) {
 ${envFor(t)}
 
 STEP 1 — write the commit message to ${artOf(t)}/commit-msg.txt.
-Follow .claude/commands/commit-message.md and these rules exactly. This repo does NOT use
-Conventional Commits — do not invent a 'feat(scope):' prefix:
-- Subject: capitalised, imperative, UNDER 72 CHARACTERS, no trailing period.
-- Then a blank line, then a body wrapped at 72 characters saying WHAT and WHY, never HOW.
-  Short bullets are fine. Name the layers when the change crosses more than one.
-- NO 'Co-Authored-By' trailer — this project bans them.
-Base it on 'git -C ${wtOf(t)} diff ${t.base}...HEAD' plus the uncommitted work, and on
-${artOf(t)}/plan.md for the why.
+
+FIRST, read ${wtOf(t)}/.claude/commands/commit-message.md in full. That file is this
+repo's commit-message specification and the only authority on style — do not work from
+your own idea of a good commit message, and do not work from a summary of that file.
+Follow it exactly: its layer table, its subject rule, its body rule, its list of things
+to call out that carry consequences beyond the diff, and its output rules.
+
+Match its worked examples for LENGTH, not just for shape. They run three to six lines of
+body. A commit message is not a design document: the plan, the reviews and the gate
+results are already archived under ${artOf(t)} for anyone who wants the full account.
+Prefer the one or two decisions a reader in six months could not reconstruct from the
+diff over a complete narration of the change.
+
+Two deltas from that file, which describes the interactive command rather than this stage:
+- Write the message to ${artOf(t)}/commit-msg.txt instead of printing it.
+- It says committing is the user's call; /ship is the exception it names, and STEP 2
+  below is that commit stage.
+
+Base the message on 'git -C ${wtOf(t)} diff ${t.base}...HEAD' plus the uncommitted work,
+and on ${artOf(t)}/plan.md for the why.
 
 STEP 2 — commit, in this exact order. The order matters:
 
