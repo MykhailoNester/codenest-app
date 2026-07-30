@@ -48,7 +48,8 @@ app/                  # FastAPI sidecar: routers/ (thin HTTP), services/ (all bu
 frontend/src/         # React app: pages/, components/, lib/ (api.ts, ipc.ts, nav-items.ts),
                       #   stores/ (zustand), hooks/, styles/ (design tokens)
 src-tauri/src/        # Rust shell: lib.rs (commands/wiring), sidecar/ (spawn + health),
-                      #   pty/ (terminals), session/, scheduler/, tray/, workspace/, commands/
+                      #   pty/ (terminals), session/, scheduler/, tray/, workspace/, commands/,
+                      #   fswatch/ (live filesystem watcher for the workspace navigator)
 src-tauri/resources/org-agents/   # bundled org agents + manifest.json (sha256 per file)
 migrations/           # append-only NNN_*.sql; 000_baseline_schema.sql is the initial DB state
 scripts/              # build-sidecar.sh, pyinstaller.spec, seed_demo.py

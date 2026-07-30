@@ -1,4 +1,5 @@
 mod commands;
+mod fswatch;
 mod pty;
 mod scheduler;
 mod session;
@@ -11,11 +12,13 @@ use commands::browser::{
     preview_close, preview_navigate, preview_open, preview_set_bounds, preview_show,
 };
 use commands::docs::{open_in_editor, open_path, read_file_text, reveal_in_finder};
-use commands::git::get_recent_commits;
+use commands::fs_nav::{fs_build_file_index, fs_list_dir};
+use commands::git::{get_recent_commits, git_status_for_roots};
 use commands::hooks::run_hook_probe;
 use commands::screenshot::{
     capture_screenshot, close_screenshot_ring, open_screenshot_ring, ring_capture,
 };
+use fswatch::{fs_watch_set_roots, fs_watch_status};
 use window::clamp_window_to_monitor;
 
 use std::sync::Arc;
@@ -303,6 +306,12 @@ pub fn run() {
     // on_window_event move closure that also needs the Arc.
     let pty_for_scheduler = Arc::clone(&pty_manager);
 
+    // Live filesystem watcher for the workspace navigator (fs_watch_set_roots
+    // / fs_watch_status). Pre-clone for the CloseRequested handler so the
+    // debouncer thread is always stopped before the sidecar shuts down.
+    let fs_watch = Arc::new(fswatch::FsWatchManager::new());
+    let fs_watch_for_close = Arc::clone(&fs_watch);
+
     // Registry of in-flight scheduled-run process groups. The scheduler inserts
     // on launch / removes on finish; the main window's CloseRequested handler
     // stops any survivors so closing the app never leaves scheduled `claude`
@@ -326,6 +335,7 @@ pub fn run() {
         .manage(sidecar::SidecarManager::new())
         .manage(pty_manager.clone())
         .manage(active_run_pty_map.clone())
+        .manage(fs_watch)
         .setup(move |app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -505,6 +515,10 @@ pub fn run() {
                     // (and can still report their terminal status to the live
                     // sidecar). No-op when nothing is in flight.
                     scheduler::shutdown_running_jobs(&run_registry_for_close);
+                    // Stop the live filesystem watcher's debouncer thread
+                    // before the sidecar goes down; no-op if nothing was
+                    // ever watched.
+                    fs_watch_for_close.stop();
                     let sidecar = window.state::<sidecar::SidecarManager>();
                     sidecar.shutdown();
                     pty_manager.close_all();
@@ -539,6 +553,11 @@ pub fn run() {
             session::open_command_center_session,
             session::open_project_session,
             get_recent_commits,
+            git_status_for_roots,
+            fs_list_dir,
+            fs_build_file_index,
+            fs_watch_set_roots,
+            fs_watch_status,
             paths_exist,
             capture_screenshot,
             open_screenshot_ring,
