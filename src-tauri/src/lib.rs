@@ -14,7 +14,7 @@ use commands::browser::{
 };
 use commands::docs::{open_in_editor, open_path, read_file_text, reveal_in_finder};
 use commands::fs_nav::{fs_build_file_index, fs_list_dir};
-use commands::git::{get_recent_commits, git_status_for_roots};
+use commands::git::{get_git_pane_status, get_recent_commits, git_status_for_roots};
 use commands::hooks::run_hook_probe;
 use commands::screenshot::{
     capture_screenshot, close_screenshot_ring, open_screenshot_ring, ring_capture,
@@ -572,6 +572,7 @@ pub fn run() {
             agent::agent_stop,
             get_recent_commits,
             git_status_for_roots,
+            get_git_pane_status,
             fs_list_dir,
             fs_build_file_index,
             fs_watch_set_roots,

@@ -25,6 +25,7 @@ import { decodeOsc7, decodeOscTitle } from "./osc-handlers";
 import { useTerminalStore } from "../../stores/terminal-store";
 import { SearchBar } from "./search-bar";
 import { PaneContextMenu, type ContextMenuTarget } from "./pane-context-menu";
+import { SessionHud } from "./session-hud";
 import { Icon } from "../icon";
 import styles from "./terminal-pane.module.css";
 
@@ -863,6 +864,18 @@ export function TerminalPane({
           </button>
         </div>
       ) : null}
+
+      {/* Session-state strip — gated on content only (D9): the default
+          single-terminal tab renders this pane with no header at all, and
+          this strip is the one piece of chrome that must still show up
+          there. `.pane` is a column flexbox, so this renders directly
+          beneath the header when one exists and as the first visible child
+          when it does not. */}
+      <SessionHud
+        paneId={terminalId}
+        cwd={liveCwd}
+        exited={liveLeaf?.exited === true}
+      />
 
       {/* Search bar overlay */}
       {searchOpen ? (

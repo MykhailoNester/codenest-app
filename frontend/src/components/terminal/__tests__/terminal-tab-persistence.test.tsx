@@ -112,6 +112,15 @@ vi.mock("../../../hooks/use-terminal-file-drop", () => ({
   useTerminalFileDrop: (): void => undefined,
 }));
 
+// This test is about xterm scrollback surviving a tab switch, not the
+// session-state strip every `TerminalPane` now renders alongside it. The
+// factory supplies the one export the module has, so Vitest 4's mock-proxy
+// cannot throw on a missing export the real `SessionHud` would otherwise
+// reach for (store, SSE, `invoke`) — stubbing it keeps this test hermetic
+// without weakening what it pins (terminal buffer content, which the HUD
+// never touches).
+vi.mock("../session-hud", () => ({ SessionHud: () => null }));
+
 // ---------------------------------------------------------------------------
 // jsdom stubs — local to this file (frontend/vite.config.ts deliberately has
 // no global setupFiles).

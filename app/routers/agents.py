@@ -16,7 +16,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.database import get_db
-from app.services import agent_runs_service, agent_service, budget_service
+from app.models.session_hud import PaneHud
+from app.services import (
+    agent_runs_service,
+    agent_service,
+    budget_service,
+    session_hud_service,
+)
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -292,6 +298,19 @@ async def api_recent_events(
     return JSONResponse(events)
 
 
+@router.get("/api/v1/agents/hud")
+async def api_agents_hud():
+    """Per-pane session-state facts for the terminal HUD strip (C1).
+
+    Hydration snapshot only — live updates ride the existing SSE stream as the
+    additive `hud` field (C2). Always 200, a bare JSON array; a clean database
+    returns `[]`. One entry per pane, never two (D5).
+    """
+    db = await get_db()
+    huds = await session_hud_service.list_live_huds(db)
+    return JSONResponse([PaneHud.model_validate(h).model_dump() for h in huds])
+
+
 @router.get("/api/v1/agents/sessions/{session_id}")
 async def api_get_session(session_id: str):
     db = await get_db()
@@ -558,9 +577,11 @@ async def stream():
             try:
                 db = await get_db()
                 sessions = await agent_service.list_sessions(db)
+                hud = await session_hud_service.list_live_huds(db)
                 snapshot = {
                     "kind": "snapshot",
                     "sessions": [dict(s) for s in sessions],
+                    "hud": hud,
                 }
                 payload = json.dumps(snapshot, default=str)
                 yield f"event: snapshot\ndata: {payload}\n\n".encode()
