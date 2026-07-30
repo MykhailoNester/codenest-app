@@ -2,10 +2,11 @@ import { useRef } from "react";
 import type { ReactElement } from "react";
 import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
 import type { LayoutNode } from "../../lib/layout-tree";
-import { collectLeafIds } from "../../lib/layout-tree";
+import { collectLeafIds, paneKind } from "../../lib/layout-tree";
 import { useTerminalStore } from "../../stores/terminal-store";
 import { TerminalPane } from "./terminal-pane";
 import { EmptyPane } from "./empty-pane";
+import { AgentPane, AgentPaneDisabled } from "./agent-pane";
 import styles from "./split-container.module.css";
 
 interface SplitContainerProps {
@@ -19,12 +20,22 @@ interface SplitContainerProps {
    * catch an omission.
    */
   active: boolean;
+  /**
+   * Whether the `composer` feature is on. Resolved once in `TerminalsLayout`
+   * via `useComposerFeature()` and threaded through every recursion (the
+   * same discipline `active` already documents above) rather than read here
+   * — that would put a `useSyncExternalStore` subscription in a component
+   * rendered per pane-tree node for no benefit, since the value is identical
+   * across the whole tree.
+   */
+  composerEnabled: boolean;
 }
 
 export function SplitContainer({
   node,
   showHeader = true,
   active,
+  composerEnabled,
 }: SplitContainerProps): ReactElement {
   const maximizedLeafId = useTerminalStore((s) => s.maximizedLeafId);
 
@@ -44,6 +55,23 @@ export function SplitContainer({
         </div>
       );
     }
+    if (paneKind(node) === "agent") {
+      return (
+        <div className={leafClass}>
+          {composerEnabled ? (
+            <AgentPane
+              leafId={node.terminalId}
+              title={node.title}
+              {...(node.cwd !== undefined ? { cwd: node.cwd } : {})}
+              showHeader={showHeader || isMaximized}
+              active={active}
+            />
+          ) : (
+            <AgentPaneDisabled leafId={node.terminalId} />
+          )}
+        </div>
+      );
+    }
     return (
       <div className={leafClass}>
         <TerminalPane
@@ -59,15 +87,17 @@ export function SplitContainer({
       </div>
     );
   }
-  return <SplitNode node={node} active={active} />;
+  return <SplitNode node={node} active={active} composerEnabled={composerEnabled} />;
 }
 
 function SplitNode({
   node,
   active,
+  composerEnabled,
 }: {
   node: Extract<LayoutNode, { type: "split" }>;
   active: boolean;
+  composerEnabled: boolean;
 }): ReactElement {
   const updateRatio = useTerminalStore((s) => s.updateRatio);
   const debounceRef = useRef<number | null>(null);
@@ -106,7 +136,12 @@ function SplitNode({
   return (
     <Group key={groupKey} orientation={orientation} onLayoutChange={handleLayout}>
       <Panel id={leftLeafId} defaultSize={`${initialSize}%`} minSize="5%">
-        <SplitContainer node={node.children[0]} showHeader active={active} />
+        <SplitContainer
+          node={node.children[0]}
+          showHeader
+          active={active}
+          composerEnabled={composerEnabled}
+        />
       </Panel>
       <Separator
         className={
@@ -114,7 +149,12 @@ function SplitNode({
         }
       />
       <Panel id={rightLeafId} defaultSize={`${100 - initialSize}%`} minSize="5%">
-        <SplitContainer node={node.children[1]} showHeader active={active} />
+        <SplitContainer
+          node={node.children[1]}
+          showHeader
+          active={active}
+          composerEnabled={composerEnabled}
+        />
       </Panel>
     </Group>
   );

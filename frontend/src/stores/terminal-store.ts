@@ -15,6 +15,7 @@ import {
   collectLeaves,
   findLeaf,
   markLeafExited,
+  paneKind,
   replaceLeafId,
   splitLeaf,
   updateLeafCwd,
@@ -22,6 +23,7 @@ import {
   updateSplitRatio,
   type Direction,
   type LayoutNode,
+  type PaneKind,
   type PaneLeaf,
 } from "../lib/layout-tree";
 import {
@@ -97,7 +99,18 @@ export interface TerminalStore {
   setHydrated: () => void;
   closeTab: (tabId: string) => Promise<void>;
   setActiveTab: (tabId: string) => void;
-  splitPane: (terminalId: string, direction: Direction) => Promise<void>;
+  /**
+   * `opts.kind` defaults to `"shell"` (today's path, unchanged: opens a real
+   * PTY). `kind: "agent"` inserts an agent leaf with **no** PTY — `<AgentPane/>`
+   * owns starting the duplex `claude` session on mount (Design decision 4 in
+   * the agent-pane-composer plan) — so no agent ipc binding lands in this
+   * store.
+   */
+  splitPane: (
+    terminalId: string,
+    direction: Direction,
+    opts?: { kind?: PaneKind },
+  ) => Promise<void>;
   closePane: (terminalId: string) => Promise<void>;
   updateRatio: (focusedTerminalId: string, ratio: number) => void;
   setFocusedLeaf: (terminalId: string | null) => void;
@@ -347,7 +360,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   closeTab: async (tabId) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    const ids = collectLeafIds(tab.layout);
+    // Agent leaves have no PTY — `<AgentPane/>`'s own unmount cleanup
+    // `agentStop`s the session when this action removes its leaf from the
+    // layout below.
+    const ids = collectLeaves(tab.layout)
+      .filter((l) => paneKind(l) !== "agent")
+      .map((l) => l.terminalId);
     await Promise.all(
       ids.map((id) => closeTerminal(id).catch(() => undefined)),
     );
@@ -388,7 +406,10 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   closeTabNoReSeed: async (tabId) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab) return false;
-    const ids = collectLeafIds(tab.layout);
+    // See closeTab above — agent leaves have no PTY to close.
+    const ids = collectLeaves(tab.layout)
+      .filter((l) => paneKind(l) !== "agent")
+      .map((l) => l.terminalId);
     await Promise.all(
       ids.map((id) => closeTerminal(id).catch(() => undefined)),
     );
@@ -431,12 +452,38 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     set({ activeTabId: tabId, focusedLeafId, maximizedLeafId: null });
   },
 
-  splitPane: async (terminalId, direction) => {
+  splitPane: async (terminalId, direction, opts) => {
     const { tabs, activeTabId } = get();
     const tab = findActiveTab(tabs, activeTabId);
     if (!tab) return;
     const target = findLeaf(tab.layout, terminalId);
     if (!target) return;
+
+    if (opts?.kind === "agent") {
+      // No PTY here — `<AgentPane/>` starts the duplex `claude` session on
+      // mount (Design decision 4), so this store never imports an agent ipc
+      // binding.
+      const cwd = target.cwd ?? (await resolveWorkspaceCwd());
+      const newLeaf: PaneLeaf = {
+        type: "leaf",
+        terminalId: genId(),
+        title: "claude",
+        kind: "agent",
+        ...(cwd !== undefined ? { cwd } : {}),
+      };
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === activeTabId
+            ? {
+                ...t,
+                layout: splitLeaf(t.layout, terminalId, direction, newLeaf),
+              }
+            : t,
+        ),
+        focusedLeafId: newLeaf.terminalId,
+      }));
+      return;
+    }
 
     const handle = await openTerminal({ cwd: target.cwd });
     const newLeaf: PaneLeaf = {
@@ -463,7 +510,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const tab = findActiveTab(tabs, activeTabId);
     if (!tab) return;
 
-    await closeTerminal(terminalId).catch(() => undefined);
+    // An agent leaf has no PTY — `<AgentPane/>`'s own unmount cleanup
+    // `agentStop`s the session when this action removes its leaf below.
+    const target = findLeaf(tab.layout, terminalId);
+    if (!target || paneKind(target) !== "agent") {
+      await closeTerminal(terminalId).catch(() => undefined);
+    }
 
     const [newLayout, wasLastLeaf] = closeLeaf(tab.layout, terminalId);
     if (wasLastLeaf) {
@@ -563,6 +615,15 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
           const leaves = collectLeaves(sanitizedLayout);
           let layout = sanitizedLayout;
           for (const leaf of leaves) {
+            if (paneKind(leaf) === "agent") {
+              // No PTY for an agent leaf — `<AgentPane/>` starts its own
+              // duplex `claude` session on mount. Only a fresh id is minted
+              // (the persisted id is a stale UUID from a previous run) so no
+              // `agent_frame:{id}` subscription can collide with a leaf that
+              // shares a serialized id by coincidence.
+              layout = replaceLeafId(layout, leaf.terminalId, genId());
+              continue;
+            }
             const handle = await openTerminal(
               leaf.cwd !== undefined ? { cwd: leaf.cwd } : {},
             );
@@ -969,6 +1030,7 @@ function stripInitCommands(node: LayoutNode): LayoutNode {
       title: node.title,
       ...(node.cwd !== undefined ? { cwd: node.cwd } : {}),
       ...(node.profileId !== undefined ? { profileId: node.profileId } : {}),
+      ...(node.kind !== undefined ? { kind: node.kind } : {}),
       ...(node.empty !== undefined ? { empty: node.empty } : {}),
       ...(node.manualTitle !== undefined
         ? { manualTitle: node.manualTitle }

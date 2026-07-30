@@ -43,6 +43,7 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         "preview",  # Dev-server preview pane (slug: preview)
         "feed",  # Activity feed (slug: feed)
         "budgets",  # Cost budgets (slug: budgets)
+        "composer",  # Native agent pane + composer (pane chrome, no nav slug)
         "sync",  # Sync targets (slug: sync)
         "snippets",  # Snippet library (slug: library)
         "gallery",  # Template/agent gallery (slug: marketplace)
@@ -62,6 +63,7 @@ _FEATURES_DEFAULT: dict[str, bool] = {
     "parallel": True,
     "preview": True,
     "budgets": True,
+    "composer": False,
     "schedules": True,
     "snippets": False,
     "gallery": False,

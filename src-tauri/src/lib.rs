@@ -570,6 +570,7 @@ pub fn run() {
             agent::agent_send,
             agent::agent_interrupt,
             agent::agent_stop,
+            agent::agent_respond_permission,
             get_recent_commits,
             git_status_for_roots,
             get_git_pane_status,

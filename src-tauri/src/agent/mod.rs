@@ -103,6 +103,25 @@ pub struct AgentPaneArgs {
     pub pane_id: String,
 }
 
+/// Arguments for [`agent_respond_permission`] — answers one `can_use_tool`
+/// `control_request` (frame kind [`frame::AgentFrameKind::Permission`]) over
+/// the same stdin the session already owns. `updated_input` is always the
+/// echo of `request.input` for an allow (`None` degrades to `{}` in the
+/// encoder, which drives the CLI's "falling back to original tool input"
+/// warning path — a caller should always send the echo). `message` is the
+/// deny reason.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPermissionArgs {
+    pub pane_id: String,
+    pub request_id: String,
+    pub allow: bool,
+    #[serde(default)]
+    pub updated_input: Option<serde_json::Value>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Return payload (Serialize side — snake_case, no rename_all)
 // ---------------------------------------------------------------------------
@@ -176,6 +195,14 @@ fn build_agent_argv(args: &AgentStartArgs, session_id: &str) -> Result<Vec<Strin
     argv.push("stream-json".to_string());
     argv.push("--verbose".to_string());
     argv.push("--include-partial-messages".to_string());
+    // Routes the CLI's permission asks to this process's stdout as a
+    // `control_request {subtype:"can_use_tool"}` instead of resolving them
+    // locally (which, in --print, means auto-deny: "This command requires
+    // approval"). `stdio` is special-cased by the CLI ahead of any MCP lookup
+    // and is what the official Agent SDK passes when a canUseTool callback
+    // exists. Verified against CLI 2.1.220 — see the plan's Wire verification.
+    argv.push("--permission-prompt-tool".to_string());
+    argv.push("stdio".to_string());
     argv.push("--session-id".to_string());
     argv.push(session_id.to_string());
 
@@ -777,6 +804,28 @@ impl AgentManager {
             .map_err(|_| format!("agent session stdin closed for pane {}", args.pane_id))
     }
 
+    /// Answer a `can_use_tool` permission request. Structurally identical to
+    /// [`Self::send`] — encode, lock, look up the live session, hand one
+    /// line to the writer thread — because a permission answer is, on the
+    /// wire, just another control message written to the same stdin.
+    pub fn respond_permission(&self, args: AgentPermissionArgs) -> Result<(), String> {
+        let line = frame::encode_permission_response(
+            &args.request_id,
+            args.allow,
+            args.updated_input.as_ref(),
+            args.message.as_deref(),
+        )?;
+        let sessions = lock_or_recover(&self.sessions);
+        let session = sessions
+            .get(&args.pane_id)
+            .and_then(SessionSlot::live)
+            .ok_or_else(|| format!("no live agent session for pane {}", args.pane_id))?;
+        session
+            .stdin_tx
+            .send(line)
+            .map_err(|_| format!("agent session stdin closed for pane {}", args.pane_id))
+    }
+
     /// Ask `claude` to interrupt the current turn via the stdin control
     /// channel (Design decision 7) — not a signal, which is untested against
     /// a `--print` child and risks ending the session outright. The session
@@ -955,6 +1004,14 @@ pub fn agent_stop(args: AgentPaneArgs, state: State<'_, Arc<AgentManager>>) -> R
     state.stop(args)
 }
 
+#[tauri::command]
+pub fn agent_respond_permission(
+    args: AgentPermissionArgs,
+    state: State<'_, Arc<AgentManager>>,
+) -> Result<(), String> {
+    state.respond_permission(args)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1000,6 +1057,8 @@ mod tests {
                 "stream-json",
                 "--verbose",
                 "--include-partial-messages",
+                "--permission-prompt-tool",
+                "stdio",
                 "--session-id",
                 uuid,
             ]
@@ -1437,6 +1496,60 @@ mod tests {
 
         mgr.stop(AgentPaneArgs {
             pane_id: "pane-k".to_string(),
+        })
+        .expect("stop should succeed");
+        assert!(poll_until(|| mgr.active_count() == 0));
+    }
+
+    #[test]
+    fn respond_permission_unknown_pane_is_an_error() {
+        let mgr = AgentManager::new();
+        let err = mgr
+            .respond_permission(AgentPermissionArgs {
+                pane_id: "no-such-pane".to_string(),
+                request_id: "req_1".to_string(),
+                allow: true,
+                updated_input: None,
+                message: None,
+            })
+            .expect_err("an unknown pane must be an error, not a panic");
+        assert!(err.contains("no live agent session"));
+    }
+
+    #[test]
+    fn respond_permission_writes_one_line_through_the_child() {
+        let mgr = AgentManager::new();
+        let collector: Collector = Arc::new(Mutex::new(Vec::new()));
+        mgr.start_inner(start_args("pane-perm"), Some(echoer()), collector_emit(&collector))
+            .expect("start_inner should succeed with the echoer fixture");
+
+        mgr.respond_permission(AgentPermissionArgs {
+            pane_id: "pane-perm".to_string(),
+            request_id: "req_perm_1".to_string(),
+            allow: true,
+            updated_input: Some(serde_json::json!({"command": "curl -s https://example.com"})),
+            message: None,
+        })
+        .expect("respond_permission should succeed");
+
+        assert!(poll_until(|| collector
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|f| f.kind == AgentFrameKind::Control)));
+
+        let frames = collector.lock().unwrap();
+        let control_frames: Vec<&AgentFrame> =
+            frames.iter().filter(|f| f.kind == AgentFrameKind::Control).collect();
+        assert_eq!(control_frames.len(), 1, "expected exactly one echoed control_response frame");
+        assert_eq!(
+            control_frames[0].raw["response"]["request_id"].as_str(),
+            Some("req_perm_1")
+        );
+        drop(frames);
+
+        mgr.stop(AgentPaneArgs {
+            pane_id: "pane-perm".to_string(),
         })
         .expect("stop should succeed");
         assert!(poll_until(|| mgr.active_count() == 0));

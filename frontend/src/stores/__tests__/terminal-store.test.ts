@@ -26,6 +26,9 @@ const openTerminalMock = ipc.openTerminal as unknown as ReturnType<
 const sendTerminalInputMock = ipc.sendTerminalInput as unknown as ReturnType<
   typeof vi.fn
 >;
+const closeTerminalMock = ipc.closeTerminal as unknown as ReturnType<
+  typeof vi.fn
+>;
 
 function resetStore(): void {
   useTerminalStore.setState({
@@ -63,6 +66,7 @@ describe("useTerminalStore", () => {
     resetStore();
     openTerminalMock.mockClear();
     sendTerminalInputMock.mockClear();
+    closeTerminalMock.mockClear();
     let counter = 0;
     openTerminalMock.mockImplementation(async () => {
       counter += 1;
@@ -106,6 +110,40 @@ describe("useTerminalStore", () => {
       await useTerminalStore.getState().splitPane(targetId, "v");
       const layout = useTerminalStore.getState().tabs[0]!.layout as Split;
       expect(layout.direction).toBe("v");
+    });
+
+    it("with kind: 'agent' inserts an agent leaf and calls openTerminal zero times", async () => {
+      await useTerminalStore.getState().addTab();
+      const targetId = (useTerminalStore.getState().tabs[0]!.layout as PaneLeaf)
+        .terminalId;
+      openTerminalMock.mockClear();
+
+      await useTerminalStore
+        .getState()
+        .splitPane(targetId, "h", { kind: "agent" });
+
+      const layout = useTerminalStore.getState().tabs[0]!.layout as Split;
+      const agentLeaf = layout.children[1] as PaneLeaf;
+      expect(agentLeaf.kind).toBe("agent");
+      expect(agentLeaf.title).toBe("claude");
+      expect(openTerminalMock).not.toHaveBeenCalled();
+      expect(useTerminalStore.getState().focusedLeafId).toBe(
+        agentLeaf.terminalId,
+      );
+    });
+
+    it("with no opts still calls openTerminal once and produces a leaf with no kind", async () => {
+      await useTerminalStore.getState().addTab();
+      const targetId = (useTerminalStore.getState().tabs[0]!.layout as PaneLeaf)
+        .terminalId;
+      openTerminalMock.mockClear();
+
+      await useTerminalStore.getState().splitPane(targetId, "h");
+
+      const layout = useTerminalStore.getState().tabs[0]!.layout as Split;
+      const newLeaf = layout.children[1] as PaneLeaf;
+      expect(newLeaf.kind).toBeUndefined();
+      expect(openTerminalMock).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -208,6 +246,45 @@ describe("useTerminalStore", () => {
       expect(tabs[0]!.layout.type).toBe("leaf");
     });
 
+    it("over a persisted tree with one shell and one agent leaf, opens exactly one PTY, gives the agent leaf a fresh id, and keeps its kind", async () => {
+      const stored = {
+        tabs: [
+          {
+            id: "tab-stored",
+            title: "Stored",
+            layout: {
+              type: "split",
+              direction: "h",
+              ratio: 0.5,
+              children: [
+                { type: "leaf", terminalId: "old-shell", title: "zsh" },
+                {
+                  type: "leaf",
+                  terminalId: "old-agent",
+                  title: "claude",
+                  kind: "agent",
+                },
+              ],
+            } satisfies LayoutNode,
+          },
+        ],
+        activeTabId: "tab-stored",
+      };
+      localStorage.setItem(TERMINAL_STORAGE_KEY, JSON.stringify(stored));
+
+      await useTerminalStore.getState().hydrateFromStorage();
+      const layout = useTerminalStore.getState().tabs[0]!.layout as Split;
+      const shellLeaf = layout.children[0] as PaneLeaf;
+      const agentLeaf = layout.children[1] as PaneLeaf;
+
+      expect(openTerminalMock).toHaveBeenCalledTimes(1);
+      expect(shellLeaf.terminalId).toBe("pty-1");
+      expect(shellLeaf.kind).toBeUndefined();
+      expect(agentLeaf.kind).toBe("agent");
+      expect(agentLeaf.terminalId).not.toBe("old-agent");
+      expect(agentLeaf.terminalId.length).toBeGreaterThan(0);
+    });
+
     it("seeds only one default tab when called concurrently (StrictMode double-mount)", async () => {
       // Empty storage → each hydrate would seed a default tab. Two overlapping
       // calls (React StrictMode double-invokes mount effects in dev) must not
@@ -220,6 +297,83 @@ describe("useTerminalStore", () => {
       expect(useTerminalStore.getState().tabs).toHaveLength(1);
       expect(openTerminalMock).toHaveBeenCalledTimes(1);
       expect(useTerminalStore.getState().hydrating).toBe(false);
+    });
+  });
+
+  describe("persistToStorage", () => {
+    it("keeps kind on a leaf that also carries initCommand (stripInitCommands regression)", () => {
+      const leaf: PaneLeaf = {
+        type: "leaf",
+        terminalId: "agent-1",
+        title: "claude",
+        kind: "agent",
+        initCommand: "claude\n",
+      };
+      useTerminalStore.setState({
+        tabs: [{ id: "tab-1", title: "Tab", layout: leaf }],
+        activeTabId: "tab-1",
+        hydrated: true,
+      });
+
+      useTerminalStore.getState().persistToStorage();
+
+      const raw = localStorage.getItem(TERMINAL_STORAGE_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!) as {
+        tabs: Array<{ layout: PaneLeaf }>;
+      };
+      const persistedLeaf = parsed.tabs[0]!.layout;
+      expect(persistedLeaf.kind).toBe("agent");
+      expect(persistedLeaf.initCommand).toBeUndefined();
+    });
+  });
+
+  describe("teardown with an agent leaf", () => {
+    async function makeTabWithShellAndAgentLeaves(): Promise<{
+      tabId: string;
+      shellId: string;
+      agentId: string;
+    }> {
+      await useTerminalStore.getState().addTab();
+      const tab = useTerminalStore.getState().tabs[0]!;
+      const shellId = (tab.layout as PaneLeaf).terminalId;
+      await useTerminalStore
+        .getState()
+        .splitPane(shellId, "h", { kind: "agent" });
+      const layout = useTerminalStore.getState().tabs[0]!.layout as Split;
+      const agentId = (layout.children[1] as PaneLeaf).terminalId;
+      return { tabId: tab.id, shellId, agentId };
+    }
+
+    it("closeTab calls closeTerminal only for the shell leaf", async () => {
+      const { tabId, shellId } = await makeTabWithShellAndAgentLeaves();
+      closeTerminalMock.mockClear();
+
+      await useTerminalStore.getState().closeTab(tabId);
+
+      expect(closeTerminalMock).toHaveBeenCalledTimes(1);
+      expect(closeTerminalMock).toHaveBeenCalledWith(shellId);
+    });
+
+    it("closePane on the agent leaf collapses the split without calling closeTerminal", async () => {
+      const { agentId } = await makeTabWithShellAndAgentLeaves();
+      closeTerminalMock.mockClear();
+
+      await useTerminalStore.getState().closePane(agentId);
+
+      expect(closeTerminalMock).not.toHaveBeenCalled();
+      const layout = useTerminalStore.getState().tabs[0]!.layout;
+      expect(layout.type).toBe("leaf");
+    });
+
+    it("closePane on the shell leaf calls closeTerminal for it", async () => {
+      const { shellId } = await makeTabWithShellAndAgentLeaves();
+      closeTerminalMock.mockClear();
+
+      await useTerminalStore.getState().closePane(shellId);
+
+      expect(closeTerminalMock).toHaveBeenCalledTimes(1);
+      expect(closeTerminalMock).toHaveBeenCalledWith(shellId);
     });
   });
 

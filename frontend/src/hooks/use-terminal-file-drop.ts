@@ -34,8 +34,9 @@
  * actual scale factor asynchronously (getCurrentWebview().scaleFactor()) so
  * the conversion is correct on every monitor, including HiDPI/Retina.
  * document.elementFromPoint(cssX, cssY) finds the element at the converted
- * coordinate; we walk up the DOM looking for data-terminal-id that
- * TerminalPane stamps on its root div.
+ * coordinate; we walk up the DOM looking for data-terminal-id (TerminalPane)
+ * or data-agent-pane-id (AgentPane, which has no PTY and so stamps its own
+ * attribute) on the ancestor's root div.
  *
  * # Scope
  * Handles any dropped file path -- not restricted to screenshots.  This is the
@@ -55,9 +56,10 @@
 import { useEffect } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { collectLeafIds } from "../lib/layout-tree";
+import { findLeaf, paneKind, type PaneLeaf } from "../lib/layout-tree";
 import { sendTerminalInput } from "../lib/ipc";
 import { useTerminalStore } from "../stores/terminal-store";
+import { useComposerStore } from "../stores/composer-store";
 
 // Bracketed-paste markers (ANSI/XTerm bracketed paste mode).
 const BP_START = "\x1b[200~";
@@ -86,18 +88,27 @@ function bracketedPaste(path: string): string {
   return `${BP_START}${safe}${BP_END}`;
 }
 
+/** A pane hit-tested at a CSS point, tagged with which kind of root stamped it. */
+interface HitPane {
+  id: string;
+  kind: "shell" | "agent";
+}
+
 /**
- * Given a point in CSS pixels, find the data-terminal-id of the
- * TerminalPane under that point.
+ * Given a point in CSS pixels, find the pane under that point.
  *
- * TerminalPane stamps data-terminal-id={terminalId} on its root div.
- * We walk up from the hit element until we find it or exhaust the tree.
+ * `TerminalPane` stamps `data-terminal-id={terminalId}` on its root div;
+ * `AgentPane` stamps `data-agent-pane-id={leafId}` on its own (it has no PTY,
+ * so it deliberately does not share the `data-terminal-id` attribute — see
+ * `agent-pane.tsx`). We walk up from the hit element until we find one or
+ * exhaust the tree.
  */
-function terminalIdAtCssPoint(cssX: number, cssY: number): string | null {
+function paneAtCssPoint(cssX: number, cssY: number): HitPane | null {
   let el = document.elementFromPoint(cssX, cssY);
   while (el && el !== document.documentElement) {
-    const id = (el as HTMLElement).dataset?.terminalId;
-    if (id) return id;
+    const dataset = (el as HTMLElement).dataset;
+    if (dataset.terminalId) return { id: dataset.terminalId, kind: "shell" };
+    if (dataset.agentPaneId) return { id: dataset.agentPaneId, kind: "agent" };
     el = el.parentElement;
   }
   return null;
@@ -132,31 +143,41 @@ export function useTerminalFileDrop(): void {
         const cssX = position.x / scaleFactor;
         const cssY = position.y / scaleFactor - titlebarHeightCss;
 
-        // Find which terminal pane is under the drop point.
-        let targetId = terminalIdAtCssPoint(cssX, cssY);
+        // Find which pane is under the drop point.
+        let target = paneAtCssPoint(cssX, cssY);
 
         // Fallback: if no pane was under the pointer (e.g. dropped on the
-        // tab bar), use the currently focused leaf.  Read from the store
-        // directly to avoid stale-closure issues without re-subscribing.
-        if (!targetId) {
+        // tab bar), use the currently focused leaf — but only when it is a
+        // shell leaf. Read from the store directly to avoid stale-closure
+        // issues without re-subscribing. An agent leaf has no PTY, so an OS
+        // drop can never fall back to writing terminal bytes into one.
+        if (!target) {
           const { tabs, focusedLeafId } = useTerminalStore.getState();
           if (focusedLeafId) {
-            const isVisible = tabs.some((tab) =>
-              tab.layout.type === "leaf"
-                ? tab.layout.terminalId === focusedLeafId
-                : collectLeafIds(tab.layout).includes(focusedLeafId),
-            );
-            if (isVisible) targetId = focusedLeafId;
+            const leaf: PaneLeaf | undefined = tabs
+              .map((tab) => findLeaf(tab.layout, focusedLeafId))
+              .find((l): l is PaneLeaf => l !== null);
+            if (leaf && paneKind(leaf) === "shell") {
+              target = { id: focusedLeafId, kind: "shell" };
+            }
           }
         }
 
-        if (!targetId) return;
+        if (!target) return;
+
+        // Dropping on an agent pane attaches the paths as context pills —
+        // there is no PTY to paste into. Dropping on a shell pane keeps the
+        // existing bracketed-paste behaviour.
+        if (target.kind === "agent") {
+          useComposerStore.getState().attachContextToPane(target.id, paths);
+          return;
+        }
 
         // Each path gets its own bracketed-paste sequence, concatenated with
         // NO separator.  A bare \r between sequences would submit/execute the
         // first path in most shells and could interrupt Claude Code.
         const input = paths.map(bracketedPaste).join("");
-        void sendTerminalInput(targetId, input).catch((err) => {
+        void sendTerminalInput(target.id, input).catch((err) => {
           console.error("useTerminalFileDrop: sendTerminalInput failed:", err);
         });
       })

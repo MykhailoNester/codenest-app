@@ -264,6 +264,127 @@ export function usePtyExited(
   }, [terminalId]);
 }
 
+// ---------------------------------------------------------------------------
+// Agent pane — duplex `claude` session bindings
+//
+// Bridges `src-tauri/src/agent/mod.rs`'s four existing commands plus
+// `agent_respond_permission` (added alongside this frontend). camelCase args
+// throughout — `AgentStartArgs`/`AgentPermissionArgs` are `#[serde(rename_all
+// = "camelCase")]` on the Rust side, matching `commands/hooks.rs`'s
+// `HookProbeArgs` convention rather than `session/mod.rs`'s snake_case one
+// (see the plan's Design decision 12 for why the two conventions diverge).
+// ---------------------------------------------------------------------------
+
+/**
+ * Routing hint for one stream-json frame — mirrors
+ * `agent::frame::AgentFrameKind` exactly (`src-tauri/src/agent/frame.rs`).
+ * `raw` on {@link AgentFrame} is always the authoritative payload; `kind`
+ * only tells the UI branch which renderer to reach for, so a brand-new
+ * Claude Code frame subtype degrades to `"unknown"` rather than being lost.
+ */
+export type AgentFrameKind =
+  | "init"
+  | "delta"
+  | "assistant"
+  | "user"
+  | "tool_use"
+  | "tool_result"
+  | "result"
+  | "permission"
+  | "control"
+  | "system"
+  | "unknown"
+  | "stderr"
+  | "error"
+  | "exit";
+
+/**
+ * One `agent_frame:{pane_id}` event payload. Snake_case, matching the Rust
+ * struct's serialize side verbatim (no `rename_all` there either). `raw` is
+ * `unknown` — read it only through the narrowing helpers in
+ * `lib/agent-conversation.ts`.
+ */
+export interface AgentFrame {
+  pane_id: string;
+  session_id: string;
+  kind: AgentFrameKind;
+  raw: unknown;
+}
+
+export interface AgentStartArgs {
+  paneId: string;
+  cwd: string;
+  model?: string;
+  agent?: string;
+  permissionMode?: string;
+  allowedTools?: string;
+}
+
+export interface AgentSessionHandle {
+  pane_id: string;
+  session_id: string;
+  pid: number;
+}
+
+/** Answers one `can_use_tool` permission request (frame kind `"permission"`). */
+export interface AgentRespondPermissionArgs {
+  paneId: string;
+  requestId: string;
+  allow: boolean;
+  /** Always the echo of `request.input` for an allow. */
+  updatedInput?: unknown;
+  /** Deny reason. */
+  message?: string;
+}
+
+/** Start a duplex `claude` session for `args.paneId`. Errors when a session
+ * is already registered for that pane — the caller must `agentStop` first. */
+export async function agentStart(
+  args: AgentStartArgs,
+): Promise<AgentSessionHandle> {
+  return invoke<AgentSessionHandle>("agent_start", { args });
+}
+
+/** Write one user turn to the session's stdin. */
+export async function agentSend(paneId: string, text: string): Promise<void> {
+  await invoke<void>("agent_send", { args: { paneId, text } });
+}
+
+/** Ask `claude` to interrupt the current turn. The session stays alive for
+ * the next turn — interrupt is not stop. */
+export async function agentInterrupt(paneId: string): Promise<void> {
+  await invoke<void>("agent_interrupt", { args: { paneId } });
+}
+
+/** Stop a pane's session (SIGTERM, grace, SIGKILL on the process group).
+ * Idempotent — an unknown pane resolves without error. */
+export async function agentStop(paneId: string): Promise<void> {
+  await invoke<void>("agent_stop", { args: { paneId } });
+}
+
+/** Answer a `can_use_tool` permission request over the same stdin the
+ * session already owns (C2 in the plan). */
+export async function agentRespondPermission(
+  args: AgentRespondPermissionArgs,
+): Promise<void> {
+  await invoke<void>("agent_respond_permission", { args });
+}
+
+/**
+ * Subscribe to `agent_frame:{paneId}` events. A plain `listen()` wrapper —
+ * not a hook — so `<AgentPane/>` can `await` the subscription *before*
+ * calling `agentStart`, closing the gap where an `init` frame emitted between
+ * "session started" and "listener attached" would otherwise be lost.
+ */
+export async function subscribeAgentFrames(
+  paneId: string,
+  handler: (frame: AgentFrame) => void,
+): Promise<() => void> {
+  return listen<AgentFrame>(`agent_frame:${paneId}`, (raw) => {
+    handler(raw.payload);
+  });
+}
+
 export interface EmitNotificationArgs {
   title: string;
   body?: string;

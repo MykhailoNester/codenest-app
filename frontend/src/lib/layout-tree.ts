@@ -3,12 +3,28 @@
 
 export type Direction = "h" | "v";
 
+/**
+ * What a leaf renders. `"shell"` is a PTY-backed `<TerminalPane/>` (today's
+ * only behaviour), `"agent"` is a native conversation + composer
+ * (`<AgentPane/>`, no PTY), `"agent-tui"` is reserved for a future
+ * bracketed-paste-mode `claude` terminal and today renders exactly like
+ * `"shell"` (see `paneKind`).
+ */
+export type PaneKind = "shell" | "agent" | "agent-tui";
+
 export interface PaneLeaf {
   type: "leaf";
   terminalId: string;
   title: string;
   cwd?: string;
   profileId?: string;
+  /**
+   * What this leaf renders. Optional and defaults to `"shell"` via
+   * `paneKind()` — never required, so every leaf already persisted in
+   * localStorage (before this field existed) stays valid JSON and rehydrates
+   * as a shell pane exactly as it did before.
+   */
+  kind?: PaneKind;
   /**
    * Command written to the PTY stdin after the shell is ready (e.g. a
    * provider CLI invocation from `applyGridLayout`).  Held in the in-memory
@@ -260,4 +276,14 @@ export function markLeafExited(
       markLeafExited(root.children[1], targetId, exited),
     ],
   };
+}
+
+/**
+ * The only thing anything else may use to read `PaneLeaf.kind` — absent
+ * means `"shell"`, so a leaf parsed from JSON that predates this field (or
+ * one written by a build without the composer feature) behaves exactly as
+ * it did before this field existed.
+ */
+export function paneKind(leaf: PaneLeaf): PaneKind {
+  return leaf.kind ?? "shell";
 }

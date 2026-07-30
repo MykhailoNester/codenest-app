@@ -1,0 +1,667 @@
+/**
+ * Pure frame → conversation reducer for the native agent pane.
+ *
+ * No React, no zustand, no IPC — every export here is a plain function or
+ * type, testable with hand-built `AgentFrame` objects. `stores/agent-session-store.ts`
+ * is the only production caller; it wraps `applyFrame` in a zustand `set()`
+ * and layers the cross-store side effects (Design decision 12 in the plan).
+ *
+ * Every read of `frame.raw` (typed `unknown` — see `lib/ipc.ts`) goes through
+ * the local `asRecord`/`asString`/`asArray`/`asNumber`/`asBool` narrowing
+ * helpers below, never a direct index, so a frame shaped nothing like the
+ * captured CLI 2.1.220 wire (a future Claude Code version, a malformed line)
+ * degrades the reducer's output instead of throwing.
+ */
+
+import type { AgentFrame } from "./ipc";
+
+// ---------------------------------------------------------------------------
+// Narrowing helpers — every `raw` read goes through one of these.
+// ---------------------------------------------------------------------------
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function asBool(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Conversation types
+// ---------------------------------------------------------------------------
+
+export interface ConvTextBlock {
+  type: "text";
+  text: string;
+}
+
+/** Cap on rendered tool output, matching `MAX_TEXT_CHARS` at `frame.rs:143` —
+ * the Rust side already caps stderr/parse-error text at this size, so this
+ * only bites `tool_result` output, which is not synthetic. */
+export const MAX_TOOL_OUTPUT_CHARS = 4000;
+
+export interface ConvToolBlock {
+  type: "tool";
+  /** The wire's `tool_use.id`, matched against a later `tool_result.tool_use_id`. */
+  id: string;
+  name: string;
+  argSummary: string;
+  input: unknown;
+  diffstat: { added: number; removed: number } | null;
+  /** `null` while the call is in flight (`endedAt === null`). */
+  output: string | null;
+  startedAt: number;
+  endedAt: number | null;
+  isError: boolean;
+}
+
+export interface ConvErrorBlock {
+  type: "error";
+  text: string;
+  source: "stderr" | "stdout";
+}
+
+export type ConvBlock = ConvTextBlock | ConvToolBlock | ConvErrorBlock;
+
+export interface ConvTurn {
+  id: string;
+  role: "user" | "assistant";
+  at: number;
+  blocks: ConvBlock[];
+}
+
+export interface PermissionRequest {
+  requestId: string;
+  toolName: string;
+  displayName: string | null;
+  input: unknown;
+  description: string | null;
+  toolUseId: string | null;
+  /** See `permissionSessionKey` — what "Allow for this session" auto-answers. */
+  sessionKey: string;
+}
+
+export interface ConversationState {
+  turns: ConvTurn[];
+  status: "starting" | "idle" | "running" | "exited";
+  streaming: boolean;
+  streamText: string;
+  thinking: boolean;
+  thinkingTokens: number;
+  sessionId: string | null;
+  model: string | null;
+  /** FIFO — `permissions[0]` is the one rendered as a dialog. */
+  permissions: PermissionRequest[];
+  lastResult: {
+    costUsd: number | null;
+    durationMs: number | null;
+    isError: boolean;
+  } | null;
+  exitCode: number | null;
+}
+
+export function emptyConversation(): ConversationState {
+  return {
+    turns: [],
+    status: "starting",
+    streaming: false,
+    streamText: "",
+    thinking: false,
+    thinkingTokens: 0,
+    sessionId: null,
+    model: null,
+    permissions: [],
+    lastResult: null,
+    exitCode: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Turn helpers
+// ---------------------------------------------------------------------------
+
+function lastTurn(state: ConversationState): ConvTurn | undefined {
+  return state.turns[state.turns.length - 1];
+}
+
+/**
+ * Append `blocks` to the trailing assistant turn, or open a new one — a
+ * model's response is often several frames (text, then a tool call, then more
+ * text) that all belong in one visual bubble (prototype `.turn`, which mixes
+ * `.msg`/`.tool`/`.toolout` freely). The boundary between one assistant turn
+ * and the next is always a `user` turn in between, so "the trailing turn is
+ * already an assistant turn" is exactly the right test. An empty `blocks`
+ * array is a no-op — never adds an empty turn (a `thinking`-only frame, once
+ * its non-renderable block is dropped, must not become a blank bubble).
+ */
+function appendAssistantBlocks(
+  state: ConversationState,
+  blocks: ConvBlock[],
+  now: number,
+): ConversationState {
+  if (blocks.length === 0) return state;
+  const last = lastTurn(state);
+  if (last && last.role === "assistant") {
+    const updated: ConvTurn = { ...last, blocks: [...last.blocks, ...blocks] };
+    return { ...state, turns: [...state.turns.slice(0, -1), updated] };
+  }
+  const turn: ConvTurn = {
+    id: `assistant-${state.turns.length}-${now}`,
+    role: "assistant",
+    at: now,
+    blocks,
+  };
+  return { ...state, turns: [...state.turns, turn] };
+}
+
+/** Appends an error block to the trailing turn (any role) — errors are never
+ * dropped, but they also never open their own turn kind. Opens a fresh
+ * assistant-role turn only when the conversation has nothing yet. */
+function appendErrorBlock(
+  state: ConversationState,
+  block: ConvErrorBlock,
+  now: number,
+): ConversationState {
+  const last = lastTurn(state);
+  if (!last) {
+    return {
+      ...state,
+      turns: [{ id: `error-0-${now}`, role: "assistant", at: now, blocks: [block] }],
+    };
+  }
+  const updated: ConvTurn = { ...last, blocks: [...last.blocks, block] };
+  return { ...state, turns: [...state.turns.slice(0, -1), updated] };
+}
+
+/** Finds the tool block matching `toolUseId` across every assistant turn and
+ * fills in its result. A miss (no matching `tool_use_id`) is ignored — never
+ * thrown — since a future CLI could legally emit a result for a call this
+ * pane never saw (e.g. reconnecting mid-turn). */
+function withToolResult(
+  state: ConversationState,
+  toolUseId: string,
+  output: string,
+  isError: boolean,
+  now: number,
+): ConversationState {
+  let found = false;
+  const turns = state.turns.map((turn) => {
+    if (turn.role !== "assistant") return turn;
+    let touched = false;
+    const blocks = turn.blocks.map((block): ConvBlock => {
+      if (block.type === "tool" && block.id === toolUseId) {
+        found = true;
+        touched = true;
+        return { ...block, output, endedAt: now, isError };
+      }
+      return block;
+    });
+    return touched ? { ...turn, blocks } : turn;
+  });
+  if (!found) return state;
+  return { ...state, turns };
+}
+
+// ---------------------------------------------------------------------------
+// Tool-call rendering helpers
+// ---------------------------------------------------------------------------
+
+const TOOL_ARG_KEY: Record<string, string> = {
+  Bash: "command",
+  Read: "file_path",
+  Edit: "file_path",
+  Write: "file_path",
+  Glob: "pattern",
+  Grep: "pattern",
+  Task: "description",
+};
+
+/** `Bash`→`command`, `Read|Edit|Write`→`file_path`, `Glob|Grep`→`pattern`,
+ * `Task`→`description`, else the first string value in `input`; `""` when
+ * nothing matches. */
+export function toolArgSummary(name: string, input: unknown): string {
+  const rec = asRecord(input);
+  if (!rec) return "";
+  const key = TOOL_ARG_KEY[name];
+  if (key !== undefined) {
+    const value = asString(rec[key]);
+    if (value !== undefined) return value;
+  }
+  for (const value of Object.values(rec)) {
+    const s = asString(value);
+    if (s !== undefined) return s;
+  }
+  return "";
+}
+
+function countLines(text: string): number {
+  return text.length === 0 ? 0 : text.split("\n").length;
+}
+
+/** `Edit`: line counts of `new_string`/`old_string`. `Write`: lines of
+ * `content` added, 0 removed. `MultiEdit`: summed over `edits[]`. Otherwise
+ * `null` — no diffstat chip is rendered rather than a fake one. */
+export function toolDiffstat(
+  name: string,
+  input: unknown,
+): { added: number; removed: number } | null {
+  const rec = asRecord(input);
+  if (!rec) return null;
+  if (name === "Edit") {
+    return {
+      added: countLines(asString(rec["new_string"]) ?? ""),
+      removed: countLines(asString(rec["old_string"]) ?? ""),
+    };
+  }
+  if (name === "Write") {
+    return { added: countLines(asString(rec["content"]) ?? ""), removed: 0 };
+  }
+  if (name === "MultiEdit") {
+    const edits = asArray(rec["edits"]) ?? [];
+    let added = 0;
+    let removed = 0;
+    for (const editRaw of edits) {
+      const edit = asRecord(editRaw);
+      added += countLines(asString(edit?.["new_string"]) ?? "");
+      removed += countLines(asString(edit?.["old_string"]) ?? "");
+    }
+    return { added, removed };
+  }
+  return null;
+}
+
+/** `"340ms"` under a second, `"1.2s"` at or above it. */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Splits `text` on backtick spans for `.msg code` rendering. Always returns
+ * at least one segment, even for an empty string. */
+export function splitInlineCode(
+  text: string,
+): Array<{ code: boolean; text: string }> {
+  const parts: Array<{ code: boolean; text: string }> = [];
+  const regex = /`([^`]+)`/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ code: false, text: text.slice(lastIndex, match.index) });
+    }
+    parts.push({ code: true, text: match[1] ?? "" });
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length || parts.length === 0) {
+    parts.push({ code: false, text: text.slice(lastIndex) });
+  }
+  return parts;
+}
+
+function blocksFromAssistantContent(
+  content: unknown[],
+  now: number,
+): ConvBlock[] {
+  const blocks: ConvBlock[] = [];
+  for (const raw of content) {
+    const block = asRecord(raw);
+    const type = asString(block?.["type"]);
+    if (type === "text") {
+      blocks.push({ type: "text", text: asString(block?.["text"]) ?? "" });
+    } else if (type === "tool_use") {
+      const name = asString(block?.["name"]) ?? "";
+      const input = block?.["input"];
+      blocks.push({
+        type: "tool",
+        id: asString(block?.["id"]) ?? "",
+        name,
+        argSummary: toolArgSummary(name, input),
+        input,
+        diffstat: toolDiffstat(name, input),
+        output: null,
+        startedAt: now,
+        endedAt: null,
+        isError: false,
+      });
+    }
+    // "thinking" (redacted text, per Design decision 6) and any other block
+    // type are intentionally not rendered as a conversation block.
+  }
+  return blocks;
+}
+
+function flattenToolResultContent(content: unknown): string {
+  const asPlainString = asString(content);
+  if (asPlainString !== undefined) return asPlainString;
+  const arr = asArray(content);
+  if (!arr) return "";
+  return arr
+    .map((entry) => {
+      const rec = asRecord(entry);
+      return asString(rec?.["type"]) === "text" ? (asString(rec?.["text"]) ?? "") : "";
+    })
+    .join("");
+}
+
+// ---------------------------------------------------------------------------
+// Permission session key (Design decision 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derives the "Allow for this session" auto-answer key from a captured
+ * `can_use_tool` `request` object (the frame's `raw.request`, not the whole
+ * envelope): `` `${toolName} ${firstRuleContent ?? "*"}` ``. Captured data,
+ * so allowing one `curl …` does not silently allow every future `Bash` call
+ * — a request with no suggestions falls back to the bare tool name plus
+ * `"*"`.
+ */
+export function permissionSessionKey(request: unknown): string {
+  const rec = asRecord(request);
+  const toolName = asString(rec?.["tool_name"]) ?? "";
+  const suggestions = asArray(rec?.["permission_suggestions"]);
+  const first = suggestions && suggestions.length > 0 ? asRecord(suggestions[0]) : undefined;
+  const rules = first ? asArray(first["rules"]) : undefined;
+  const firstRule = rules && rules.length > 0 ? asRecord(rules[0]) : undefined;
+  const ruleContent = firstRule ? asString(firstRule["ruleContent"]) : undefined;
+  return `${toolName} ${ruleContent ?? "*"}`;
+}
+
+// ---------------------------------------------------------------------------
+// User-turn / wire-line helpers (composer side)
+// ---------------------------------------------------------------------------
+
+/**
+ * Structural subset of `stores/composer-store.ts`'s `ContextPill` needed to
+ * render the composed message. Declared locally rather than imported so this
+ * leaf module and the composer store — which imports `buildUserMessageText`
+ * from here — cannot form a cycle; TypeScript's structural typing makes the
+ * real `ContextPill[]` assignable here without either file importing the
+ * other (Design decision 11: the store dependency graph is a DAG).
+ */
+export type UserMessagePill =
+  | { kind: "file"; path: string }
+  | { kind: "task"; taskId: number; title: string; description: string | null }
+  | { kind: "template"; slug: string; title: string; body: string };
+
+function pillHeaderLine(pill: UserMessagePill): string {
+  switch (pill.kind) {
+    case "file":
+      return `@file: ${pill.path}`;
+    case "task":
+      return `@task #${pill.taskId}: ${pill.title}`;
+    case "template":
+      return `@template: ${pill.title}`;
+  }
+}
+
+/** The exact text a send transmits: one header line per pill, a blank line,
+ * then the draft. With no pills, the draft is sent verbatim. */
+export function buildUserMessageText(
+  pills: UserMessagePill[],
+  draft: string,
+): string {
+  if (pills.length === 0) return draft;
+  const header = pills.map(pillHeaderLine).join("\n");
+  return `${header}\n\n${draft}`;
+}
+
+/**
+ * The literal stdin line `agent::frame::encode_user_message` writes for
+ * `text` (see the plan's step 13 and the paired Rust test
+ * `encode_user_message_line_is_byte_exact`). `serde_json` on that side has no
+ * `preserve_order` feature (verified with `cargo tree -e features -i
+ * serde_json`), so its output keys are alphabetical — this object literal's
+ * keys are written in that same alphabetical order (JS preserves insertion
+ * order for string keys) so `JSON.stringify` produces an identical string
+ * without a manual sort step.
+ */
+export function previewUserMessageLine(text: string): string {
+  return JSON.stringify({
+    message: { content: [{ text, type: "text" }], role: "user" },
+    type: "user",
+  });
+}
+
+/** Appends an optimistic user turn and marks the conversation running — the
+ * CLI never echoes a plain user turn back (Design decision 5, verified
+ * against all three captured sessions), so this is the only place a user
+ * turn is added for a message this pane itself sent. */
+export function appendUserTurn(
+  state: ConversationState,
+  text: string,
+  now: number,
+): ConversationState {
+  const turn: ConvTurn = {
+    id: `user-${state.turns.length}-${now}`,
+    role: "user",
+    at: now,
+    blocks: [{ type: "text", text }],
+  };
+  return { ...state, turns: [...state.turns, turn], status: "running" };
+}
+
+// ---------------------------------------------------------------------------
+// Per-kind frame application
+// ---------------------------------------------------------------------------
+
+function applyInit(state: ConversationState, frame: AgentFrame): ConversationState {
+  const rec = asRecord(frame.raw);
+  const model = asString(rec?.["model"]);
+  return {
+    ...state,
+    sessionId: frame.session_id,
+    model: model ?? state.model,
+    status: "idle",
+  };
+}
+
+function applyDelta(state: ConversationState, raw: unknown): ConversationState {
+  const rec = asRecord(raw);
+  const event = asRecord(rec?.["event"]);
+  const delta = asRecord(event?.["delta"]);
+  const deltaType = asString(delta?.["type"]);
+  if (deltaType === "text_delta") {
+    const text = asString(delta?.["text"]) ?? "";
+    return { ...state, streaming: true, streamText: state.streamText + text };
+  }
+  if (deltaType === "thinking_delta") {
+    const tokens = asNumber(delta?.["estimated_tokens"]);
+    return {
+      ...state,
+      thinking: true,
+      thinkingTokens: tokens ?? state.thinkingTokens,
+    };
+  }
+  // "input_json_delta" and any other event/delta shape: the final
+  // `assistant`/`tool_use` frame carries the parsed input, so streamed tool
+  // argument JSON is intentionally not rendered.
+  return state;
+}
+
+function applyAssistantOrToolUse(
+  state: ConversationState,
+  raw: unknown,
+  now: number,
+): ConversationState {
+  const rec = asRecord(raw);
+  const content = asArray(asRecord(rec?.["message"])?.["content"]) ?? [];
+  const blocks = blocksFromAssistantContent(content, now);
+  // The assistant frame always replaces the streaming scratch buffer with
+  // its real text (Design decision 6) — closing it here, before appending,
+  // means a following frame never doubles up on already-rendered text.
+  const closed: ConversationState = { ...state, streaming: false, streamText: "" };
+  return appendAssistantBlocks(closed, blocks, now);
+}
+
+function applyToolResult(
+  state: ConversationState,
+  raw: unknown,
+  now: number,
+): ConversationState {
+  const rec = asRecord(raw);
+  const content0 = asArray(asRecord(rec?.["message"])?.["content"])?.[0];
+  const block = asRecord(content0);
+  const toolUseId = asString(block?.["tool_use_id"]);
+  if (!toolUseId) return state;
+  const output = flattenToolResultContent(block?.["content"]).slice(
+    0,
+    MAX_TOOL_OUTPUT_CHARS,
+  );
+  const isError = asBool(block?.["is_error"]) ?? false;
+  return withToolResult(state, toolUseId, output, isError, now);
+}
+
+/** A plain user turn, deduped against the last user turn's concatenated text
+ * (Design decision 5) — defensive against a future CLI that starts echoing. */
+function applyUserFrame(
+  state: ConversationState,
+  raw: unknown,
+  now: number,
+): ConversationState {
+  const rec = asRecord(raw);
+  const content = asArray(asRecord(rec?.["message"])?.["content"]);
+  if (!content) return state;
+  const text = content
+    .map((b) => {
+      const rec2 = asRecord(b);
+      return asString(rec2?.["type"]) === "text" ? (asString(rec2?.["text"]) ?? "") : "";
+    })
+    .join("");
+
+  const last = lastTurn(state);
+  if (last && last.role === "user") {
+    const lastText = last.blocks
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("");
+    if (lastText === text) return state;
+  }
+
+  const turn: ConvTurn = {
+    id: `user-echo-${state.turns.length}-${now}`,
+    role: "user",
+    at: now,
+    blocks: [{ type: "text", text }],
+  };
+  return { ...state, turns: [...state.turns, turn] };
+}
+
+function applyResult(state: ConversationState, raw: unknown): ConversationState {
+  const rec = asRecord(raw);
+  return {
+    ...state,
+    status: "idle",
+    streaming: false,
+    thinking: false,
+    streamText: "",
+    lastResult: {
+      costUsd: asNumber(rec?.["total_cost_usd"]) ?? null,
+      durationMs: asNumber(rec?.["duration_ms"]) ?? null,
+      isError: asBool(rec?.["is_error"]) ?? false,
+    },
+  };
+}
+
+function applyPermission(state: ConversationState, raw: unknown): ConversationState {
+  const rec = asRecord(raw);
+  const req = asRecord(rec?.["request"]);
+  const request: PermissionRequest = {
+    requestId: asString(rec?.["request_id"]) ?? "",
+    toolName: asString(req?.["tool_name"]) ?? "",
+    displayName: asString(req?.["display_name"]) ?? null,
+    input: req?.["input"],
+    description: asString(req?.["description"]) ?? null,
+    toolUseId: asString(req?.["tool_use_id"]) ?? null,
+    sessionKey: permissionSessionKey(req),
+  };
+  return { ...state, permissions: [...state.permissions, request] };
+}
+
+function applySystem(state: ConversationState, raw: unknown): ConversationState {
+  const rec = asRecord(raw);
+  if (
+    asString(rec?.["subtype"]) === "status" &&
+    asString(rec?.["status"]) === "requesting"
+  ) {
+    return { ...state, status: "running" };
+  }
+  return state;
+}
+
+function applyErrorFrame(
+  state: ConversationState,
+  raw: unknown,
+  now: number,
+): ConversationState {
+  const rec = asRecord(raw);
+  const text = asString(rec?.["text"]) ?? asString(rec?.["error"]) ?? "";
+  const source: ConvErrorBlock["source"] =
+    asString(rec?.["source"]) === "stderr" ? "stderr" : "stdout";
+  return appendErrorBlock(state, { type: "error", text, source }, now);
+}
+
+function applyExit(state: ConversationState, raw: unknown): ConversationState {
+  const rec = asRecord(raw);
+  const exitCodeRaw = rec?.["exit_code"];
+  return {
+    ...state,
+    status: "exited",
+    exitCode: typeof exitCodeRaw === "number" ? exitCodeRaw : null,
+  };
+}
+
+/**
+ * Reduces one `AgentFrame` into the next `ConversationState`. `now` (browser
+ * `Date.now()` in production) is injected rather than read internally so
+ * tests are deterministic (Design decision 10 — every clock in this task is
+ * frontend-only; nothing here touches SQLite or a Python datetime).
+ */
+export function applyFrame(
+  state: ConversationState,
+  frame: AgentFrame,
+  now: number,
+): ConversationState {
+  switch (frame.kind) {
+    case "init":
+      return applyInit(state, frame);
+    case "delta":
+      return applyDelta(state, frame.raw);
+    case "assistant":
+    case "tool_use":
+      return applyAssistantOrToolUse(state, frame.raw, now);
+    case "tool_result":
+      return applyToolResult(state, frame.raw, now);
+    case "user":
+      return applyUserFrame(state, frame.raw, now);
+    case "result":
+      return applyResult(state, frame.raw);
+    case "permission":
+      return applyPermission(state, frame.raw);
+    case "system":
+      return applySystem(state, frame.raw);
+    case "stderr":
+    case "error":
+      return applyErrorFrame(state, frame.raw, now);
+    case "exit":
+      return applyExit(state, frame.raw);
+    case "control":
+    case "unknown":
+      return state;
+    default:
+      return state;
+  }
+}

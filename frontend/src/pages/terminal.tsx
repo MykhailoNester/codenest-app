@@ -6,6 +6,7 @@ import { SplitContainer } from "../components/terminal/split-container";
 import { useTerminalShortcuts } from "../hooks/use-terminal-shortcuts";
 import { useTerminalFileDrop } from "../hooks/use-terminal-file-drop";
 import { useTerminalStore } from "../stores/terminal-store";
+import { useComposerFeature } from "../lib/composer-feature";
 import styles from "./terminal.module.css";
 
 interface TerminalsLayoutProps {
@@ -41,6 +42,11 @@ export function TerminalsLayout({
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const hydrated = useTerminalStore((s) => s.hydrated);
   const hydrateFromStorage = useTerminalStore((s) => s.hydrateFromStorage);
+  // Resolved once here — provider-free (no QueryClient needed) — and
+  // threaded into `SplitContainer` as a required prop rather than read
+  // inside it, so the recursion does no per-node work. See
+  // `lib/composer-feature.ts` and Design decision 2 in the plan.
+  const composerEnabled = useComposerFeature();
 
   useTerminalShortcuts();
   useTerminalFileDrop();
@@ -76,6 +82,7 @@ export function TerminalsLayout({
                   node={tab.layout}
                   showHeader={tab.layout.type === "split"}
                   active={tab.id === activeTabId}
+                  composerEnabled={composerEnabled}
                 />
               </div>
             ))

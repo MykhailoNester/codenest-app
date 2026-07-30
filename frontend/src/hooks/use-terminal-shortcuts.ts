@@ -1,6 +1,15 @@
 import { useEffect } from "react";
-import { useTerminalStore } from "../stores/terminal-store";
+import { useTerminalStore, type TerminalStore } from "../stores/terminal-store";
 import { sendTerminalInput } from "../lib/ipc";
+import { findLeaf, paneKind, type PaneLeaf } from "../lib/layout-tree";
+import { readComposerFeature } from "../lib/composer-feature";
+
+/** The leaf `store.focusedLeafId` names, within the active tab's layout. */
+function findFocusedLeaf(store: TerminalStore): PaneLeaf | null {
+  const tab = store.tabs.find((t) => t.id === store.activeTabId);
+  if (!tab || !store.focusedLeafId) return null;
+  return findLeaf(tab.layout, store.focusedLeafId);
+}
 
 /**
  * Window-level keyboard shortcuts for the terminal page.
@@ -22,11 +31,17 @@ export function useTerminalShortcuts(): void {
       // Esc — collapse a maximized pane back to grid view.  Only fires when
       // a pane is maximized; otherwise the keystroke flows to xterm/shell.
       if (e.key === "Escape" && store.maximizedLeafId !== null) {
-        // Bail out if any modal-ish overlay owns the keypress already.
+        // Bail out if any modal-ish overlay — or the composer / permission
+        // dialog, which each own Escape themselves (interrupt / deny) — owns
+        // the keypress already.
         const t = e.target as HTMLElement | null;
         const isInModal =
-          t?.closest?.("[data-modal]") !== null &&
-          t?.closest?.("[data-modal]") !== undefined;
+          t?.closest?.(
+            "[data-modal], [data-agent-composer], [data-permission-dialog]",
+          ) !== null &&
+          t?.closest?.(
+            "[data-modal], [data-agent-composer], [data-permission-dialog]",
+          ) !== undefined;
         if (!isInModal) {
           e.preventDefault();
           e.stopPropagation();
@@ -37,6 +52,35 @@ export function useTerminalShortcuts(): void {
 
       if (!e.metaKey) return;
       const key = e.key.toLowerCase();
+
+      // ⌘⇧T (shell sibling from an agent pane) / ⌘⇧A (agent sibling from a
+      // shell pane) — both dark unless `composer` is on. Placed here, above
+      // the text-field bail below, because both require Shift plus a letter
+      // (so neither can shadow native text editing) and the composer's own
+      // `<textarea>` must still receive them while focused. Each falls
+      // through to the branches further down when its own guard fails: ⌘⇧T
+      // still reaches the plain `key === "t"` branch (opens a new tab)
+      // everywhere it does today (`readComposerFeature` — no React, no
+      // provider — is safe to call on every keystroke).
+      const composerOn = readComposerFeature();
+      if (composerOn && e.shiftKey && key === "t" && store.focusedLeafId) {
+        const leaf = findFocusedLeaf(store);
+        if (leaf && paneKind(leaf) === "agent") {
+          e.preventDefault();
+          e.stopPropagation();
+          void store.splitPane(leaf.terminalId, "h");
+          return;
+        }
+      }
+      if (composerOn && e.shiftKey && key === "a" && store.focusedLeafId) {
+        const leaf = findFocusedLeaf(store);
+        if (leaf && paneKind(leaf) !== "agent") {
+          e.preventDefault();
+          e.stopPropagation();
+          void store.splitPane(leaf.terminalId, "h", { kind: "agent" });
+          return;
+        }
+      }
 
       // Bail out for meta-key combos only when a GENUINE text field owns focus
       // (e.g. the inline tab/pane rename input) so Cmd+Left/Right/Backspace edit
