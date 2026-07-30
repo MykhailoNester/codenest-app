@@ -1,3 +1,4 @@
+mod agent;
 mod commands;
 mod pty;
 mod scheduler;
@@ -303,6 +304,12 @@ pub fn run() {
     // on_window_event move closure that also needs the Arc.
     let pty_for_scheduler = Arc::clone(&pty_manager);
 
+    // Registry of live duplex agent-pane `claude` sessions, keyed by pane id.
+    // One clone for the CloseRequested handler's move closure, exactly as
+    // run_registry_for_close / pty_for_scheduler do below.
+    let agent_manager = Arc::new(agent::AgentManager::new());
+    let agent_for_close = Arc::clone(&agent_manager);
+
     // Registry of in-flight scheduled-run process groups. The scheduler inserts
     // on launch / removes on finish; the main window's CloseRequested handler
     // stops any survivors so closing the app never leaves scheduled `claude`
@@ -325,6 +332,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .manage(sidecar::SidecarManager::new())
         .manage(pty_manager.clone())
+        .manage(agent_manager.clone())
         .manage(active_run_pty_map.clone())
         .setup(move |app| {
             if cfg!(debug_assertions) {
@@ -508,6 +516,12 @@ pub fn run() {
                     let sidecar = window.state::<sidecar::SidecarManager>();
                     sidecar.shutdown();
                     pty_manager.close_all();
+                    // Same guarantee for a live duplex agent-pane session: without
+                    // this, a `claude` process kept open by an interactive pane
+                    // would survive app quit as an orphan, the exact failure mode
+                    // `scheduler::shutdown_running_jobs` exists to prevent for
+                    // scheduled runs.
+                    agent_for_close.close_all();
                 }
             }
         })
@@ -538,6 +552,10 @@ pub fn run() {
             workspace::get_app_data_path,
             session::open_command_center_session,
             session::open_project_session,
+            agent::agent_start,
+            agent::agent_send,
+            agent::agent_interrupt,
+            agent::agent_stop,
             get_recent_commits,
             paths_exist,
             capture_screenshot,
