@@ -1,14 +1,19 @@
-"""Tests for session_hud_service — the per-pane session-state HUD read path.
+"""Tests for session_hud_service — the per-pane session-state HUD read path —
+and the two agent_service.record_stop behaviours the HUD depends on.
 
 Coverage:
-1. Pane resolution: agent_sessions.pane_id vs. the agent_runs fallback (D5).
-2. list_hud excludes sessions with no resolvable pane_id and ended sessions.
+1. Pane resolution: agent_sessions.pane_id vs. the agent_runs fallback, and
+   which wins when both exist (D5).
+2. list_live_huds: exactly one row per pane, ended sessions excluded, clean
+   database yields [].
 3. TodoWrite progress: newest-wins, absent-when-missing, absent-on-malformed.
-4. The "thinking" inference state machine (D4).
-5. context_window_for's static rule table.
-6. context_tokens NULL passthrough.
-7. Naive-UTC timestamp normalization to a T separator (D6).
-8. model_display resolution via provider_models.
+4. The "thinking" inference state machine (D7).
+5. record_stop's context_tokens write: the exact formula, and that it
+   overwrites (not sums) across turns.
+6. context_tokens' 0-maps-to-null and context_window-for-an-unmapped-model
+   honesty rules.
+7. Regression net for the (defective, deliberately untouched) Sonnet-4 cost
+   arithmetic — see D8.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ import uuid
 import aiosqlite
 import pytest
 
-from app.services import session_hud_service
+from app.services import agent_service, session_hud_service
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -38,38 +43,30 @@ async def _insert_session(
     status: str = "active",
     model: str | None = None,
     cost_usd: float = 0.0,
-    context_tokens: int | None = None,
+    context_tokens: int = 0,
     current_tool: str | None = None,
     current_tool_started_at: str | None = None,
-    started_at: str | None = None,
 ) -> None:
-    columns = ["session_id", "status", "cost_usd", "pane_id", "model"]
-    values: list[object] = [session_id, status, cost_usd, pane_id, model]
-    if context_tokens is not None:
-        columns.append("context_tokens")
-        values.append(context_tokens)
-    if current_tool is not None:
-        columns.append("current_tool")
-        values.append(current_tool)
-    if current_tool_started_at is not None:
-        columns.append("current_tool_started_at")
-        values.append(current_tool_started_at)
-    if started_at is not None:
-        columns.append("started_at")
-        values.append(started_at)
-    placeholders = ", ".join("?" for _ in columns)
     await db.execute(
-        f"INSERT INTO agent_sessions ({', '.join(columns)}) VALUES ({placeholders})",
-        values,
+        """INSERT INTO agent_sessions
+           (session_id, status, cost_usd, pane_id, model, context_tokens,
+            current_tool, current_tool_started_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            session_id,
+            status,
+            cost_usd,
+            pane_id,
+            model,
+            context_tokens,
+            current_tool,
+            current_tool_started_at,
+        ),
     )
     await db.commit()
 
 
-async def _insert_run(
-    db: aiosqlite.Connection,
-    session_id: str,
-    pane_id: str,
-) -> None:
+async def _insert_run(db: aiosqlite.Connection, session_id: str, pane_id: str) -> None:
     await db.execute(
         """INSERT INTO agent_runs (session_id, pane_id, status, started_at)
            VALUES (?, ?, 'running', datetime('now', '-1 minute'))""",
@@ -93,20 +90,13 @@ async def _insert_event(
     await db.commit()
 
 
-async def _provider_and_model(
-    db: aiosqlite.Connection, model_name: str, display_name: str
-) -> None:
-    cur = await db.execute(
-        "INSERT INTO providers (name, display_name, command_template) "
-        "VALUES ('test-provider', 'Test Provider', 'claude {extra_args}')",
+async def _get_session(
+    db: aiosqlite.Connection, session_id: str
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        "SELECT * FROM agent_sessions WHERE session_id = ?", (session_id,)
     )
-    provider_id = cur.lastrowid
-    await db.execute(
-        "INSERT INTO provider_models (provider_id, model_name, display_name) "
-        "VALUES (?, ?, ?)",
-        (provider_id, model_name, display_name),
-    )
-    await db.commit()
+    return await cursor.fetchone()
 
 
 # ---------------------------------------------------------------------------
@@ -115,53 +105,82 @@ async def _provider_and_model(
 
 
 @pytest.mark.asyncio
-async def test_pane_id_resolved_from_agent_runs(migrated_db: aiosqlite.Connection):
+async def test_pane_hud_resolves_via_agent_runs(migrated_db: aiosqlite.Connection):
+    """The common case: a pane's first session has pane_id NULL, so
+    resolution must fall back through agent_runs."""
     session_id = _gen_uuid()
     pane_id = _gen_uuid()
     await _insert_session(migrated_db, session_id, pane_id=None)
     await _insert_run(migrated_db, session_id, pane_id)
 
-    pane = await session_hud_service.get_hud(migrated_db, session_id)
-    assert pane is not None
-    assert pane.pane_id == pane_id
+    hud = await session_hud_service.build_hud_for_pane(migrated_db, pane_id)
+    assert hud is not None
+    assert hud["session_id"] == session_id
+    assert hud["pane_id"] == pane_id
 
 
 @pytest.mark.asyncio
-async def test_pane_id_prefers_session_column(migrated_db: aiosqlite.Connection):
+async def test_pane_hud_prefers_stamped_session_pane_id(
+    migrated_db: aiosqlite.Connection,
+):
+    """After a /clear stamp, agent_sessions.pane_id wins over any agent_runs
+    row for the same session."""
     session_id = _gen_uuid()
-    session_pane_id = _gen_uuid()
-    run_pane_id = _gen_uuid()
-    await _insert_session(migrated_db, session_id, pane_id=session_pane_id)
-    await _insert_run(migrated_db, session_id, run_pane_id)
+    stamped_pane_id = _gen_uuid()
+    other_pane_id = _gen_uuid()
+    await _insert_session(migrated_db, session_id, pane_id=stamped_pane_id)
+    await _insert_run(migrated_db, session_id, other_pane_id)
 
-    pane = await session_hud_service.get_hud(migrated_db, session_id)
-    assert pane is not None
-    assert pane.pane_id == session_pane_id
-
-
-@pytest.mark.asyncio
-async def test_no_pane_id_returns_none(migrated_db: aiosqlite.Connection):
-    session_id = _gen_uuid()
-    await _insert_session(migrated_db, session_id, pane_id=None)
-
-    pane = await session_hud_service.get_hud(migrated_db, session_id)
-    assert pane is None
-
-    panes = await session_hud_service.list_hud(migrated_db)
-    assert session_id not in {p.session_id for p in panes}
+    hud = await session_hud_service.build_hud_for_pane(migrated_db, stamped_pane_id)
+    assert hud is not None
+    assert hud["session_id"] == session_id
+    assert hud["pane_id"] == stamped_pane_id
 
 
 @pytest.mark.asyncio
-async def test_list_hud_excludes_ended(migrated_db: aiosqlite.Connection):
+async def test_pane_hud_none_for_unknown_pane(migrated_db: aiosqlite.Connection):
+    """An unresolvable pane returns None outright, never a half-filled dict."""
+    hud = await session_hud_service.build_hud_for_pane(migrated_db, _gen_uuid())
+    assert hud is None
+
+
+# ---------------------------------------------------------------------------
+# list_live_huds
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_live_huds_one_row_per_pane(migrated_db: aiosqlite.Connection):
+    """Two sessions bound to the same pane (idle + active, as after /clear)
+    dedupe to exactly one entry: the active one (D5)."""
+    pane_id = _gen_uuid()
+    idle_id = _gen_uuid()
+    active_id = _gen_uuid()
+    await _insert_session(migrated_db, idle_id, pane_id=pane_id, status="idle")
+    await _insert_session(migrated_db, active_id, pane_id=pane_id, status="active")
+
+    huds = await session_hud_service.list_live_huds(migrated_db)
+    matching = [h for h in huds if h["pane_id"] == pane_id]
+    assert len(matching) == 1
+    assert matching[0]["session_id"] == active_id
+
+
+@pytest.mark.asyncio
+async def test_live_huds_excludes_ended(migrated_db: aiosqlite.Connection):
     ended_id = _gen_uuid()
     active_id = _gen_uuid()
     await _insert_session(migrated_db, ended_id, pane_id=_gen_uuid(), status="ended")
     await _insert_session(migrated_db, active_id, pane_id=_gen_uuid(), status="active")
 
-    panes = await session_hud_service.list_hud(migrated_db)
-    ids = {p.session_id for p in panes}
+    huds = await session_hud_service.list_live_huds(migrated_db)
+    ids = {h["session_id"] for h in huds}
     assert ended_id not in ids
     assert active_id in ids
+
+
+@pytest.mark.asyncio
+async def test_live_huds_empty_on_clean_db(migrated_db: aiosqlite.Connection):
+    assert await session_hud_service.list_live_huds(migrated_db) == []
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +189,7 @@ async def test_list_hud_excludes_ended(migrated_db: aiosqlite.Connection):
 
 
 @pytest.mark.asyncio
-async def test_todo_progress_from_newest_todowrite(migrated_db: aiosqlite.Connection):
+async def test_todo_progress_reads_newest_todowrite(migrated_db: aiosqlite.Connection):
     session_id = _gen_uuid()
     await _insert_session(migrated_db, session_id, pane_id=_gen_uuid())
     older_todos = [{"status": "completed"}] * 1 + [{"status": "pending"}] * 2
@@ -190,9 +209,9 @@ async def test_todo_progress_from_newest_todowrite(migrated_db: aiosqlite.Connec
         payload={"tool_input": {"todos": newer_todos}},
     )
 
-    pane = await session_hud_service.get_hud(migrated_db, session_id)
-    assert pane is not None
-    assert (pane.todo_done, pane.todo_total) == (5, 8)
+    hud = await session_hud_service.build_hud_for_session(migrated_db, session_id)
+    assert hud is not None
+    assert (hud["todo_done"], hud["todo_total"]) == (5, 8)
 
 
 @pytest.mark.asyncio
@@ -202,9 +221,10 @@ async def test_todo_absent_without_todowrite(migrated_db: aiosqlite.Connection):
     await _insert_event(migrated_db, session_id, "UserPromptSubmit")
     await _insert_event(migrated_db, session_id, "PreToolUse", tool_name="Edit")
 
-    pane = await session_hud_service.get_hud(migrated_db, session_id)
-    assert pane is not None
-    assert (pane.todo_done, pane.todo_total) == (None, None)
+    hud = await session_hud_service.build_hud_for_session(migrated_db, session_id)
+    assert hud is not None
+    # Explicitly not (0, 0) — a real-but-empty todo list would be a lie here.
+    assert (hud["todo_done"], hud["todo_total"]) == (None, None)
 
 
 @pytest.mark.asyncio
@@ -219,40 +239,53 @@ async def test_todo_absent_on_malformed_payload(migrated_db: aiosqlite.Connectio
         payload={"tool_input": {"todos": "not-a-list"}},
     )
 
-    pane = await session_hud_service.get_hud(migrated_db, session_id)
-    assert pane is not None
-    assert (pane.todo_done, pane.todo_total) == (None, None)
+    hud = await session_hud_service.build_hud_for_session(migrated_db, session_id)
+    assert hud is not None
+    assert (hud["todo_done"], hud["todo_total"]) == (None, None)
 
 
 # ---------------------------------------------------------------------------
-# Thinking inference (D4)
+# Thinking inference (D7)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("newest_event_type", "status", "expected"),
-    [
-        ("UserPromptSubmit", "active", True),
-        ("PostToolUse", "active", True),
-        ("PreToolUse", "active", False),
-        ("Stop", "idle", False),
-        ("PostToolUse", "idle", False),
-    ],
-)
-async def test_thinking_state_machine(
-    migrated_db: aiosqlite.Connection,
-    newest_event_type: str,
-    status: str,
-    expected: bool,
-):
+async def test_thinking_true_after_post_tool(migrated_db: aiosqlite.Connection):
     session_id = _gen_uuid()
-    await _insert_session(migrated_db, session_id, pane_id=_gen_uuid(), status=status)
-    await _insert_event(migrated_db, session_id, newest_event_type)
+    await _insert_session(migrated_db, session_id, pane_id=_gen_uuid(), status="active")
+    await _insert_event(migrated_db, session_id, "PostToolUse", tool_name="Edit")
 
-    pane = await session_hud_service.get_hud(migrated_db, session_id)
-    assert pane is not None
-    assert pane.thinking is expected
+    hud = await session_hud_service.build_hud_for_session(migrated_db, session_id)
+    assert hud is not None
+    assert hud["thinking"] is True
+
+
+@pytest.mark.asyncio
+async def test_thinking_false_while_tool_running(migrated_db: aiosqlite.Connection):
+    session_id = _gen_uuid()
+    await _insert_session(
+        migrated_db,
+        session_id,
+        pane_id=_gen_uuid(),
+        status="active",
+        current_tool="Edit",
+    )
+    await _insert_event(migrated_db, session_id, "PreToolUse", tool_name="Edit")
+
+    hud = await session_hud_service.build_hud_for_session(migrated_db, session_id)
+    assert hud is not None
+    assert hud["thinking"] is False
+
+
+@pytest.mark.asyncio
+async def test_thinking_false_when_idle(migrated_db: aiosqlite.Connection):
+    session_id = _gen_uuid()
+    await _insert_session(migrated_db, session_id, pane_id=_gen_uuid(), status="idle")
+    await _insert_event(migrated_db, session_id, "Stop")
+
+    hud = await session_hud_service.build_hud_for_session(migrated_db, session_id)
+    assert hud is not None
+    assert hud["thinking"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +293,7 @@ async def test_thinking_state_machine(
 # ---------------------------------------------------------------------------
 
 
-def test_context_window_rules():
+def test_context_window_for_rules():
     assert session_hud_service.context_window_for("claude-opus-4-5-20251101") == 200_000
     assert session_hud_service.context_window_for("claude-opus-5[1m]") == 1_000_000
     assert session_hud_service.context_window_for("gpt-5") is None
@@ -268,61 +301,123 @@ def test_context_window_rules():
 
 
 @pytest.mark.asyncio
-async def test_context_fields_none_when_column_null(migrated_db: aiosqlite.Connection):
+async def test_context_window_unknown_model_is_none(migrated_db: aiosqlite.Connection):
+    session_id = _gen_uuid()
+    await _insert_session(
+        migrated_db,
+        session_id,
+        pane_id=_gen_uuid(),
+        model="gpt-5",
+        context_tokens=12_345,
+    )
+
+    hud = await session_hud_service.build_hud_for_session(migrated_db, session_id)
+    assert hud is not None
+    assert hud["context_window"] is None
+
+
+@pytest.mark.asyncio
+async def test_context_zero_maps_to_null(migrated_db: aiosqlite.Connection):
+    """The migration's DEFAULT 0 backfill must never render as a fake 0%."""
     session_id = _gen_uuid()
     await _insert_session(
         migrated_db, session_id, pane_id=_gen_uuid(), model="claude-opus-4-5"
     )
 
-    pane = await session_hud_service.get_hud(migrated_db, session_id)
-    assert pane is not None
-    assert pane.context_tokens is None
+    hud = await session_hud_service.build_hud_for_session(migrated_db, session_id)
+    assert hud is not None
+    assert hud["context_tokens"] is None
 
 
 # ---------------------------------------------------------------------------
-# Timestamp normalization (D6)
+# record_stop's context_tokens write
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_started_at_normalized_to_t(migrated_db: aiosqlite.Connection):
+async def test_context_tokens_written_on_stop(
+    migrated_db: aiosqlite.Connection, tmp_path
+):
     session_id = _gen_uuid()
-    # No explicit started_at: the column DEFAULTs to space-separated
-    # CURRENT_TIMESTAMP, exactly like a row a test harness inserts by hand.
-    await _insert_session(migrated_db, session_id, pane_id=_gen_uuid())
+    transcript = tmp_path / "transcript.jsonl"
+    usage = {
+        "input_tokens": 1000,
+        "cache_creation_input_tokens": 200,
+        "cache_read_input_tokens": 300,
+        "output_tokens": 500,
+    }
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {"model": "claude-opus-4-5", "usage": usage},
+            }
+        )
+        + "\n"
+    )
 
-    pane = await session_hud_service.get_hud(migrated_db, session_id)
-    assert pane is not None
-    assert " " not in pane.started_at
-    assert "T" in pane.started_at
+    await agent_service.record_stop(
+        migrated_db, {"session_id": session_id, "transcript_path": str(transcript)}
+    )
 
+    row = await _get_session(migrated_db, session_id)
+    assert row is not None
+    assert row["context_tokens"] == 1000 + 300 + 200
 
-# ---------------------------------------------------------------------------
-# model_display via provider_models
-# ---------------------------------------------------------------------------
+    # A second Stop with a different-sized turn must overwrite, not sum.
+    usage2 = {
+        "input_tokens": 50,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 10,
+        "output_tokens": 5,
+    }
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {"model": "claude-opus-4-5", "usage": usage2},
+            }
+        )
+        + "\n"
+    )
+    await agent_service.record_stop(
+        migrated_db, {"session_id": session_id, "transcript_path": str(transcript)}
+    )
+    row_after = await _get_session(migrated_db, session_id)
+    assert row_after is not None
+    assert row_after["context_tokens"] == 50 + 10 + 0
 
 
 @pytest.mark.asyncio
-async def test_model_display_from_provider_models(migrated_db: aiosqlite.Connection):
-    await _provider_and_model(migrated_db, "claude-opus-4-5-20251101", "Opus 4.5")
-    with_display_id = _gen_uuid()
-    without_display_id = _gen_uuid()
-    await _insert_session(
-        migrated_db,
-        with_display_id,
-        pane_id=_gen_uuid(),
-        model="claude-opus-4-5-20251101",
-    )
-    await _insert_session(
-        migrated_db,
-        without_display_id,
-        pane_id=_gen_uuid(),
-        model="claude-sonnet-4-6",
+async def test_record_stop_cost_arithmetic_unchanged(
+    migrated_db: aiosqlite.Connection, tmp_path
+):
+    """Regression net for a deliberate non-change (D8).
+
+    Sonnet-4 pricing ($3/M input, cached $0.30/M, $15/M output) is a known
+    accuracy defect — it prices every model at these rates — tracked as its
+    own follow-up. This test only pins that THIS branch does not change the
+    number it produces. If it starts failing because the pricing bug was
+    fixed, that is expected and correct — move the fix to its own branch,
+    do not "repair" this test in place.
+    """
+    session_id = _gen_uuid()
+    transcript = tmp_path / "transcript.jsonl"
+    usage = {
+        "input_tokens": 1_000_000,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1_000_000,
+        "output_tokens": 1_000_000,
+    }
+    transcript.write_text(
+        json.dumps({"type": "assistant", "message": {"usage": usage}}) + "\n"
     )
 
-    with_pane = await session_hud_service.get_hud(migrated_db, with_display_id)
-    without_pane = await session_hud_service.get_hud(migrated_db, without_display_id)
-    assert with_pane is not None
-    assert with_pane.model_display == "Opus 4.5"
-    assert without_pane is not None
-    assert without_pane.model_display is None
+    await agent_service.record_stop(
+        migrated_db, {"session_id": session_id, "transcript_path": str(transcript)}
+    )
+
+    row = await _get_session(migrated_db, session_id)
+    assert row is not None
+    expected_cost = (1_000_000 * 3 + 1_000_000 * 0.30 + 1_000_000 * 15) / 1_000_000
+    assert row["cost_usd"] == pytest.approx(expected_cost)

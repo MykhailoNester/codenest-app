@@ -1,142 +1,171 @@
 /**
  * Session-state HUD store — one shared SSE subscription + one hydration
- * fetch, fanned out to every `<SessionHud/>` instance by `pane_id`.
+ * fetch for the whole app (D3: no new polling loop), plus one shared
+ * ref-counted git-status poller keyed by cwd (D12: one `git` spawn per
+ * distinct cwd, not per pane).
  *
- * Follows the module-level `useSyncExternalStore` idiom of
- * `stores/provider-store.ts`: plain module state, an exported subscriber
- * hook, and exported non-hook mutators. No zustand needed for one map keyed
- * by pane.
- *
- * Live updates ride the existing `/api/v1/agents/stream` SSE connection (via
- * `sseRegistry`, ref-counted across every consumer already using that
- * stream) — this store never opens its own connection and never polls.
+ * zustand (already a dependency; see `stores/terminal-store.ts`).
  */
 
-import { useSyncExternalStore } from "react";
-import { fetchSessionHud, type SessionHudPane } from "../lib/api";
+import { useEffect } from "react";
+import { create } from "zustand";
+import { fetchPaneHuds, type PaneHud } from "../lib/api";
+import {
+  getGitPaneStatus,
+  isTauriAvailable,
+  type GitPaneStatus,
+} from "../lib/ipc";
 import { sseRegistry, SSE_EVENT_NAMES } from "../lib/sse-registry";
 
-let byPane: Record<string, SessionHudPane> = {};
-const listeners = new Set<() => void>();
-let refCount = 0;
-let unsubscribeSse: (() => void) | null = null;
-
-function emit(): void {
-  for (const l of listeners) l();
+interface SessionHudState {
+  byPane: Record<string, PaneHud>;
+  gitByCwd: Record<string, GitPaneStatus | null>;
 }
 
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+export const useSessionHudStore = create<SessionHudState>(() => ({
+  byPane: {},
+  gitByCwd: {},
+}));
+
+/** Selector: this pane's HUD facts, or `null` when it has no live session. */
+export function useSessionHud(paneId: string): PaneHud | null {
+  return useSessionHudStore((s) => s.byPane[paneId] ?? null);
 }
 
-function isHudPane(value: unknown): value is SessionHudPane {
+// ─── Hydration + SSE deltas (D3) ────────────────────────────────────────────
+
+let started = false;
+
+function isPaneHud(value: unknown): value is PaneHud {
   return (
     typeof value === "object" &&
     value !== null &&
     "pane_id" in value &&
-    "status" in value
+    "session_id" in value
   );
 }
 
-/** Replace the whole map, keyed by `pane_id`, dropping ended sessions. */
-function applySnapshot(panes: SessionHudPane[]): void {
-  const next: Record<string, SessionHudPane> = {};
-  for (const pane of panes) {
-    if (pane.status === "ended") continue;
-    next[pane.pane_id] = pane;
-  }
-  byPane = next;
-  emit();
+function applySnapshot(huds: PaneHud[]): void {
+  const byPane: Record<string, PaneHud> = {};
+  for (const hud of huds) byPane[hud.pane_id] = hud;
+  useSessionHudStore.setState({ byPane });
+}
+
+function applyDelta(hud: PaneHud): void {
+  useSessionHudStore.setState((s) => ({
+    byPane: { ...s.byPane, [hud.pane_id]: hud },
+  }));
 }
 
 /**
- * Upsert (or, on `status === "ended"`, remove) one pane's row. `null` is a
- * no-op — the stream sends `hud: null` for events with no resolvable pane
- * (an external `claude` session with no Codenest pane).
+ * Handle one SSE message. Per C2, a message with no `hud` key means "no
+ * update" and is ignored outright — that covers `launch` and any other kind
+ * with nothing to say about the HUD.
  */
-function applyDelta(hud: SessionHudPane | null): void {
-  if (hud === null) return;
-  const next = { ...byPane };
-  if (hud.status === "ended") {
-    delete next[hud.pane_id];
-  } else {
-    next[hud.pane_id] = hud;
-  }
-  byPane = next;
-  emit();
-}
-
 function handleSse(eventName: string, data: unknown): void {
-  if (typeof data !== "object" || data === null || !("hud" in data)) {
-    // `launch` messages and any future event with no `hud` field — ignore.
-    return;
-  }
+  if (typeof data !== "object" || data === null || !("hud" in data)) return;
   const hud = (data as { hud: unknown }).hud;
   if (eventName === "snapshot") {
-    if (Array.isArray(hud)) {
-      applySnapshot(hud.filter(isHudPane));
-    }
+    applySnapshot(Array.isArray(hud) ? hud.filter(isPaneHud) : []);
     return;
   }
-  if (hud === null || isHudPane(hud)) {
-    applyDelta(hud);
-  }
+  if (isPaneHud(hud)) applyDelta(hud);
 }
 
 /**
- * Acquire the shared subscription; returns a release function. Ref-counted
- * so N panes share one `EventSource` (via `sseRegistry`) and one hydration
- * fetch.
+ * Subscribe the whole app to the agents SSE stream's additive `hud` field
+ * and hydrate once via `GET /api/v1/agents/hud`. Idempotent — every
+ * `<SessionHud/>` calls this from an effect on mount, and only the first
+ * call does anything.
  */
-export function acquireSessionHudStream(): () => void {
-  refCount += 1;
-  if (refCount === 1) {
-    unsubscribeSse = sseRegistry.subscribe("agents", SSE_EVENT_NAMES, handleSse);
-    // Where `EventSource` is undefined (jsdom, or any non-browser host),
-    // `sseRegistry.subscribe` deliberately no-ops the connection
-    // (sse-registry.ts's `getEventSourceCtor`) — nothing will ever deliver a
-    // `snapshot` to reconcile a one-shot hydration fetch against, so seeding
-    // state from it would leave a permanently stale snapshot on screen,
-    // exactly the kind of value this HUD must never show. Skipping the
-    // fetch there keeps the store honest and keeps unrelated component
-    // tests off the network.
-    if (typeof EventSource !== "undefined") {
-      void fetchSessionHud()
-        .then((snapshot) => applySnapshot(snapshot.panes))
-        .catch(() => undefined);
-    }
+export function startSessionHudFeed(): void {
+  if (started) return;
+  started = true;
+  sseRegistry.subscribe("agents", SSE_EVENT_NAMES, handleSse);
+  fetchPaneHuds()
+    .then((huds) => applySnapshot(huds))
+    .catch(() => undefined);
+}
+
+// ─── Git status (D12) ───────────────────────────────────────────────────────
+//
+// One module-level 30 s interval refreshes every registered cwd once per
+// tick, ref-counted so N panes sharing a cwd (the common case in a split)
+// spawn one `git` process, not N. The interval exists only while at least
+// one cwd is registered.
+
+const GIT_POLL_MS = 30_000;
+
+const gitRefCounts = new Map<string, number>();
+let gitInterval: ReturnType<typeof setInterval> | null = null;
+
+async function refreshGitCwd(cwd: string): Promise<void> {
+  // `invoke` throws outside the Tauri shell, and a real terminal pane cannot
+  // exist there anyway — guards both the first call and every later tick.
+  if (!isTauriAvailable()) return;
+  let status: GitPaneStatus | null;
+  try {
+    status = await getGitPaneStatus(cwd);
+  } catch {
+    status = null;
   }
-
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    refCount -= 1;
-    if (refCount <= 0) {
-      refCount = 0;
-      unsubscribeSse?.();
-      unsubscribeSse = null;
-      byPane = {};
-      emit();
-    }
-  };
+  useSessionHudStore.setState((s) => ({
+    gitByCwd: { ...s.gitByCwd, [cwd]: status },
+  }));
 }
 
-export function useSessionHudPane(paneId: string): SessionHudPane | null {
-  return useSyncExternalStore(
-    subscribe,
-    () => byPane[paneId] ?? null,
-    () => null,
+function startGitInterval(): void {
+  if (gitInterval != null) return;
+  gitInterval = setInterval(() => {
+    for (const cwd of gitRefCounts.keys()) void refreshGitCwd(cwd);
+  }, GIT_POLL_MS);
+}
+
+function stopGitInterval(): void {
+  if (gitInterval != null) {
+    clearInterval(gitInterval);
+    gitInterval = null;
+  }
+}
+
+function registerGitCwd(cwd: string): void {
+  const count = gitRefCounts.get(cwd) ?? 0;
+  gitRefCounts.set(cwd, count + 1);
+  if (count === 0) {
+    void refreshGitCwd(cwd);
+    startGitInterval();
+  }
+}
+
+function unregisterGitCwd(cwd: string): void {
+  const count = gitRefCounts.get(cwd) ?? 0;
+  if (count <= 1) {
+    gitRefCounts.delete(cwd);
+    useSessionHudStore.setState((s) => {
+      const next = { ...s.gitByCwd };
+      delete next[cwd];
+      return { gitByCwd: next };
+    });
+  } else {
+    gitRefCounts.set(cwd, count - 1);
+  }
+  if (gitRefCounts.size === 0) stopGitInterval();
+}
+
+/**
+ * Selector + lifecycle hook: registers `cwd` in the shared poller on mount,
+ * deregisters on unmount or when `cwd` changes, and returns the latest known
+ * status (`null` before the first poll resolves, or when the path is not a
+ * git repository).
+ */
+export function useGitPaneStatus(cwd: string | undefined): GitPaneStatus | null {
+  const status = useSessionHudStore((s) =>
+    cwd !== undefined ? (s.gitByCwd[cwd] ?? null) : null,
   );
-}
-
-/** Test-only: reset all module state between test cases. */
-export function _resetSessionHudStoreForTests(): void {
-  byPane = {};
-  refCount = 0;
-  unsubscribeSse?.();
-  unsubscribeSse = null;
+  useEffect(() => {
+    if (cwd === undefined) return;
+    registerGitCwd(cwd);
+    return () => unregisterGitCwd(cwd);
+  }, [cwd]);
+  return status;
 }

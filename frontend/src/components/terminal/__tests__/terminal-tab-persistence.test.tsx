@@ -103,12 +103,6 @@ vi.mock("../../../lib/ipc", async () => {
         };
       }, [id, handler]);
     },
-    // SessionHud (rendered by every TerminalPane since the session-state strip
-    // landed) reaches for these. Vitest 4 proxies a factory mock's namespace and
-    // THROWS on any export the factory omits, so they must be listed here even
-    // though this test never exercises the git cell.
-    isTauriAvailable: () => false,
-    getGitPaneStatus: vi.fn(async () => null),
   };
 });
 
@@ -117,6 +111,15 @@ vi.mock("../../../lib/ipc", async () => {
 vi.mock("../../../hooks/use-terminal-file-drop", () => ({
   useTerminalFileDrop: (): void => undefined,
 }));
+
+// This test is about xterm scrollback surviving a tab switch, not the
+// session-state strip every `TerminalPane` now renders alongside it. The
+// factory supplies the one export the module has, so Vitest 4's mock-proxy
+// cannot throw on a missing export the real `SessionHud` would otherwise
+// reach for (store, SSE, `invoke`) — stubbing it keeps this test hermetic
+// without weakening what it pins (terminal buffer content, which the HUD
+// never touches).
+vi.mock("../session-hud", () => ({ SessionHud: () => null }));
 
 // ---------------------------------------------------------------------------
 // jsdom stubs — local to this file (frontend/vite.config.ts deliberately has

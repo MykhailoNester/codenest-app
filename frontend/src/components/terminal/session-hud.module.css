@@ -1,16 +1,20 @@
 /* Session-state HUD strip — 1:1 with the prototype's `.hud` block
-   (warp-class-input-composer-prototype.html, CSS ~196-224, markup ~621-636),
-   with two deliberate deltas:
+   (warp-class-input-composer-prototype.html, CSS ~197-224, markup ~621-636).
 
-   1. The prototype's `.src` provenance badges and the
-      `body[data-prov="1"] .hud { padding-bottom: 19px }` rule that only
-      makes room for them are dropped — they are a documentation device for
-      the mockup, not product chrome (see the plan's Scope/Out).
-   2. `--hud-pink` is declared locally on `.hud` because `#f9a8d4` is
-      hardcoded in the prototype and is not one of `styles/tokens.css`'s
-      tokens. Same value, one place. */
+   Two deliberate deltas from the prototype source:
+   1. The `.src` provenance badges and the
+      `body[data-prov="1"] .hud { padding-bottom: 19px }` rule that only makes
+      room for them are dropped — they are a documentation device for the
+      mockup, not product chrome (see the plan's Scope/Out).
+   2. The prototype's inline `style="color:var(--fg-3)"` on the tool-elapsed
+      span becomes the `.muted` class below — visually identical, no inline
+      style in JSX.
 
-.hud {
+   `--hud-pink` is declared locally because `#f9a8d4` is hardcoded in the
+   prototype and is not one of `styles/tokens.css`'s tokens; same value, one
+   place. */
+
+.strip {
   --hud-pink: #f9a8d4;
   display: flex;
   align-items: center;
@@ -24,19 +28,19 @@
   scrollbar-width: none;
 }
 
-.hud::-webkit-scrollbar {
+.strip::-webkit-scrollbar {
   display: none;
 }
 
 /* "No live agent session bound to this pane" — matches the prototype's
-   [data-mode="shell"] .hud rule, extended (D11) to a pane whose process
-   has exited. */
+   [data-mode="shell"] .hud rule, extended (D11) to a pane whose process has
+   exited. */
 .dimmed {
   opacity: 0.38;
   filter: grayscale(0.7);
 }
 
-.hcell {
+.cell {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -46,18 +50,18 @@
   flex: none;
 }
 
-.hcell:last-child {
+.cell:last-child {
   border-right: 0;
 }
 
-.hk {
+.key {
   color: var(--fg-4);
   font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.hv {
+.value {
   color: var(--fg-1);
   font-variant-numeric: tabular-nums;
 }
@@ -71,14 +75,14 @@
 .warn {
   color: var(--warn);
 }
-.violet {
-  color: var(--violet);
-}
 .info {
   color: var(--info);
 }
 .pink {
   color: var(--hud-pink);
+}
+.muted {
+  color: var(--fg-3);
 }
 
 .cbar {
@@ -145,12 +149,5 @@
   }
   50% {
     opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spin,
-  .thinkDot {
-    animation: none;
   }
 }

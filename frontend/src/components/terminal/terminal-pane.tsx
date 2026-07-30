@@ -865,7 +865,7 @@ export function TerminalPane({
         </div>
       ) : null}
 
-      {/* Session-state strip — gated on content only (D8): the default
+      {/* Session-state strip — gated on content only (D9): the default
           single-terminal tab renders this pane with no header at all, and
           this strip is the one piece of chrome that must still show up
           there. `.pane` is a column flexbox, so this renders directly
@@ -874,7 +874,6 @@ export function TerminalPane({
       <SessionHud
         paneId={terminalId}
         cwd={liveCwd}
-        active={active}
         exited={liveLeaf?.exited === true}
       />
 

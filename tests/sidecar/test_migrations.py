@@ -271,3 +271,19 @@ async def test_launch_source_overrides_prompt_fanout_check(migrated_db) -> None:
             "INSERT INTO launch_source_overrides (source_kind, source_id, prompt_fanout) VALUES (?, ?, ?)",
             ("task", 2, "shotgun"),
         )
+
+
+# ---------------------------------------------------------------------------
+# Migration 003 — agent_sessions.context_tokens
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_has_context_tokens(migrated_db) -> None:
+    """Migration 003 must add a context_tokens column to agent_sessions."""
+    cur = await migrated_db.execute("PRAGMA table_info(agent_sessions)")
+    rows = await cur.fetchall()
+    col_names = {r["name"] for r in rows}
+    assert "context_tokens" in col_names, (
+        "context_tokens column missing from agent_sessions"
+    )

@@ -121,52 +121,38 @@ pub async fn get_recent_commits(args: GetRecentCommitsArgs) -> Result<Vec<Commit
     Ok(all)
 }
 
-/// Arguments for [`get_git_pane_status`].
-#[derive(Debug, Deserialize)]
-pub struct GitPaneStatusArgs {
-    /// Absolute working directory of the terminal pane to inspect.
-    pub cwd: String,
-}
-
-/// Branch/dirty/ahead-behind facts for one pane's working directory, used by
-/// the session-state HUD's git cell. The sidecar tracks none of this — it
+/// Branch/dirty/ahead facts for one terminal pane's working directory, used
+/// by the session-state HUD's git cell. The sidecar tracks none of this — it
 /// has no reason to shell out — so it comes from the Rust shell instead.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPaneStatus {
-    /// Current branch name, `None` when HEAD is detached.
-    pub branch: Option<String>,
-    /// First 7 characters of the current commit, `None` on the initial
-    /// (parentless) commit before any commit exists.
-    pub head_short: Option<String>,
+    /// Current branch name, or the literal string `"(detached)"` when HEAD
+    /// is detached — never absent, unlike [`CommitEntry`]'s optional fields.
+    pub branch: String,
     /// `true` when any tracked or untracked change is present.
     pub dirty: bool,
     /// Commits ahead of the upstream branch, `None` when there is no upstream.
     pub ahead: Option<u32>,
-    /// Commits behind the upstream branch. Read from the same porcelain line
-    /// as `ahead` but not rendered by the HUD today.
-    pub behind: Option<u32>,
 }
 
 /// Run one `git status --porcelain=v2 --branch` against a pane's live cwd and
-/// return branch/dirty/ahead-behind facts for the session-state HUD's git
-/// cell.
+/// return branch/dirty/ahead facts for the session-state HUD's git cell.
 ///
-/// `Ok(None)` — not `Err` — covers every "there is nothing to show" case: an
-/// empty or relative `cwd`, a path that no longer exists, or a directory that
-/// is not a git work tree (`git` exits non-zero). `Err` is reserved for
-/// nothing today; the `Result` return keeps the calling convention of
-/// [`get_recent_commits`].
+/// `None` — never `Err` — covers every "there is nothing to show" case: an
+/// empty, relative, or non-existent `cwd`, `git` missing, a directory that is
+/// not a git work tree, a non-zero exit, or output with no `# branch.head`
+/// line. Same "skip silently" contract as [`get_recent_commits`].
 ///
-/// `--no-optional-locks` keeps this poll from ever taking the index lock, so
-/// it never contends with the user's own git commands.
+/// # Refresh cadence
+/// The frontend's `session-hud-store` polls this once per distinct cwd every
+/// 30 s (not once per pane — panes in a split usually share a cwd).
+/// `--no-optional-locks` keeps that poll from ever taking the index lock, so
+/// it never contends with the agent's own git commands.
 #[tauri::command]
-pub async fn get_git_pane_status(
-    args: GitPaneStatusArgs,
-) -> Result<Option<GitPaneStatus>, String> {
-    let cwd = args.cwd;
+pub async fn get_git_pane_status(cwd: String) -> Option<GitPaneStatus> {
     if cwd.is_empty() || !cwd.starts_with('/') || !Path::new(&cwd).exists() {
-        return Ok(None);
+        return None;
     }
 
     let output = Command::new("git")
@@ -177,68 +163,55 @@ pub async fn get_git_pane_status(
             "status",
             "--porcelain=v2",
             "--branch",
-            "--untracked-files=normal",
         ])
         .output();
 
     let output = match output {
         Ok(o) if o.status.success() => o,
         // Not a git repo, git missing, or any other non-zero exit — no cell.
-        _ => return Ok(None),
+        _ => return None,
     };
 
-    Ok(Some(parse_git_status_porcelain_v2(&String::from_utf8_lossy(
-        &output.stdout,
-    ))))
+    parse_porcelain_v2(&String::from_utf8_lossy(&output.stdout))
 }
 
 /// Parse `git status --porcelain=v2 --branch` output into [`GitPaneStatus`].
 ///
 /// Pure and unit-tested without spawning git. Requires git >= 2.11 (the
-/// version that introduced the `--porcelain=v2` format).
-fn parse_git_status_porcelain_v2(stdout: &str) -> GitPaneStatus {
+/// version that introduced the `--porcelain=v2` format). Returns `None` when
+/// no `# branch.head` line is present — that only happens for output this
+/// function was never meant to parse (not a repo, or an unexpected git
+/// version), so there is nothing honest to report.
+fn parse_porcelain_v2(stdout: &str) -> Option<GitPaneStatus> {
     let mut branch: Option<String> = None;
-    let mut head_short: Option<String> = None;
     let mut ahead: Option<u32> = None;
-    let mut behind: Option<u32> = None;
     let mut dirty = false;
 
     for line in stdout.lines() {
-        if let Some(oid) = line.strip_prefix("# branch.oid ") {
-            head_short = if oid == "(initial)" || oid.len() < 7 {
-                None
-            } else {
-                Some(oid[..7].to_owned())
-            };
-        } else if let Some(head) = line.strip_prefix("# branch.head ") {
-            branch = if head == "(detached)" {
-                None
-            } else {
-                Some(head.to_owned())
-            };
+        if let Some(head) = line.strip_prefix("# branch.head ") {
+            // "(detached)" passes through verbatim — it is itself the honest
+            // label for this state, not a placeholder.
+            branch = Some(head.to_owned());
         } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
-            // e.g. "+2 -0" — split on whitespace, strip the leading sign
-            // before parsing (`"-0".parse::<u32>()` fails; the value itself
-            // is always non-negative).
-            let mut parts = ab.split_whitespace();
-            ahead = parts
+            // e.g. "+2 -0" — strip the sign before parsing: `"-0".parse::<u32>()`
+            // fails, and the value itself is always non-negative.
+            ahead = ab
+                .split_whitespace()
                 .next()
                 .and_then(|s| s.trim_start_matches(['+', '-']).parse().ok());
-            behind = parts
-                .next()
-                .and_then(|s| s.trim_start_matches(['+', '-']).parse().ok());
-        } else if !line.starts_with('#') && !line.is_empty() {
+        } else if !line.is_empty() && !line.starts_with('#') {
+            // Covers `1`/`2`/`u` (tracked, staged, unmerged) and `?`
+            // (untracked) — untracked-only counts as dirty, matching what
+            // `git status -sb` shows the user.
             dirty = true;
         }
     }
 
-    GitPaneStatus {
+    branch.map(|branch| GitPaneStatus {
         branch,
-        head_short,
         dirty,
         ahead,
-        behind,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -246,58 +219,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_branch_ahead_and_clean() {
-        let status = parse_git_status_porcelain_v2(
-            "# branch.oid abc1234567890\n# branch.head develop\n# branch.ab +2 -0\n",
-        );
-        assert_eq!(status.branch.as_deref(), Some("develop"));
-        assert_eq!(status.head_short.as_deref(), Some("abc1234"));
+    fn parses_branch_dirty_and_ahead() {
+        let status = parse_porcelain_v2(
+            "# branch.oid abc1234567890\n# branch.head develop\n# branch.ab +2 -0\n1 .M N... 100644 100644 100644 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 file.rs\n",
+        )
+        .expect("branch.head present");
+        assert_eq!(status.branch, "develop");
         assert_eq!(status.ahead, Some(2));
-        assert_eq!(status.behind, Some(0));
-        assert!(!status.dirty);
-    }
-
-    #[test]
-    fn marks_dirty_on_any_entry_line() {
-        let status = parse_git_status_porcelain_v2(
-            "# branch.oid abc1234567890\n# branch.head develop\n1 .M N... 100644 100644 100644 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 file.rs\n",
-        );
         assert!(status.dirty);
     }
 
     #[test]
-    fn no_upstream_yields_none_ahead() {
-        let status = parse_git_status_porcelain_v2(
-            "# branch.oid abc1234567890\n# branch.head develop\n",
-        );
-        assert_eq!(status.ahead, None);
-        assert_eq!(status.behind, None);
-    }
-
-    #[test]
-    fn detached_head_yields_none_branch_and_short_oid() {
-        let status = parse_git_status_porcelain_v2(
-            "# branch.oid abc1234567890\n# branch.head (detached)\n",
-        );
-        assert_eq!(status.branch, None);
-        assert_eq!(status.head_short.as_deref(), Some("abc1234"));
-    }
-
-    #[test]
-    fn initial_commit_yields_none_head_short() {
+    fn parses_clean_branch_without_upstream() {
         let status =
-            parse_git_status_porcelain_v2("# branch.oid (initial)\n# branch.head develop\n");
-        assert_eq!(status.head_short, None);
-        assert_eq!(status.branch.as_deref(), Some("develop"));
+            parse_porcelain_v2("# branch.oid abc1234567890\n# branch.head develop\n")
+                .expect("branch.head present");
+        assert_eq!(status.branch, "develop");
+        assert_eq!(status.ahead, None);
+        assert!(!status.dirty);
     }
 
     #[test]
-    fn empty_output_is_clean_and_unknown() {
-        let status = parse_git_status_porcelain_v2("");
-        assert_eq!(status.branch, None);
-        assert_eq!(status.head_short, None);
-        assert_eq!(status.ahead, None);
-        assert_eq!(status.behind, None);
-        assert!(!status.dirty);
+    fn treats_untracked_as_dirty() {
+        let status = parse_porcelain_v2(
+            "# branch.oid abc1234567890\n# branch.head develop\n? untracked.txt\n",
+        )
+        .expect("branch.head present");
+        assert!(status.dirty);
+    }
+
+    #[test]
+    fn parses_ahead_zero_as_zero_not_none() {
+        let status = parse_porcelain_v2(
+            "# branch.oid abc1234567890\n# branch.head develop\n# branch.ab +0 -3\n",
+        )
+        .expect("branch.head present");
+        assert_eq!(status.ahead, Some(0));
+    }
+
+    #[test]
+    fn returns_none_without_branch_head() {
+        assert_eq!(parse_porcelain_v2(""), None);
+        assert_eq!(parse_porcelain_v2("# branch.oid abc1234567890\n"), None);
+    }
+
+    #[test]
+    fn parses_detached_head() {
+        let status = parse_porcelain_v2(
+            "# branch.oid abc1234567890\n# branch.head (detached)\n",
+        )
+        .expect("branch.head present");
+        assert_eq!(status.branch, "(detached)");
     }
 }

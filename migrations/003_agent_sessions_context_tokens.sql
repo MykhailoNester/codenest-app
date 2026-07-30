@@ -1,8 +1,14 @@
--- Window occupancy at the end of the most recent completed turn, in tokens.
--- Written by agent_service.record_stop from the transcript usage it already
--- reads; the per-turn number is otherwise discarded (tokens_in/tokens_out are
--- cumulative and cannot be used to derive context %).
--- NULL = unknown. There is no backfill: historical sessions genuinely have no
--- per-turn usage recorded anywhere, and inventing one would put a fake number
--- on screen.
-ALTER TABLE agent_sessions ADD COLUMN context_tokens INTEGER;
+-- Per-turn context-window occupancy, in tokens, as of the most recent Stop.
+--
+-- tokens_in/tokens_out are running sums across the whole session (see the
+-- UPDATE in agent_service.record_stop) and cannot answer "how full is the
+-- context window right now" — that needs the size of the single most recent
+-- turn, which record_stop already computes and previously discarded. This
+-- column is overwritten (not summed) on every Stop.
+--
+-- DEFAULT 0 backfills every existing row. 0 is not a real occupancy value —
+-- the read path (app/services/session_hud_service.py) maps it to `null`
+-- ("never computed"), so a historical session with no recorded turn never
+-- renders a false "0%" on the HUD strip. No seeded rows: the clean-slate
+-- invariant holds.
+ALTER TABLE agent_sessions ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0;
