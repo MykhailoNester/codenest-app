@@ -108,7 +108,12 @@ pub fn new_registry() -> RunRegistry {
 }
 
 /// Signal an entire process group (negative pid targets the group).
-fn kill_group(pid: u32, sig: i32) {
+///
+/// `pub(crate)` (not private) so `agent::AgentManager` — the duplex-session
+/// module's `stop` / `close_all` — can reuse the same negative-pid signalling
+/// convention rather than duplicating this `unsafe` block. No behaviour
+/// change for the scheduler itself.
+pub(crate) fn kill_group(pid: u32, sig: i32) {
     // SAFETY: a bare libc::kill on a (possibly already-exited) pid is safe; the
     // worst case is ESRCH which we ignore.
     unsafe {
