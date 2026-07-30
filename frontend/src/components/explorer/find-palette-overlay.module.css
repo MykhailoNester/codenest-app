@@ -1,0 +1,32 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.card {
+  width: 520px;
+  max-width: 92vw;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-4);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+
+.foot {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line-1);
+  padding: 6px 9px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-4);
+}

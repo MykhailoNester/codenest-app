@@ -42,6 +42,7 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         "parallel",  # Parallel agent runs (slug: parallel)
         "preview",  # Dev-server preview pane (slug: preview)
         "feed",  # Activity feed (slug: feed)
+        "explorer",  # Workspace navigator side panel (Terminal page, no nav slug)
         "budgets",  # Cost budgets (slug: budgets)
         "sync",  # Sync targets (slug: sync)
         "snippets",  # Snippet library (slug: library)
@@ -66,6 +67,7 @@ _FEATURES_DEFAULT: dict[str, bool] = {
     "snippets": False,
     "gallery": False,
     "feed": False,
+    "explorer": False,
     "mcp": False,
     "integrations": False,
     "plugins": False,

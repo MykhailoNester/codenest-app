@@ -103,7 +103,10 @@ packaged `~/Library/Application Support/com.codenest.dashboard/codenest.db`.
   Never widen the bind address or CORS allowlist.
 - **Frontend chrome renders only from known-good state.** `FEATURE_DEFAULTS` in
   `frontend/src/lib/nav-items.ts` must mirror `_FEATURES_DEFAULT` in
-  `app/services/settings_service.py`. Left-nav visibility is governed solely by feature toggles.
+  `app/services/settings_service.py`, and `KNOWN_FEATURES_ORDERED` (same file) must mirror
+  `KNOWN_FEATURES` — the ordered list is what actually drives the Settings → Features toggle
+  list, so a slug missing from it can never be switched on. Left-nav visibility is governed
+  solely by feature toggles.
 - **Org-agent bundle is manifest-driven.** Editing any file in
   `src-tauri/resources/org-agents/` requires recomputing its sha256 in `manifest.json`
   (and bumping the manifest `version`). Installs are idempotent, per-file-hash-diffed;

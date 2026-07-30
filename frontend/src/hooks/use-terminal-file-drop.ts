@@ -47,9 +47,12 @@
  * would race with Claude Code reading the file asynchronously after paste.
  *
  * # Usage
- * Call once at the TerminalsLayout level -- covers both the embedded terminal
- * page and the detached terminals window without modifying terminal-pane.tsx
- * beyond the single data-terminal-id stamp.
+ * Call once at the TerminalsLayout level -- covers OS drops for both the
+ * embedded terminal page and the detached terminals window without
+ * modifying terminal-pane.tsx beyond the single data-terminal-id stamp.
+ * `pastePathsIntoTerminal` below is the same wrap + paste, exported so the
+ * in-window workspace-navigator drag (`use-pane-path-drop.ts`) can reuse it
+ * instead of duplicating the bracketed-paste + marker-strip logic.
  */
 
 import { useEffect } from "react";
@@ -81,9 +84,29 @@ const BP_MARKER_RE = new RegExp(`${ESC}\\[20[01]~`, "g");
  * No trailing newline -- Claude Code's path regex is end-anchored and any
  * trailing character would break the match.
  */
-function bracketedPaste(path: string): string {
+export function bracketedPaste(path: string): string {
   const safe = path.replace(BP_MARKER_RE, "");
   return `${BP_START}${safe}${BP_END}`;
+}
+
+/**
+ * Paste absolute paths into `terminalId` as independent bracketed-paste
+ * sequences with no separator. Shared by the Tauri OS-drop listener below
+ * and the in-window HTML5 drop from the workspace navigator
+ * (`hooks/use-pane-path-drop.ts`), so the marker-strip defence and the
+ * no-separator rule have exactly one implementation.
+ */
+export function pastePathsIntoTerminal(
+  terminalId: string,
+  paths: string[],
+): void {
+  // Each path gets its own bracketed-paste sequence, concatenated with NO
+  // separator.  A bare \r between sequences would submit/execute the first
+  // path in most shells and could interrupt Claude Code.
+  const input = paths.map(bracketedPaste).join("");
+  void sendTerminalInput(terminalId, input).catch((err) => {
+    console.error("useTerminalFileDrop: sendTerminalInput failed:", err);
+  });
 }
 
 /**
@@ -152,13 +175,7 @@ export function useTerminalFileDrop(): void {
 
         if (!targetId) return;
 
-        // Each path gets its own bracketed-paste sequence, concatenated with
-        // NO separator.  A bare \r between sequences would submit/execute the
-        // first path in most shells and could interrupt Claude Code.
-        const input = paths.map(bracketedPaste).join("");
-        void sendTerminalInput(targetId, input).catch((err) => {
-          console.error("useTerminalFileDrop: sendTerminalInput failed:", err);
-        });
+        pastePathsIntoTerminal(targetId, paths);
       })
       .then((fn) => {
         if (cancelled) fn();

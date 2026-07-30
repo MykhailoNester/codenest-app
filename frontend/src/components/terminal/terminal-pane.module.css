@@ -16,6 +16,14 @@
   border-color: var(--accent);
 }
 
+/* Workspace-navigator row dragged over this pane (prototype `.pane.drop`,
+   CSS line 181). Takes precedence visually over `.paneFocused` — the inset
+   shadow reads as "about to drop here" even on the already-focused pane. */
+.paneDrop {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
+}
+
 .header {
   display: flex;
   flex-direction: row;

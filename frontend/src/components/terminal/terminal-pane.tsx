@@ -23,6 +23,7 @@ import {
 import { upsertSetting, TERMINAL_SETTING_DEFAULTS } from "../../lib/api";
 import { decodeOsc7, decodeOscTitle } from "./osc-handlers";
 import { useTerminalStore } from "../../stores/terminal-store";
+import { usePanePathDrop } from "../../hooks/use-pane-path-drop";
 import { SearchBar } from "./search-bar";
 import { PaneContextMenu, type ContextMenuTarget } from "./pane-context-menu";
 import { Icon } from "../icon";
@@ -207,6 +208,11 @@ export function TerminalPane({
   const toggleMaximize = useTerminalStore((s) => s.toggleMaximize);
   const storeMarkLeafExited = useTerminalStore((s) => s.markLeafExited);
 
+  // -- workspace-navigator drop target (in-window HTML5 drag, not the
+  // Tauri OS-drop path that useTerminalFileDrop owns) --
+  const { dropActive, handlers: panePathDropHandlers } =
+    usePanePathDrop(terminalId);
+
   usePtyExited(terminalId, ({ exit_code }) => {
     storeMarkLeafExited(terminalId);
     const msg =
@@ -313,7 +319,7 @@ export function TerminalPane({
       fontFamily: font_family,
       fontSize: font_size,
       theme: computeTheme(),
-      macOptionIsMeta: true,      // Option key → ESC+<key> for readline word-nav (bug #9)
+      macOptionIsMeta: true, // Option key → ESC+<key> for readline word-nav (bug #9)
       rightClickSelectsWord: false, // context menu is handled by PaneContextMenu
     });
 
@@ -808,8 +814,9 @@ export function TerminalPane({
 
   return (
     <div
-      className={`${styles.pane} ${isFocused ? styles.paneFocused : ""}`}
+      className={`${styles.pane} ${isFocused ? styles.paneFocused : ""} ${dropActive ? styles.paneDrop : ""}`}
       data-terminal-id={terminalId}
+      {...panePathDropHandlers}
     >
       {showHeader ? (
         <div className={styles.header}>

@@ -758,3 +758,180 @@ export function useEvent<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [event]);
 }
+
+// ---------------------------------------------------------------------------
+// Workspace navigator filesystem surface (feature/file-index-ipc)
+//
+// Typed wrappers for the five Tauri commands + one event that back the
+// workspace navigator: `fs_list_dir`, `fs_build_file_index`,
+// `git_status_for_roots`, `fs_watch_set_roots`, `fs_watch_status`, and the
+// `fs_change_batch` event. Every struct here mirrors its Rust counterpart
+// field-for-field; each Rust struct is `#[serde(rename_all = "camelCase")]`
+// so the TS fields are camelCase even where the Rust source is snake_case.
+// The three commands that take a struct argument take it under the key
+// `args` (the Rust command's parameter name) — `fs_list_dir` is the one
+// exception, taking `{ path }` directly.
+// ---------------------------------------------------------------------------
+
+/** `src-tauri/src/commands/fs_nav.rs:33-43`. */
+export interface DirEntryInfo {
+  name: string;
+  path: string;
+  isDir: boolean;
+  isSymlink: boolean;
+  /** Dirs only; `null` for a file, an unreadable dir, or one past the
+   *  per-listing budget. */
+  childCount: number | null;
+}
+
+/** `src-tauri/src/commands/fs_nav.rs:45-54`. */
+export interface DirListing {
+  /** Canonical absolute path that was listed. */
+  path: string;
+  /** Dirs first, then case-insensitive name — sorted server-side. */
+  entries: DirEntryInfo[];
+  /** More than `MAX_DIR_ENTRIES` entries existed; the list was truncated. */
+  truncated: boolean;
+}
+
+/** `src-tauri/src/commands/fs_nav.rs:63-76`. */
+export interface FileIndex {
+  /** Canonical absolute. */
+  root: string;
+  /** Root-relative, `/`-separated, sorted. */
+  files: string[];
+  count: number;
+  /** Hit the `maxFiles` cap. */
+  truncated: boolean;
+  /** `"git"` (via `git ls-files`) or `"walk"` (depth-bounded fallback). */
+  source: string;
+  elapsedMs: number;
+  skippedNonUtf8: number;
+}
+
+/** `src-tauri/src/commands/git.rs:255-266`. */
+export interface GitFileStatus {
+  /** Relative to `GitRootStatus.repoRoot` — NOT to the requested root. */
+  path: string;
+  status: string;
+  staged: boolean;
+  added: number | null;
+  removed: number | null;
+  origPath: string | null;
+}
+
+/** `src-tauri/src/commands/git.rs:269-285`. */
+export interface GitRootStatus {
+  root: string;
+  /** Canonical repo toplevel; the base for every `GitFileStatus.path`.
+   *  `null` iff `isRepo` is false. */
+  repoRoot: string | null;
+  isRepo: boolean;
+  branch: string | null;
+  detached: boolean;
+  dirty: boolean;
+  ahead: number | null;
+  behind: number | null;
+  files: GitFileStatus[];
+  truncated: boolean;
+  error: string | null;
+}
+
+/** `src-tauri/src/fswatch/mod.rs:88-93`. */
+export interface RejectedRoot {
+  path: string;
+  reason: string;
+}
+
+/** `src-tauri/src/fswatch/mod.rs:95-113` (incl. the additive `excludedDirs`
+ *  field — see C1 in the workspace-navigator plan). */
+export interface WatchState {
+  backend: string;
+  /** Canonical, in the order accepted. */
+  watchedRoots: string[];
+  rootCount: number;
+  maxRoots: number;
+  rejected: RejectedRoot[];
+  /** `true` => caller MUST refresh on expand, not trust events. */
+  degraded: boolean;
+  indexedFileCount: number;
+  indexedRootCount: number;
+  batchesEmitted: number;
+  changesEmitted: number;
+  changesDropped: number;
+  debounceMs: number;
+  /** The directory names filtered out of every listing, index and watch
+   *  batch — sourced from `fs_scope::EXCLUDED_DIRS`. */
+  excludedDirs: string[];
+}
+
+/** `src-tauri/src/fswatch/mod.rs:60-72`. */
+export interface FsChange {
+  kind: "created" | "removed" | "modified" | "moved";
+  /** The watched root this path belongs to (absolute, canonical). */
+  root: string;
+  /** Absolute; for `"moved"` this is the destination. */
+  path: string;
+  /** Set only for `"moved"`. */
+  fromPath: string | null;
+  /** `null` when it could not be stat'd (e.g. after removal). */
+  isDir: boolean | null;
+}
+
+/** `src-tauri/src/fswatch/mod.rs:74-86`. */
+export interface FsChangeBatch {
+  /** Monotonic, per app run; gaps mean nothing was emitted. */
+  seq: number;
+  /** Empty when `rescan` is true. */
+  changes: FsChange[];
+  /** Backend lost events (or the batch was over cap) — refetch the
+   *  affected roots. */
+  rescan: boolean;
+  /** Changes filtered out or over the batch cap. */
+  dropped: number;
+}
+
+/** One level of a directory tree, per call — never crawls itself. */
+export async function fsListDir(path: string): Promise<DirListing> {
+  return invoke<DirListing>("fs_list_dir", { path });
+}
+
+/**
+ * Build (or rebuild) the ⌘P palette's file index for `root`. Records its
+ * count into the shell's live watcher state, so calling this AFTER
+ * `fsWatchSetRoots` is what keeps `WatchState.indexedFileCount` honest —
+ * `set_roots` prunes counts for roots that left the watched set.
+ */
+export async function fsBuildFileIndex(
+  root: string,
+  maxFiles?: number,
+): Promise<FileIndex> {
+  return invoke<FileIndex>("fs_build_file_index", {
+    args: { root, maxFiles },
+  });
+}
+
+/** Git status + diffstat for every requested root, in the same order — never
+ *  rejects because one root is broken. Match results back by array index. */
+export async function gitStatusForRoots(
+  paths: string[],
+): Promise<GitRootStatus[]> {
+  return invoke<GitRootStatus[]>("git_status_for_roots", { args: { paths } });
+}
+
+/**
+ * Declarative, idempotent set-swap of the live watcher's roots. `[]` stops
+ * watching. Events during the swap are lost, so the contract requires the
+ * caller to refresh (re-list every expanded directory) after this resolves.
+ */
+export async function fsWatchSetRoots(roots: string[]): Promise<WatchState> {
+  return invoke<WatchState>("fs_watch_set_roots", { args: { roots } });
+}
+
+/** The watcher's current state with no side effect on it. */
+export async function fsWatchStatus(): Promise<WatchState> {
+  return invoke<WatchState>("fs_watch_status");
+}
+
+/** Event name for the debounced watcher batch — see `useEvent`. */
+export const FS_CHANGE_BATCH_EVENT = "fs_change_batch";

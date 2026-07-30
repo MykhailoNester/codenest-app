@@ -3,9 +3,12 @@ import type { ReactElement } from "react";
 import { Shell } from "../components/layout/shell";
 import { TabBar } from "../components/terminal/tab-bar";
 import { SplitContainer } from "../components/terminal/split-container";
+import { WorkspaceNavigator } from "../components/explorer/workspace-navigator";
+import { FindPaletteOverlay } from "../components/explorer/find-palette-overlay";
 import { useTerminalShortcuts } from "../hooks/use-terminal-shortcuts";
 import { useTerminalFileDrop } from "../hooks/use-terminal-file-drop";
 import { useTerminalStore } from "../stores/terminal-store";
+import { useEnabledFeatures } from "../lib/api";
 import styles from "./terminal.module.css";
 
 interface TerminalsLayoutProps {
@@ -26,6 +29,23 @@ interface TerminalsLayoutProps {
    * default re-seed-on-empty behaviour is preserved.
    */
   onCloseTab?: (tabId: string) => void;
+  /**
+   * Whether this mount gets the 262 px Explorer panel at all. `true` only
+   * for the main window (`TerminalPage`) — a popout is a focused surface
+   * the panel would eat a third of, so `TerminalWindowRoot` omits this and
+   * gets `<FindPaletteOverlay>` instead. Defaults to `false` so a bare
+   * `render(<TerminalsLayout />)` (the persistence test) never renders it.
+   */
+  showNavigator?: boolean;
+  /**
+   * The resolved `explorer` feature toggle, resolved by the caller — never
+   * fetched here. `TerminalsLayout` must stay renderable without a
+   * `QueryClientProvider` — `terminal-tab-persistence.test.tsx` renders it
+   * bare five times — so the `useEnabledFeatures()` call is hoisted to
+   * `TerminalPage` / `TerminalWindowRoot`, both of which already sit inside
+   * one. Defaults to `false`.
+   */
+  explorerOn?: boolean;
 }
 
 /**
@@ -36,6 +56,8 @@ interface TerminalsLayoutProps {
 export function TerminalsLayout({
   skipHydration = false,
   onCloseTab,
+  showNavigator = false,
+  explorerOn = false,
 }: TerminalsLayoutProps): ReactElement {
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
@@ -59,7 +81,7 @@ export function TerminalsLayout({
     }
   }, [hydrated, skipHydration, hydrateFromStorage, setHydrated]);
 
-  return (
+  const page = (
     <div className={styles.page}>
       <TabBar onCloseTab={onCloseTab} />
       <div className={styles.paneArea}>
@@ -88,12 +110,22 @@ export function TerminalsLayout({
       </div>
     </div>
   );
+
+  if (!explorerOn) return page;
+
+  return (
+    <div className={styles.row}>
+      {showNavigator ? <WorkspaceNavigator /> : <FindPaletteOverlay />}
+      {page}
+    </div>
+  );
 }
 
 export function TerminalPage(): ReactElement {
+  const explorerOn = useEnabledFeatures().explorer !== false;
   return (
     <Shell scrollable={false}>
-      <TerminalsLayout />
+      <TerminalsLayout showNavigator explorerOn={explorerOn} />
     </Shell>
   );
 }
