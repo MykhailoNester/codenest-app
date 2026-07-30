@@ -207,17 +207,74 @@ still uncommitted.
 
 Never push. Never open a pull request. Never merge or rebase onto `develop`.
 
-## If a run dies mid-flight
+## Never resume. Finish by hand.
 
-The worktrees and `_artifacts/` survive — that is why they live outside the repo.
-**A workflow run cannot be resumed across a process exit**: `resumeFromRunId`
-keys its cache to the session's transcript directory, so a new session replays
-nothing, re-runs Setup, and hard-stops on the branch the dead run already created.
+**`resumeFromRunId` is not a retry mechanism, and there is no case in this
+pipeline where you should reach for it.** Whatever went wrong — the process
+exited, or the run completed with some tasks failed — the recovery is the same
+and it is manual. This section is the whole of it.
 
-That hard stop is correct. Do not weaken it and do not delete the branch to get
-past it. Instead read `git -C <worktree> status` and `ls <artifacts>` to see how
-far it got — `plan.md` plus a `plan-review-*.md` saying APPROVED means planning is
-done — then finish that task by launching the remaining stage agents directly
-(`coder-agent`, `code-reviewer`, `compiler-agent`), and commit as the script's
-Finalize stage does: remove the `.venv` and `src-tauri/target` symlinks first,
-then `git add -A`, then commit.
+Why resume does not work here, in both directions:
+
+- **Across a process exit**, the cache keys to the session's transcript
+  directory, so a new session replays nothing.
+- **Within the same session, on a run that already finished**, the cache does
+  not reliably hit either. Setup re-runs, hard-stops on the branches the first
+  run created, and the tasks you wanted retried never start — while tasks that
+  already committed can re-run and *commit a second time*, leaving two commits
+  with the same subject doing one job.
+
+That hard stop on an existing branch is correct behaviour. Do not weaken it, do
+not delete the branch to get past it, and do not rename the branch to dodge it.
+
+### The recovery
+
+Read the state first — `git -C <worktree> status` and `ls <artifacts>`. Then:
+
+| What you find | What it means |
+|---|---|
+| No `plan.md` | Planning never finished. Start from `planner-agent`. |
+| `plan.md` + a `plan-review-*.md` saying APPROVED | Planning is done. Do not regenerate the plan — it is the artifact the work was reviewed against. |
+| Worktree full of changes, no commit | Implementation got some distance. **Verify and finish it; do not re-implement it.** |
+
+Then drive the remaining stages directly — `coder-agent`, `code-reviewer`,
+`compiler-agent` — and commit as Finalize does: remove the `.venv` and
+`src-tauri/target` symlinks first, then `git add -A`, then commit.
+
+Two things that are easy to get wrong here:
+
+- **Brief the finisher that the work is mostly done.** A `coder-agent` pointed at
+  a full worktree with a bare "implement the plan" will rewrite working code.
+  Tell it to walk the plan item by item, verify what exists, finish only what is
+  missing, and explicitly not improve what already satisfies the plan.
+- **A stage agent can go idle without reporting.** Silence is not success. Ask it
+  for the result explicitly, give it permission to say it did not finish, and
+  never commit on an assumed green gate — re-run `make check-all` yourself, in a
+  separate `compiler-agent`, as one invocation.
+
+## Failure modes that are not code failures
+
+Check `reason` before concluding a task failed on its merits.
+
+- **Account or session limit.** The coder was killed mid-write; nothing is wrong
+  with the plan or the code. The worktree usually holds near-complete work. Wait
+  for the reset, then verify-and-finish as above.
+- **Branch already exists / worktree missing.** An orchestration state mismatch,
+  almost always the wreckage of an attempted resume. Never clobber; recover by
+  hand.
+- **A truncated write can corrupt a file invisibly.** A coder killed mid-write
+  can leave stray bytes in source — a NUL inside a string literal survives
+  `tsc`, `eslint` and the tests without complaint. After finishing an
+  interrupted task, scan its files for NUL bytes before committing, and scan the
+  sibling branches the same run produced.
+
+## Sizing a run
+
+Every task costs roughly six to eight agent invocations across its stages, and
+the whole run shares one account budget. Five `L`-sized tasks is at the practical
+ceiling — that is where this pipeline first hit a session limit mid-implement.
+
+Prefer more waves of smaller tasks over one wide wave of large ones. A task
+that spans a new Rust subsystem *and* a full UI surface should usually be two
+tasks with the second chained on the first: each gets its own plan, its own
+review and its own gate, and a failure costs one stage rather than the lot.
