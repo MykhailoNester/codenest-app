@@ -50,6 +50,11 @@ const FEATURE_META: Record<string, { label: string; description: string }> = {
     label: "Budgets",
     description: "Cost budget tracking by workspace, project, or agent.",
   },
+  composer: {
+    label: "Composer (native agent panes)",
+    description:
+      "Native agent conversation panes with a composer, in place of a terminal. Experimental.",
+  },
   sync: {
     label: "Sync",
     description: "External sync targets and snapshot management.",

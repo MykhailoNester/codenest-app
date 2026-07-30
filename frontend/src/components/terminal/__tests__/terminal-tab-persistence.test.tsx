@@ -65,6 +65,14 @@ const { outputHandlers, exitHandlers } = vi.hoisted(() => {
 // for a given terminal id into the maps above inside a `useEffect`, so the
 // test can drive PTY output / exit events without a real Tauri backend.
 //
+// `agentStart`/`agentSend`/`agentInterrupt`/`agentStop`/
+// `agentRespondPermission`/`subscribeAgentFrames` are the agent-pane-composer
+// additions: `SplitContainer` now imports `agent-pane.tsx`, which imports all
+// six from this same module id, so a factory that omitted them would leave
+// those bindings `undefined` for every test in this file. None of the five
+// fixtures below creates a `kind: "agent"` leaf, so these are never actually
+// invoked — they exist so the mock factory matches the real module's shape.
+//
 // Declared as an async factory so `useEffect` can be obtained via a dynamic
 // `import("react")` inside the factory body — referencing the test file's
 // top-level `import { useEffect } from "react"` directly would hit the same
@@ -79,6 +87,16 @@ vi.mock("../../../lib/ipc", async () => {
     openTerminal: vi.fn(async () => ({ id: "pty-new" })),
     closeTerminal: vi.fn(async () => undefined),
     getWorkspacePath: vi.fn(async () => "/workspace"),
+    agentStart: vi.fn(async () => ({
+      pane_id: "pane-new",
+      session_id: "session-new",
+      pid: 0,
+    })),
+    agentSend: vi.fn(async () => undefined),
+    agentInterrupt: vi.fn(async () => undefined),
+    agentStop: vi.fn(async () => undefined),
+    agentRespondPermission: vi.fn(async () => undefined),
+    subscribeAgentFrames: vi.fn(async () => () => undefined),
     useTerminalOutput: (
       id: string | null,
       handler: (chunk: string) => void,

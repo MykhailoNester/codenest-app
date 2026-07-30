@@ -556,6 +556,7 @@ pub fn run() {
             agent::agent_send,
             agent::agent_interrupt,
             agent::agent_stop,
+            agent::agent_respond_permission,
             get_recent_commits,
             paths_exist,
             capture_screenshot,

@@ -18,6 +18,7 @@ export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
   parallel: true,
   preview: true,
   budgets: true,
+  composer: false,
   schedules: true,
   snippets: false,
   gallery: false,
@@ -27,6 +28,23 @@ export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
   plugins: false,
   sync: false,
 } as const;
+
+/**
+ * Cache key used to persist the resolved `enabled_features` map across cold
+ * relaunches so the sidebar (and, for `composer`, the pane tree) is correct
+ * on the very first paint before the sidecar has responded. Declared here
+ * rather than in `api.ts` (which used to own it) so a non-react-query
+ * consumer — `lib/composer-feature.ts` — can read it without importing the
+ * query layer. This module has no imports and must keep it that way.
+ */
+export const FEATURE_CACHE_KEY = "enabled_features_cache";
+
+/**
+ * Dispatched on `window` after the enabled-features cache is refreshed, so
+ * non-react-query consumers (`lib/composer-feature.ts`) can re-read it
+ * without a QueryClient.
+ */
+export const FEATURE_CACHE_EVENT = "codenest:enabled-features";
 //
 // `group` is a UI-only concern (which sidebar section the item renders in).
 // Items are ordered so each group's entries are contiguous, matching
@@ -37,6 +55,13 @@ export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
 // set of nav slugs it controls.  Nav slugs NOT listed here belong to no gated
 // feature and are NEVER disableable (command, settings, dashboard, projects,
 // team, docs).
+//
+// `composer` is intentionally absent from this map: it gates pane chrome
+// (the native agent pane + composer inside the Terminal page), not a nav
+// slug — an empty array here would just be inert dead config. It still gets
+// a working Settings toggle via KNOWN_FEATURES_ORDERED + FEATURE_META, which
+// is the actual reason that mirror exists. Do not "fix" this by adding an
+// empty `composer: []` entry.
 //
 // Feature → nav slug taxonomy:
 //   work          → Work board kanban (slugs: tasks, inbox).
@@ -75,6 +100,7 @@ export const KNOWN_FEATURES_ORDERED: readonly string[] = [
   "preview",
   "feed",
   "budgets",
+  "composer",
   "sync",
   "snippets",
   "gallery",

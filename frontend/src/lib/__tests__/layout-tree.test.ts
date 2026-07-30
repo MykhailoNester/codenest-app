@@ -4,6 +4,10 @@ import {
   closeLeaf,
   collectLeafIds,
   replaceLeafId,
+  updateLeafTitle,
+  updateLeafCwd,
+  markLeafExited,
+  paneKind,
   type PaneLeaf,
   type LayoutNode,
 } from "../layout-tree";
@@ -154,6 +158,92 @@ describe("layout-tree", () => {
       if (out.type !== "split") throw new Error("expected split");
       expect((out.children[0] as PaneLeaf).terminalId).toBe("A");
       expect((out.children[1] as PaneLeaf).terminalId).toBe("b");
+    });
+  });
+
+  describe("paneKind", () => {
+    it("returns 'shell' for a leaf parsed from a kind-less persisted JSON blob", () => {
+      // Simulates JSON.parse()'ing a layout written before `kind` existed —
+      // the field is simply absent, not `undefined`.
+      const persisted: PaneLeaf = JSON.parse(
+        JSON.stringify(leaf("a")),
+      ) as PaneLeaf;
+      expect(paneKind(persisted)).toBe("shell");
+    });
+
+    it("returns the explicit kind when set", () => {
+      expect(paneKind({ ...leaf("a"), kind: "agent" })).toBe("agent");
+      expect(paneKind({ ...leaf("a"), kind: "agent-tui" })).toBe("agent-tui");
+      expect(paneKind({ ...leaf("a"), kind: "shell" })).toBe("shell");
+    });
+  });
+
+  describe("kind preservation across leaf ops", () => {
+    it("splitLeaf preserves kind on the untouched target leaf and its sibling", () => {
+      const root: LayoutNode = splitLeaf(
+        { ...leaf("a"), kind: "agent" },
+        "a",
+        "h",
+        leaf("b"),
+      );
+      if (root.type !== "split") throw new Error("expected split");
+      expect((root.children[0] as PaneLeaf).kind).toBe("agent");
+      expect((root.children[1] as PaneLeaf).kind).toBeUndefined();
+    });
+
+    it("updateLeafTitle preserves kind on the target leaf and its sibling", () => {
+      const root: LayoutNode = {
+        type: "split",
+        direction: "h",
+        ratio: 0.5,
+        children: [{ ...leaf("a"), kind: "agent" }, leaf("b")],
+      };
+      const out = updateLeafTitle(root, "a", "renamed");
+      if (out.type !== "split") throw new Error("expected split");
+      expect((out.children[0] as PaneLeaf).kind).toBe("agent");
+      expect((out.children[0] as PaneLeaf).title).toBe("renamed");
+      expect((out.children[1] as PaneLeaf).kind).toBeUndefined();
+    });
+
+    it("updateLeafCwd preserves kind on the target leaf and its sibling", () => {
+      const root: LayoutNode = {
+        type: "split",
+        direction: "h",
+        ratio: 0.5,
+        children: [{ ...leaf("a"), kind: "agent" }, leaf("b")],
+      };
+      const out = updateLeafCwd(root, "a", "/tmp/proj");
+      if (out.type !== "split") throw new Error("expected split");
+      expect((out.children[0] as PaneLeaf).kind).toBe("agent");
+      expect((out.children[1] as PaneLeaf).kind).toBeUndefined();
+    });
+
+    it("markLeafExited preserves kind on the target leaf and its sibling", () => {
+      const root: LayoutNode = {
+        type: "split",
+        direction: "h",
+        ratio: 0.5,
+        children: [{ ...leaf("a"), kind: "agent" }, leaf("b")],
+      };
+      const out = markLeafExited(root, "a", true);
+      if (out.type !== "split") throw new Error("expected split");
+      expect((out.children[0] as PaneLeaf).kind).toBe("agent");
+      expect((out.children[0] as PaneLeaf).exited).toBe(true);
+      expect((out.children[1] as PaneLeaf).kind).toBeUndefined();
+    });
+
+    it("replaceLeafId preserves kind on the target leaf and its sibling", () => {
+      const root: LayoutNode = {
+        type: "split",
+        direction: "h",
+        ratio: 0.5,
+        children: [{ ...leaf("a"), kind: "agent" }, leaf("b")],
+      };
+      const out = replaceLeafId(root, "a", "A");
+      if (out.type !== "split") throw new Error("expected split");
+      expect((out.children[0] as PaneLeaf).kind).toBe("agent");
+      expect((out.children[0] as PaneLeaf).terminalId).toBe("A");
+      expect((out.children[1] as PaneLeaf).kind).toBeUndefined();
     });
   });
 });

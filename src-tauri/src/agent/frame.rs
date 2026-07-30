@@ -332,6 +332,55 @@ pub fn encode_interrupt(request_id: &str) -> Result<String, String> {
     encode_line(&value)
 }
 
+/// Encode a `control_response` answering a `can_use_tool` permission request.
+/// Both variants below were round-tripped against CLI 2.1.220 (the plan's
+/// Wire verification, runs B and C):
+///
+/// ```jsonc
+/// // allow
+/// {"type":"control_response","response":{"subtype":"success","request_id":"<id>",
+///  "response":{"behavior":"allow","updatedInput":{…echo of request.input…}}}}
+/// // deny
+/// {"type":"control_response","response":{"subtype":"success","request_id":"<id>",
+///  "response":{"behavior":"deny","message":"Denied in Codenest"}}}
+/// ```
+///
+/// `updated_input` is `None` → `{}` (an allow with no echoed input drives the
+/// CLI's "falling back to original tool input" warning path — deliberately
+/// never our default, see the caller). `message` is `None` on a deny →
+/// `"Denied in Codenest"`. `updatedPermissions` is never emitted: the
+/// captured `permission_suggestions` carry `"destination":"localSettings"`,
+/// i.e. echoing them back would write a persistent rule into the user's
+/// settings file — the opposite of "allow for this session" (Design
+/// decision 7 in the plan).
+pub fn encode_permission_response(
+    request_id: &str,
+    allow: bool,
+    updated_input: Option<&Value>,
+    message: Option<&str>,
+) -> Result<String, String> {
+    let response = if allow {
+        serde_json::json!({
+            "behavior": "allow",
+            "updatedInput": updated_input.cloned().unwrap_or_else(|| serde_json::json!({})),
+        })
+    } else {
+        serde_json::json!({
+            "behavior": "deny",
+            "message": message.unwrap_or("Denied in Codenest"),
+        })
+    };
+    let value = serde_json::json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "request_id": request_id,
+            "response": response,
+        },
+    });
+    encode_line(&value)
+}
+
 fn encode_line(value: &Value) -> Result<String, String> {
     let mut line = serde_json::to_string(value).map_err(|e| format!("encode stdin line: {e}"))?;
     line.push('\n');
@@ -587,6 +636,64 @@ mod tests {
         assert_eq!(value["type"], "user");
         assert_eq!(value["message"]["role"], "user");
         assert_eq!(value["message"]["content"][0]["type"], "text");
+    }
+
+    #[test]
+    fn encode_permission_response_allow_matches_the_captured_control_response() {
+        let input = serde_json::json!({"command": "curl -s https://example.com/nope"});
+        let encoded = encode_permission_response("req_1", true, Some(&input), None)
+            .expect("encode should succeed");
+
+        assert_eq!(encoded.matches('\n').count(), 1);
+        assert!(encoded.ends_with('\n'));
+
+        let value: Value = serde_json::from_str(encoded.trim_end()).expect("must parse");
+        let expected = serde_json::json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": "req_1",
+                "response": {
+                    "behavior": "allow",
+                    "updatedInput": input,
+                },
+            },
+        });
+        assert_eq!(value, expected);
+    }
+
+    #[test]
+    fn encode_permission_response_allow_with_no_input_echoes_an_empty_object() {
+        let encoded =
+            encode_permission_response("req_2", true, None, None).expect("encode should succeed");
+        let value: Value = serde_json::from_str(encoded.trim_end()).expect("must parse");
+        assert_eq!(value["response"]["response"]["updatedInput"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn encode_permission_response_deny_carries_a_message() {
+        let encoded = encode_permission_response("req_3", false, None, None)
+            .expect("encode should succeed");
+        let value: Value = serde_json::from_str(encoded.trim_end()).expect("must parse");
+        assert_eq!(value["response"]["response"]["behavior"], "deny");
+        assert_eq!(value["response"]["response"]["message"], "Denied in Codenest");
+
+        let custom = encode_permission_response("req_4", false, None, Some("nope"))
+            .expect("encode should succeed");
+        let custom_value: Value = serde_json::from_str(custom.trim_end()).expect("must parse");
+        assert_eq!(custom_value["response"]["response"]["message"], "nope");
+    }
+
+    #[test]
+    fn encode_user_message_line_is_byte_exact() {
+        // Pinned so the composer's `previewUserMessageLine` TS test cannot
+        // silently drift from the wire: `serde_json` here has no
+        // `preserve_order` feature, so keys serialise alphabetically.
+        let encoded = encode_user_message("hi").expect("encode should succeed");
+        assert_eq!(
+            encoded,
+            "{\"message\":{\"content\":[{\"text\":\"hi\",\"type\":\"text\"}],\"role\":\"user\"},\"type\":\"user\"}\n"
+        );
     }
 
     #[test]

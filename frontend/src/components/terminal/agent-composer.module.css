@@ -1,0 +1,448 @@
+/* Direct port of prototype:290-368 onto the real tokens. Class names match
+   the plan's table (step 16):
+   .composer .cmode .mbadge.composing .mwhy .mswap -> composer cmode mbadge
+     mbadgeComposing mwhy mswap
+   .cctx .pill(.file/.task/.tpl/.add/.dropped) -> cctx pill pillFile pillTask
+     pillTpl pillAdd pillDropped
+   .cedit .mention .gut .dropzone -> cedit mention gut dropzone
+   .cact .fanout .hint .kbd .send .sendghost -> cact fanout hint kbd send
+     sendGhost
+   .wire .chist .hpill .hpill.q -> wire chist hpill hpillQueued */
+
+.composer {
+  flex: 0 0 auto;
+  background: var(--bg-2);
+  border-top: 1px solid var(--line-2);
+  display: flex;
+  flex-direction: column;
+}
+
+.composerFocused {
+  border-top-color: var(--accent-line);
+}
+
+.cmode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--line-1);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.mbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  padding: 2px 7px;
+  border-radius: var(--r-1);
+  text-transform: uppercase;
+  flex: none;
+}
+
+.mbadgeComposing {
+  background: var(--violet-soft);
+  color: var(--violet);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.mwhy {
+  color: var(--fg-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mswap {
+  margin-left: auto;
+  flex: none;
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  border-radius: var(--r-1);
+  padding: 2px 7px;
+  font-size: 9.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.mswap:hover {
+  border-color: var(--accent-line);
+  color: var(--fg-1);
+}
+
+.cctx {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px 0;
+  flex-wrap: wrap;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-2);
+}
+
+.pillKey {
+  color: var(--fg-4);
+}
+
+.pillRemove {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  font: inherit;
+}
+
+.pillFile {
+  border-color: rgba(56, 189, 248, 0.3);
+  color: var(--info);
+}
+
+.pillTask {
+  border-color: rgba(168, 85, 247, 0.32);
+  color: var(--violet);
+}
+
+.pillTpl {
+  border-color: rgba(34, 197, 94, 0.3);
+  color: var(--ok);
+}
+
+.pillAdd {
+  border-style: dashed;
+  color: var(--fg-3);
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.pillDropped {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+  animation: landed 1.6s ease-out;
+}
+
+@keyframes landed {
+  0% {
+    transform: scale(0.82);
+    opacity: 0;
+  }
+  40% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.cedit {
+  position: relative;
+  margin: 7px 9px 0;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-3);
+}
+
+.composerFocused .cedit {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.07);
+}
+
+.editorStack {
+  position: relative;
+  padding: 8px 10px;
+  min-height: 64px;
+}
+
+.editorOverlay,
+.editorTextarea {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.editorOverlay {
+  position: absolute;
+  inset: 8px 10px;
+  color: var(--fg-1);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.mention {
+  color: var(--info);
+  background: rgba(56, 189, 248, 0.1);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.editorTextarea {
+  position: relative;
+  display: block;
+  width: 100%;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--fg-1);
+  outline: none;
+  min-height: 48px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.gut {
+  position: absolute;
+  right: 9px;
+  bottom: 5px;
+  font-size: 9.5px;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+
+.dropzone {
+  position: absolute;
+  inset: 0;
+  border: 1.5px dashed var(--accent);
+  border-radius: var(--r-3);
+  background: rgba(9, 14, 26, 0.93);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  white-space: normal;
+}
+
+.cact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px 8px;
+  flex-wrap: wrap;
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--fg-3);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: var(--r-1);
+  padding: 1px 5px;
+}
+
+.hint {
+  font-size: 10px;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+}
+
+.fanout {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  padding: 2px 7px;
+  cursor: pointer;
+}
+
+.fanoutCount {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.send {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--violet);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  padding: 5px 13px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.send .kbd {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.sendGhost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-1);
+  color: var(--fg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  padding: 5px 11px;
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.sendGhost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wire {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px 7px;
+  border-top: 1px dashed var(--line-1);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--fg-4);
+  overflow: hidden;
+}
+
+.wireLabel {
+  color: var(--fg-3);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  flex: none;
+}
+
+.wireCode {
+  color: var(--ok);
+  background: rgba(34, 197, 94, 0.08);
+  padding: 1px 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chist {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px 8px;
+  overflow: hidden;
+}
+
+.hpill {
+  flex: none;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+.hpill:hover {
+  color: var(--fg-1);
+  border-color: var(--line-2);
+}
+
+.hpillQueued {
+  border-color: rgba(245, 158, 11, 0.3);
+  color: var(--warn);
+  cursor: default;
+}
+
+.pickerPanel {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 6px);
+  width: 260px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  z-index: 10;
+}
+
+.pickerHeader {
+  padding: 4px 9px;
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-2);
+}
+
+.pickerRow {
+  display: flex;
+  gap: 8px;
+  padding: 5px 9px;
+  color: var(--fg-2);
+  line-height: 1.5;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  font: inherit;
+}
+
+.pickerRow:hover {
+  background: var(--accent-soft);
+  color: var(--fg-0);
+}
+
+.pickerEmpty {
+  padding: 8px 9px;
+  color: var(--fg-4);
+}

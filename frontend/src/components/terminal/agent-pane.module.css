@@ -1,0 +1,169 @@
+/* Chrome for the native agent pane. The header intentionally mirrors
+   terminal-pane.module.css's `.header`/`.title`/`.cwd`/`.iconBtn`/`.close`
+   rules (values, not an import — a second component depending on a sibling's
+   CSS module is more fragile than repeating five small rules) so a shell
+   pane and an agent pane sit side by side without a visual seam. */
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-1);
+  border-radius: var(--r-3);
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid transparent;
+  transition: border-color 100ms ease;
+  position: relative;
+}
+
+.paneFocused {
+  border-color: var(--accent);
+}
+
+.header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-1);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+/* prototype .kind.agent (phead) */
+.kind {
+  flex: 0 0 auto;
+  color: var(--violet);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  color: var(--fg-1);
+}
+
+.cwd {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--fg-2);
+  opacity: 0.85;
+}
+
+.iconBtn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-2);
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: var(--r-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.iconBtn:hover {
+  background: var(--line-1);
+  color: var(--fg-1);
+}
+
+.close {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-2);
+  cursor: pointer;
+  padding: 0 0.4rem;
+  border-radius: var(--r-1);
+  line-height: 1;
+}
+
+.close:hover {
+  background: var(--line-1);
+  color: var(--fg-1);
+}
+
+/* Body: conversation above, composer (or the disabled/ended bar) below. */
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* "Session ended (exit N) · Restart" bar replacing the composer once the
+   child process has exited (see step 16 in the plan). */
+.endedBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border-top: 1px solid var(--line-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+.restartBtn {
+  appearance: none;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  color: var(--fg-1);
+  border-radius: var(--r-2);
+  padding: 3px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.restartBtn:hover {
+  border-color: var(--accent-line);
+}
+
+/* Inline start-failure notice + Retry (never throws — see mod.rs's
+   documented error strings, rendered verbatim). */
+.startError {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--err);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* <AgentPaneDisabled/> — feature off but the leaf still exists and rehydrates. */
+.disabled {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: center;
+}

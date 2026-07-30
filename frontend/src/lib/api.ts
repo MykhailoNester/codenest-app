@@ -21,7 +21,17 @@ import {
 } from "@tanstack/react-query";
 import { sseRegistry, SSE_EVENT_NAMES } from "./sse-registry";
 import { SIDECAR_BASE_URL } from "./sidecar-url";
-import { FEATURE_DEFAULTS } from "./nav-items";
+import {
+  FEATURE_DEFAULTS,
+  FEATURE_CACHE_KEY,
+  FEATURE_CACHE_EVENT,
+} from "./nav-items";
+
+// Re-exported so any existing `import { FEATURE_CACHE_KEY } from "./api"`
+// caller still resolves — the constant itself now lives in `nav-items.ts`
+// (a leaf module with no imports) so `lib/composer-feature.ts` can read it
+// without pulling in react-query.
+export { FEATURE_CACHE_KEY };
 
 // Re-exported so existing `import { SIDECAR_BASE_URL } from "./api"` callers keep
 // working. The constant itself lives in `sidecar-url.ts` to avoid an import cycle
@@ -2442,13 +2452,6 @@ export function useLookups(): UseQueryResult<LookupsOut, SidecarError> {
 }
 
 /**
- * Cache key used to persist the resolved `enabled_features` map across
- * cold relaunches so the sidebar is correct on the very first paint before
- * the sidecar responds.
- */
-export const FEATURE_CACHE_KEY = "enabled_features_cache";
-
-/**
  * Resolves the enabled-features map with three-tier precedence:
  *   live sidecar data > localStorage cache > FEATURE_DEFAULTS
  *
@@ -2472,14 +2475,18 @@ export function useEnabledFeatures(): Record<string, boolean> {
     }
   }, []);
 
-  // Persist fresh live data to localStorage whenever it arrives.
+  // Persist fresh live data to localStorage whenever it arrives, announcing
+  // the write (only when it actually changed, to avoid a pointless notify on
+  // every refetch) so non-react-query consumers — `lib/composer-feature.ts`
+  // — can re-read it without a QueryClient.
   useEffect(() => {
     if (!data?.enabled_features) return;
     try {
-      localStorage.setItem(
-        FEATURE_CACHE_KEY,
-        JSON.stringify(data.enabled_features),
-      );
+      const next = JSON.stringify(data.enabled_features);
+      if (localStorage.getItem(FEATURE_CACHE_KEY) !== next) {
+        localStorage.setItem(FEATURE_CACHE_KEY, next);
+        window.dispatchEvent(new Event(FEATURE_CACHE_EVENT));
+      }
     } catch {
       /* non-fatal */
     }
