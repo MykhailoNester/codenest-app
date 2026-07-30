@@ -8,7 +8,7 @@ croniter>=6.2.4
 ruff==0.16.0
 mypy==1.13.0
 types-croniter>=6.2.4.20260711
-pyinstaller==6.20.0
+pyinstaller==6.21.0
 
 # Testing
 pytest==9.1.1
