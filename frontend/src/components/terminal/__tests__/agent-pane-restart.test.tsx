@@ -38,6 +38,13 @@ const { handlers } = vi.hoisted(() => ({
 vi.mock("../../../lib/ipc", async () => {
   const { useEffect } = await import("react");
   return {
+    // `session-hud-store` reads both of these on mount. A vi.mock factory
+    // replaces the module wholesale, so an export the rendered subtree
+    // reaches must be listed here or Vitest throws on access. Returning
+    // false keeps the HUD in its no-Tauri branch, which is what a jsdom
+    // test should exercise.
+    isTauriAvailable: vi.fn((): boolean => false),
+    getGitPaneStatus: vi.fn(async () => null),
     sendTerminalInput: vi.fn(async () => undefined),
     resizeTerminal: vi.fn(async () => undefined),
     openPath: vi.fn(async () => undefined),

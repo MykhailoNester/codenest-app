@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::docs::require_home_scope;
-use crate::commands::fs_scope::{is_excluded_relative, resolve_in_home_scope};
+use crate::commands::fs_scope::{is_excluded_relative, resolve_in_home_scope, EXCLUDED_DIRS};
 
 /// macOS FSEvents gives one cheap kernel watch per tree; Linux inotify needs
 /// a descriptor per directory and hits `max_user_watches` on a large
@@ -110,6 +110,10 @@ pub struct WatchState {
     pub changes_emitted: u64,
     pub changes_dropped: u64,
     pub debounce_ms: u64,
+    /// The directory names filtered out of every listing, index and watch
+    /// batch. Sourced from `fs_scope::EXCLUDED_DIRS` so the navigator
+    /// footer states the real policy rather than a duplicated literal.
+    pub excluded_dirs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -418,6 +422,7 @@ impl FsWatchManager {
             changes_emitted: self.changes_emitted.load(Ordering::Relaxed),
             changes_dropped: self.changes_dropped.load(Ordering::Relaxed),
             debounce_ms: DEBOUNCE_MS,
+            excluded_dirs: EXCLUDED_DIRS.iter().map(|s| (*s).to_string()).collect(),
         }
     }
 
@@ -833,6 +838,18 @@ mod tests {
         for r in &rejected {
             assert!(r.reason.contains("refresh on expand"));
         }
+    }
+
+    #[test]
+    fn watch_state_reports_the_real_exclusion_list() {
+        // No `AppHandle` needed — `state()` reads only its own mutexes and
+        // the `EXCLUDED_DIRS` constant, so this pins that the footer's list
+        // is sourced from the shared policy, not typed out separately.
+        let state = FsWatchManager::new().state();
+        let expected: Vec<String> = EXCLUDED_DIRS.iter().map(|s| s.to_string()).collect();
+        assert_eq!(state.excluded_dirs, expected);
+        assert!(state.excluded_dirs.contains(&".git".to_string()));
+        assert!(state.excluded_dirs.contains(&"node_modules".to_string()));
     }
 
     #[test]

@@ -498,6 +498,8 @@ export interface Project {
   root_path: string | null;
   /** 1 when this row represents the synthetic workspace aggregate project. */
   is_workspace: number;
+  /** 1 when the project is active (not archived). */
+  is_active: number;
   /** FK → providers.id; null means "no default set". */
   default_provider_id: number | null;
   /** FK → profiles.id; null means unassigned / uses the default profile. */

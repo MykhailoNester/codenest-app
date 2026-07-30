@@ -1,3 +1,17 @@
+/*
+ * Wraps the Explorer panel + `.page` side by side when the `explorer`
+ * feature is on. Only rendered at all when the toggle is on (see
+ * `TerminalsLayout`), so the default (toggle off) layout is byte-for-byte
+ * what it was before this panel existed — `.page` renders as the sole
+ * child of `TerminalsLayout`'s returned tree in that case.
+ */
+.row {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
 .page {
   display: flex;
   flex-direction: column;

@@ -9,6 +9,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { TerminalsLayout } from "./terminal";
 import { useEvent, closeTerminal } from "../lib/ipc";
+import { useEnabledFeatures } from "../lib/api";
 import {
   useTerminalStore,
   TERMINAL_STORAGE_KEY,
@@ -41,6 +42,10 @@ export function TerminalWindowRoot(): ReactElement {
   const [sidecarDown, setSidecarDown] = useState(false);
   const closeUnlistenRef = useRef<UnlistenFn | null>(null);
   const terminalStore = useTerminalStore();
+  // The popout rule (Design decision 3 / research §12 "Popped-out windows"):
+  // a detached window never gets the 262 px panel, only the ⌘P palette — so
+  // `showNavigator` is deliberately omitted below.
+  const explorerOn = useEnabledFeatures().explorer !== false;
 
   // Tab-close handler for the detached window.  Uses `closeTabNoReSeed` so
   // that removing the last tab does not spawn a replacement shell — instead the
@@ -210,6 +215,7 @@ export function TerminalWindowRoot(): ReactElement {
         <TerminalsLayout
           skipHydration={hasPendingLaunch}
           onCloseTab={handleCloseTab}
+          explorerOn={explorerOn}
         />
       </div>
     </div>
