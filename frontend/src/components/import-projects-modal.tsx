@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
 import { useEscapeKey } from "../hooks/use-escape-key";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { pickDirectory } from "../lib/ipc";
 import {
   useScanProjects,
   useRichImportProjects,
   useProfiles,
+  useSystemInfo,
   type DiscoveryCandidate,
   type ProfileOut,
 } from "../lib/api";
@@ -45,6 +52,23 @@ const rowStyle: React.CSSProperties = {
   borderBottom: "1px solid var(--line-3)",
 };
 
+/** Scan depth for the modal: three levels below the chosen root. */
+const SCAN_MAX_DEPTH = 3;
+
+/** Build a placeholder row for a manually added folder that hasn't (yet)
+ * been confirmed by a scan — no stack/tools/git metadata is known for it. */
+function manualCandidate(path: string): DiscoveryCandidate {
+  return {
+    name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,
+    path,
+    stack: null,
+    git: false,
+    tools: [],
+    git_remote: null,
+    already_imported: false,
+  };
+}
+
 export function ImportProjectsModal({
   onClose,
   onImported,
@@ -58,27 +82,63 @@ export function ImportProjectsModal({
   // Show profile selector only when more than one profile exists.
   const showProfileSelector = profiles.length > 1;
   const [profileId, setProfileId] = useState<number | null>(defaultProfileId);
-  const [candidates, setCandidates] = useState<DiscoveryCandidate[]>([]);
+  const { data: systemInfo } = useSystemInfo();
+  // The scan root: a folder the user picked, or the sidecar's home directory
+  // once /api/v1/system/info answers. Derived (not an effect-driven state) so
+  // there is no render where it lags behind either source.
+  const [pickedRoot, setPickedRoot] = useState<string | null>(null);
+  const rootPath = pickedRoot ?? systemInfo?.home ?? "";
+  // `scanned` mirrors the last scan response verbatim so a rescan can keep
+  // replacing it wholesale without discarding manually added folders, which
+  // live separately in `manualPaths` and are merged into `candidates` below.
+  const [scanned, setScanned] = useState<DiscoveryCandidate[]>([]);
+  const [manualPaths, setManualPaths] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [hint, setHint] = useState<string | null>(null);
+  const autoScanned = useRef(false);
 
-  // Trigger initial auto-scan on modal open (no one-shot guard — the user can
-  // also re-run discovery by clicking "Rescan").
-  useEffect(() => {
-    scan.mutate(undefined, {
-      onSuccess: (data) => {
-        setCandidates(data.candidates);
-        setSelected(
-          new Set(
+  const candidates = useMemo<DiscoveryCandidate[]>(() => {
+    const scannedPaths = new Set(scanned.map((c) => c.path));
+    const extras = manualPaths
+      .filter((p) => !scannedPaths.has(p))
+      .map(manualCandidate);
+    return [...extras, ...scanned];
+  }, [scanned, manualPaths]);
+
+  function runScan(root: string): void {
+    if (!root) return;
+    scan.mutate(
+      { roots: [root], git_only: true, max_depth: SCAN_MAX_DEPTH },
+      {
+        onSuccess: (data) => {
+          setScanned(data.candidates);
+          const importedPaths = new Set(
             data.candidates
-              .filter((c) => !c.already_imported)
+              .filter((c) => c.already_imported)
               .map((c) => c.path),
-          ),
-        );
+          );
+          setSelected(
+            new Set([
+              ...manualPaths.filter((p) => !importedPaths.has(p)),
+              ...data.candidates
+                .filter((c) => !c.already_imported)
+                .map((c) => c.path),
+            ]),
+          );
+          setHint(null);
+        },
       },
-    });
+    );
+  }
+
+  // Auto-scan once the root is known (home from the sidecar, or a folder the
+  // user picked before /system/info answered). "Rescan" re-runs it on demand.
+  useEffect(() => {
+    if (autoScanned.current || !rootPath) return;
+    autoScanned.current = true;
+    runScan(rootPath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [rootPath]);
 
   useEscapeKey(onClose);
 
@@ -97,41 +157,30 @@ export function ImportProjectsModal({
   }
 
   async function handlePickFolder(): Promise<void> {
-    const picked = await openDialog({ directory: true, multiple: false });
-    if (typeof picked !== "string") return;
+    const picked = await pickDirectory();
+    if (picked === null) return;
+    // Claim the auto-scan slot so the rootPath change below cannot fire a
+    // second scan.
+    autoScanned.current = true;
+    setPickedRoot(picked);
+    setHint(null);
+    runScan(picked);
+  }
+
+  async function handleAddFolder(): Promise<void> {
+    const picked = await pickDirectory();
+    if (picked === null) return;
     if (candidates.some((c) => c.path === picked)) {
       setHint(`Already in the list: ${picked}`);
       return;
     }
-    const manual: DiscoveryCandidate = {
-      name: picked.split(/[\\/]/).filter(Boolean).pop() ?? picked,
-      path: picked,
-      stack: null,
-      git: false,
-      tools: [],
-      git_remote: null,
-      already_imported: false,
-    };
-    setCandidates((prev) => [manual, ...prev]);
+    setManualPaths((prev) => [picked, ...prev]);
     setSelected((prev) => new Set(prev).add(picked));
     setHint(null);
   }
 
   function handleRescan(): void {
-    scan.mutate(undefined, {
-      onSuccess: (data) => {
-        setCandidates(data.candidates);
-        // Re-select all not-yet-imported entries.
-        setSelected(
-          new Set(
-            data.candidates
-              .filter((c) => !c.already_imported)
-              .map((c) => c.path),
-          ),
-        );
-        setHint(null);
-      },
-    });
+    runScan(rootPath);
   }
 
   function handleImport(): void {
@@ -174,8 +223,20 @@ export function ImportProjectsModal({
             >
               Import Projects
             </div>
-            <div style={{ fontSize: 12, color: "var(--fg-3)", marginTop: 2 }}>
-              Scanned common folders for git repos and recognised manifests.
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--fg-3)",
+                marginTop: 2,
+                fontFamily: "monospace",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                maxWidth: 380,
+              }}
+              title={rootPath || undefined}
+            >
+              {rootPath ? `Scanning ${rootPath}` : "No folder selected yet."}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -184,14 +245,24 @@ export function ImportProjectsModal({
               type="button"
               onClick={() => void handlePickFolder()}
               disabled={scan.isPending}
+              title="Choose the folder to scan for git repositories"
             >
               Pick folder...
             </button>
             <button
               className="d3-btn d3-btn--ghost"
               type="button"
-              onClick={handleRescan}
+              onClick={() => void handleAddFolder()}
               disabled={scan.isPending}
+              title="Add this folder to the list even if it is not a git repository"
+            >
+              Add folder...
+            </button>
+            <button
+              className="d3-btn d3-btn--ghost"
+              type="button"
+              onClick={handleRescan}
+              disabled={scan.isPending || !rootPath}
             >
               {scan.isPending ? "Scanning..." : "Rescan"}
             </button>
@@ -213,8 +284,9 @@ export function ImportProjectsModal({
             <div
               style={{ padding: 32, textAlign: "center", color: "var(--fg-3)" }}
             >
-              No projects found in the default roots. Use "Pick folder..." to
-              add one manually.
+              {!rootPath
+                ? "Pick a folder to scan for git repositories."
+                : `No git repositories found under ${rootPath}. Use "Pick folder..." to scan somewhere else, or "Add folder..." to add a folder directly.`}
             </div>
           ) : (
             candidates.map((c) => {
