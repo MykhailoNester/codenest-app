@@ -59,16 +59,26 @@ export function TerminalsLayout({
     }
   }, [hydrated, skipHydration, hydrateFromStorage, setHydrated]);
 
-  const activeTab = tabs.find((t) => t.id === activeTabId);
-  const showHeader = activeTab ? activeTab.layout.type === "split" : false;
-
   return (
     <div className={styles.page}>
       <TabBar onCloseTab={onCloseTab} />
       <div className={styles.paneArea}>
         <Suspense fallback={null}>
-          {activeTab ? (
-            <SplitContainer node={activeTab.layout} showHeader={showHeader} />
+          {tabs.length > 0 ? (
+            tabs.map((tab) => (
+              <div
+                key={tab.id}
+                className={styles.tabPane}
+                data-tab-pane={tab.id}
+                data-active={tab.id === activeTabId ? "true" : "false"}
+              >
+                <SplitContainer
+                  node={tab.layout}
+                  showHeader={tab.layout.type === "split"}
+                  active={tab.id === activeTabId}
+                />
+              </div>
+            ))
           ) : (
             <div className={styles.empty}>
               {hydrated ? "No terminals" : "Starting…"}
