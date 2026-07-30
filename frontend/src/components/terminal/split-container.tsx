@@ -11,11 +11,20 @@ import styles from "./split-container.module.css";
 interface SplitContainerProps {
   node: LayoutNode;
   showHeader?: boolean;
+  /**
+   * Whether this pane tree belongs to the currently-active tab. Required (no
+   * default) so every recursion site must thread it through explicitly —
+   * `TerminalPane` uses it to gate its `document.body` portals (context menu,
+   * paste modal) while the tab is hidden, and `noUnusedLocals`/strict TS
+   * catch an omission.
+   */
+  active: boolean;
 }
 
 export function SplitContainer({
   node,
   showHeader = true,
+  active,
 }: SplitContainerProps): ReactElement {
   const maximizedLeafId = useTerminalStore((s) => s.maximizedLeafId);
 
@@ -45,17 +54,20 @@ export function SplitContainer({
             ? { profileId: node.profileId }
             : {})}
           showHeader={showHeader || isMaximized}
+          active={active}
         />
       </div>
     );
   }
-  return <SplitNode node={node} />;
+  return <SplitNode node={node} active={active} />;
 }
 
 function SplitNode({
   node,
+  active,
 }: {
   node: Extract<LayoutNode, { type: "split" }>;
+  active: boolean;
 }): ReactElement {
   const updateRatio = useTerminalStore((s) => s.updateRatio);
   const debounceRef = useRef<number | null>(null);
@@ -94,7 +106,7 @@ function SplitNode({
   return (
     <Group key={groupKey} orientation={orientation} onLayoutChange={handleLayout}>
       <Panel id={leftLeafId} defaultSize={`${initialSize}%`} minSize="5%">
-        <SplitContainer node={node.children[0]} showHeader />
+        <SplitContainer node={node.children[0]} showHeader active={active} />
       </Panel>
       <Separator
         className={
@@ -102,7 +114,7 @@ function SplitNode({
         }
       />
       <Panel id={rightLeafId} defaultSize={`${100 - initialSize}%`} minSize="5%">
-        <SplitContainer node={node.children[1]} showHeader />
+        <SplitContainer node={node.children[1]} showHeader active={active} />
       </Panel>
     </Group>
   );

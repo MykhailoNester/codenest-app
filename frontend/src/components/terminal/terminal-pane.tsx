@@ -170,12 +170,19 @@ interface TerminalPaneProps {
   cwd?: string;
   profileId?: string;
   showHeader?: boolean;
+  /**
+   * Whether this pane's owning tab is the active one. Required (no default)
+   * so the two `document.body` portals below (context menu, paste modal) are
+   * always deliberately gated — see `SplitContainer`'s `active` prop doc.
+   */
+  active: boolean;
 }
 
 export function TerminalPane({
   terminalId,
   title,
   showHeader = true,
+  active,
 }: TerminalPaneProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -283,6 +290,17 @@ export function TerminalPane({
       document.removeEventListener("terminal:settings-changed", handler);
     };
   }, [terminalId]);
+
+  // A pane hidden with `visibility: hidden` keeps its DOM/canvas up to date,
+  // but force a full repaint from the buffer when it is revealed so the
+  // visible rows can never depend on the child process redrawing — a pane
+  // whose process already exited has no child left to ask.
+  useEffect(() => {
+    if (!active) return;
+    const term = termRef.current;
+    if (!term) return;
+    term.refresh(0, term.rows - 1);
+  }, [active]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -864,8 +882,11 @@ export function TerminalPane({
         onContextMenu={handleContextMenu}
       />
 
-      {/* Context menu */}
-      {contextMenu !== null
+      {/* Context menu — gated on `active` (not cleared in an effect: doing so
+          would be a `react-hooks/set-state-in-effect` lint error, and the
+          state harmlessly survives to reappear if the user switches back
+          with the menu still open). */}
+      {active && contextMenu !== null
         ? createPortal(
             <PaneContextMenu
               x={contextMenu.x}
@@ -881,8 +902,9 @@ export function TerminalPane({
           )
         : null}
 
-      {/* Multi-line paste confirmation */}
-      {pastePayload !== null
+      {/* Multi-line paste confirmation — gated on `active`, same rationale
+          as the context menu above. */}
+      {active && pastePayload !== null
         ? createPortal(
             <div className={styles.pasteOverlay}>
               <div className={styles.pasteModal}>

@@ -13,8 +13,34 @@
   min-width: 0;
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
+}
+
+/*
+ * One wrapper per tab, all mounted at once so the xterm instance inside
+ * (and its scrollback, selection, WebGL context and `terminal_output:{id}`
+ * subscription) survives a tab switch instead of being torn down and
+ * recreated.  `visibility: hidden` — not `display: none` — keeps the
+ * inactive wrapper in layout with real pixel dimensions, so
+ * terminal-pane.tsx's ResizeObserver guard (which refuses to `fit()` a
+ * zero-sized container) never trips and the hidden pane's cols/rows stay in
+ * sync with the window.  `display: none` / `opacity: 0` / off-screen
+ * translation were all considered and rejected: the first zeroes the
+ * measurements (same problem as above, plus bad split ratios get written
+ * back to the store), the other two keep the pane paintable and
+ * hit-testable, so a hidden pane could still catch a file drop via
+ * `document.elementFromPoint`.
+ */
+.tabPane {
+  position: absolute;
+  inset: 0;
   padding: 0.5rem;
   box-sizing: border-box;
+}
+
+.tabPane[data-active="false"] {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .empty {
