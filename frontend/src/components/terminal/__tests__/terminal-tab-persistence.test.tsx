@@ -103,6 +103,12 @@ vi.mock("../../../lib/ipc", async () => {
         };
       }, [id, handler]);
     },
+    // SessionHud (rendered by every TerminalPane since the session-state strip
+    // landed) reaches for these. Vitest 4 proxies a factory mock's namespace and
+    // THROWS on any export the factory omits, so they must be listed here even
+    // though this test never exercises the git cell.
+    isTauriAvailable: () => false,
+    getGitPaneStatus: vi.fn(async () => null),
   };
 });
 

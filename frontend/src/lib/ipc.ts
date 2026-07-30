@@ -538,6 +538,36 @@ export async function getRecentCommits(
   return invoke<CommitEntry[]>("get_recent_commits", { args });
 }
 
+/** Branch/dirty/ahead-behind facts for one pane's working directory. */
+export interface GitPaneStatus {
+  /** Current branch name, `null` when HEAD is detached. */
+  branch: string | null;
+  /** First 7 characters of the current commit, `null` before any commit exists. */
+  headShort: string | null;
+  /** `true` when any tracked or untracked change is present. */
+  dirty: boolean;
+  /** Commits ahead of the upstream branch, `null` when there is no upstream. */
+  ahead: number | null;
+  /** Commits behind the upstream branch. Read, but not rendered by the HUD. */
+  behind: number | null;
+}
+
+/**
+ * Run one `git status --porcelain=v2 --branch` against a terminal pane's live
+ * cwd, for the session-state HUD's git cell.
+ *
+ * `null` means "not a git repo / unreachable path" — never an error toast.
+ * The frontend polls this every 15 s per visible pane (hidden tabs poll
+ * nothing); `--no-optional-locks` keeps the poll from taking the index lock.
+ */
+export async function getGitPaneStatus(
+  cwd: string,
+): Promise<GitPaneStatus | null> {
+  return invoke<GitPaneStatus | null>("get_git_pane_status", {
+    args: { cwd },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Hook self-test probe
 // ---------------------------------------------------------------------------

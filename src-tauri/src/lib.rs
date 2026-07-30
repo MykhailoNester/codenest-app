@@ -11,7 +11,7 @@ use commands::browser::{
     preview_close, preview_navigate, preview_open, preview_set_bounds, preview_show,
 };
 use commands::docs::{open_in_editor, open_path, read_file_text, reveal_in_finder};
-use commands::git::get_recent_commits;
+use commands::git::{get_git_pane_status, get_recent_commits};
 use commands::hooks::run_hook_probe;
 use commands::screenshot::{
     capture_screenshot, close_screenshot_ring, open_screenshot_ring, ring_capture,
@@ -539,6 +539,7 @@ pub fn run() {
             session::open_command_center_session,
             session::open_project_session,
             get_recent_commits,
+            get_git_pane_status,
             paths_exist,
             capture_screenshot,
             open_screenshot_ring,

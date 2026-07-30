@@ -1,0 +1,156 @@
+/* Session-state HUD strip — 1:1 with the prototype's `.hud` block
+   (warp-class-input-composer-prototype.html, CSS ~196-224, markup ~621-636),
+   with two deliberate deltas:
+
+   1. The prototype's `.src` provenance badges and the
+      `body[data-prov="1"] .hud { padding-bottom: 19px }` rule that only
+      makes room for them are dropped — they are a documentation device for
+      the mockup, not product chrome (see the plan's Scope/Out).
+   2. `--hud-pink` is declared locally on `.hud` because `#f9a8d4` is
+      hardcoded in the prototype and is not one of `styles/tokens.css`'s
+      tokens. Same value, one place. */
+
+.hud {
+  --hud-pink: #f9a8d4;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-1);
+  padding: 6px 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.hud::-webkit-scrollbar {
+  display: none;
+}
+
+/* "No live agent session bound to this pane" — matches the prototype's
+   [data-mode="shell"] .hud rule, extended (D11) to a pane whose process
+   has exited. */
+.dimmed {
+  opacity: 0.38;
+  filter: grayscale(0.7);
+}
+
+.hcell {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border-right: 1px solid var(--line-1);
+  white-space: nowrap;
+  flex: none;
+}
+
+.hcell:last-child {
+  border-right: 0;
+}
+
+.hk {
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hv {
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.acc {
+  color: var(--accent);
+}
+.ok {
+  color: var(--ok);
+}
+.warn {
+  color: var(--warn);
+}
+.violet {
+  color: var(--violet);
+}
+.info {
+  color: var(--info);
+}
+.pink {
+  color: var(--hud-pink);
+}
+
+.cbar {
+  width: 60px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-4);
+  overflow: hidden;
+  flex: none;
+}
+
+.cbarFill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--ok), var(--accent));
+}
+
+.tdbar {
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-4);
+  overflow: hidden;
+  flex: none;
+}
+
+.tdbarFill {
+  display: block;
+  height: 100%;
+  background: var(--hud-pink);
+}
+
+.think {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warn);
+}
+
+.thinkDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warn);
+  animation: ppulse 1.25s ease-in-out infinite;
+}
+
+.spin {
+  display: inline-block;
+  animation: spin 1.9s linear infinite;
+  color: var(--info);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ppulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin,
+  .thinkDot {
+    animation: none;
+  }
+}

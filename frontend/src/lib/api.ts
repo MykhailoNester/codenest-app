@@ -199,6 +199,49 @@ export function useAgentSessions(
   });
 }
 
+// ─── Session-state HUD (per-pane strip) ──────────────────────────────────────
+
+/**
+ * Per-pane session-state facts for the terminal HUD strip
+ * (`GET /api/v1/agents/hud`, mirrored by `app/models/session_hud.py`).
+ *
+ * Honesty contract: every optional field is `null` only when the app
+ * genuinely does not know the value — the HUD renders no cell for it rather
+ * than a placeholder. Live updates ride the existing `/agents/stream` SSE
+ * connection (see `stores/session-hud-store.ts`); this shape is also the
+ * hydration snapshot fetched once per store activation.
+ */
+export interface SessionHudPane {
+  pane_id: string;
+  session_id: string;
+  status: "active" | "idle" | "stopped" | "ended";
+  model: string | null;
+  model_display: string | null;
+  context_tokens: number | null;
+  context_window: number | null;
+  cost_usd: number;
+  started_at: string;
+  current_tool: string | null;
+  current_tool_started_at: string | null;
+  thinking: boolean;
+  todo_done: number | null;
+  todo_total: number | null;
+}
+
+export interface SessionHudSnapshot {
+  panes: SessionHudPane[];
+}
+
+/**
+ * One-shot hydration fetch for the session-state HUD store. Not a
+ * `useQuery` hook — `stores/session-hud-store.ts` owns the single fetch and
+ * fans the result out to every pane, so a second caller belongs there, not
+ * here.
+ */
+export function fetchSessionHud(): Promise<SessionHudSnapshot> {
+  return fetchSidecar<SessionHudSnapshot>("/api/v1/agents/hud");
+}
+
 // ─── Reconcile stale sessions ────────────────────────────────────────────────
 
 export interface CleanupStaleResult {

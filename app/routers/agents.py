@@ -16,7 +16,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.database import get_db
-from app.services import agent_runs_service, agent_service, budget_service
+from app.services import (
+    agent_runs_service,
+    agent_service,
+    budget_service,
+    session_hud_service,
+)
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -292,6 +297,18 @@ async def api_recent_events(
     return JSONResponse(events)
 
 
+@router.get("/api/v1/agents/hud")
+async def api_agents_hud():
+    """Per-pane session-state facts for the terminal HUD strip.
+
+    Hydration snapshot only — live updates ride the existing SSE stream as the
+    additive `hud` field. Always 200; an empty list means nothing live.
+    """
+    db = await get_db()
+    panes = await session_hud_service.list_hud(db)
+    return JSONResponse({"panes": [p.model_dump() for p in panes]})
+
+
 @router.get("/api/v1/agents/sessions/{session_id}")
 async def api_get_session(session_id: str):
     db = await get_db()
@@ -558,9 +575,11 @@ async def stream():
             try:
                 db = await get_db()
                 sessions = await agent_service.list_sessions(db)
+                hud = await session_hud_service.list_hud(db)
                 snapshot = {
                     "kind": "snapshot",
                     "sessions": [dict(s) for s in sessions],
+                    "hud": [p.model_dump() for p in hud],
                 }
                 payload = json.dumps(snapshot, default=str)
                 yield f"event: snapshot\ndata: {payload}\n\n".encode()

@@ -18,7 +18,12 @@ from fastapi import HTTPException
 
 from app.models.session_end_reason import EndCategory, classify
 
-from . import attribution_service, budget_service, notification_service
+from . import (
+    attribution_service,
+    budget_service,
+    notification_service,
+    session_hud_service,
+)
 
 # ─── Pub/sub ────────────────────────────────────────────────────────────────
 
@@ -251,6 +256,15 @@ async def _broadcast(
         ev = await row.fetchone()
         if ev:
             msg["event"] = dict(ev)
+    # Per-pane session-state strip. Only computed when someone is listening —
+    # _publish drops the message otherwise, and this runs on the hook request
+    # path that Claude Code blocks on.
+    if _subscribers:
+        try:
+            hud = await session_hud_service.get_hud(db, session_id)
+        except Exception:  # noqa: BLE001 — the strip must never break ingest
+            hud = None
+        msg["hud"] = hud.model_dump() if hud is not None else None
     _publish(msg)
 
 
@@ -443,6 +457,14 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
     cache_read = int(usage.get("cache_read_input_tokens", 0) or 0)
     # Sonnet 4 pricing: $3/M input (cached: $0.30/M), $15/M output
     cost_delta = (tokens_in * 3 + cache_read * 0.30 + tokens_out * 15) / 1_000_000
+    # Window occupancy at the end of this turn: the prompt that was sent (fresh +
+    # cache-created + cache-read input) plus the reply, which becomes part of the
+    # next prompt. None when the transcript gave us no usage at all, so a failed
+    # read leaves the previous value alone instead of zeroing it.
+    context_tokens: int | None = None
+    if usage:
+        cache_create = int(usage.get("cache_creation_input_tokens", 0) or 0)
+        context_tokens = tokens_in + cache_create + cache_read + tokens_out
     model = payload.get("model") or transcript_model
     set_model = "model = COALESCE(?, model)," if model else ""
     # Resolve provider: the session's profile is authoritative; fall back to
@@ -466,7 +488,7 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
         params.append(model)
     if provider_id:
         params.append(provider_id)
-    params += [tokens_in, tokens_out, cost_delta, now, session_id]
+    params += [tokens_in, tokens_out, cost_delta, context_tokens, now, session_id]
     await db.execute(
         f"""UPDATE agent_sessions
            SET {set_model}
@@ -474,6 +496,7 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
                tokens_in = tokens_in + ?,
                tokens_out = tokens_out + ?,
                cost_usd = cost_usd + ?,
+               context_tokens = COALESCE(?, context_tokens),
                status='idle', current_tool=NULL, current_tool_use_id=NULL,
                current_tool_started_at=NULL, last_event_at=?
            WHERE session_id=?""",
