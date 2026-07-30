@@ -236,16 +236,28 @@ struct AgentSession {
     next_request_id: AtomicU64,
 }
 
-/// A registry slot for one `pane_id`. `Reserved` exists only for the
+/// A registry slot for one `pane_id`. `Reserved(id)` exists only for the
 /// synchronous window inside `start_inner` between the duplicate-session
 /// check and the point where the real `AgentSession` is known (after
 /// `cwd`/argv validation, `Command::spawn`, and the reader/writer/waiter
-/// threads are up) — see [`ReservationGuard`]. Every other accessor treats
-/// `Reserved` exactly like "no session for this pane": a caller that lands
-/// in that window sees the same result it would have seen if it had arrived
-/// a moment earlier, before `agent_start` was ever called.
+/// threads are up) — see [`ReservationGuard`]. The `id` is the session id
+/// `start_inner` mints for this attempt *before* the reservation (step 1),
+/// so a later mutation of this slot can prove it is still talking to the
+/// same attempt that created it. Every other accessor treats
+/// `Reserved`/`Cancelled` exactly like "no session for this pane": a caller
+/// that lands in that window sees the same result it would have seen if it
+/// had arrived a moment earlier, before `agent_start` was ever called.
+///
+/// `Cancelled(id)` is what `stop()` turns a `Reserved(id)` into (F1's second
+/// race, review-2.md): the reservation keeps its id, but the in-flight
+/// `start_inner` must not publish `Live` on top of it — it must kill the
+/// child it just spawned instead. Without this state, `stop()` racing the
+/// provisioning window would have nothing to write that the in-flight call
+/// could observe, and the eventual publish would silently resurrect the
+/// very session the caller just asked to stop.
 enum SessionSlot {
-    Reserved,
+    Reserved(String),
+    Cancelled(String),
     Live(AgentSession),
 }
 
@@ -253,14 +265,14 @@ impl SessionSlot {
     fn live(&self) -> Option<&AgentSession> {
         match self {
             SessionSlot::Live(session) => Some(session),
-            SessionSlot::Reserved => None,
+            SessionSlot::Reserved(_) | SessionSlot::Cancelled(_) => None,
         }
     }
 
     fn into_live(self) -> Option<AgentSession> {
         match self {
             SessionSlot::Live(session) => Some(session),
-            SessionSlot::Reserved => None,
+            SessionSlot::Reserved(_) | SessionSlot::Cancelled(_) => None,
         }
     }
 }
@@ -279,16 +291,43 @@ fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     }
 }
 
+/// Send `SIGTERM` to a process group immediately, then `SIGKILL` after
+/// `SHUTDOWN_GRACE_MS` on a detached thread — the two-phase shutdown shared
+/// by `stop` and, since F1's second race (review-2.md), the cancellation
+/// path in `start_inner`'s own publish step: a `stop()` that lands while the
+/// session is still `Reserved` has to be able to kill the child once
+/// `start_inner` actually spawns it, using the exact same grace period
+/// rather than inventing a second one.
+fn terminate_process_group(pid: u32) {
+    crate::scheduler::kill_group(pid, libc::SIGTERM);
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(SHUTDOWN_GRACE_MS));
+        crate::scheduler::kill_group(pid, libc::SIGKILL);
+    });
+}
+
 /// RAII guard for the reservation `start_inner` places in the registry
 /// before doing anything that can fail (cwd check, argv build, spawn). An
 /// armed guard's `Drop` removes the reservation, so every early return
-/// between "reserve" (step 1) and "replace with the real session" (step 10)
+/// between "reserve" (step 1) and "replace with the real session" (step 9)
 /// cleans up automatically — no early-return path needs its own cleanup
 /// line, and none can be missed. `disarm` is called exactly once, right
-/// after the real `AgentSession` overwrites the reservation.
+/// after the real `AgentSession` overwrites the reservation (or, on the
+/// cancelled path, right after that path has already cleaned the slot up by
+/// hand — see step 9).
+///
+/// `session_id` is the same id stored in `SessionSlot::Reserved`/`Cancelled`
+/// (F1's second race, review-2.md): `Drop` only removes the slot if it still
+/// holds *this* reservation's id, mirroring the ownership check the waiter
+/// thread's own self-cleanup performs (step 8d below) before it removes a
+/// `Live` entry. Nothing else can occupy this key while this call holds the
+/// reservation, so this check should never actually fail today — but the
+/// guard shouldn't rely on that invariant unchecked, given how narrow the
+/// window was that let a bare `remove` here go wrong the first time.
 struct ReservationGuard {
     sessions: SessionMap,
     pane_id: String,
+    session_id: String,
     armed: bool,
 }
 
@@ -300,8 +339,18 @@ impl ReservationGuard {
 
 impl Drop for ReservationGuard {
     fn drop(&mut self) {
-        if self.armed {
-            lock_or_recover(&self.sessions).remove(&self.pane_id);
+        if !self.armed {
+            return;
+        }
+        let mut sessions = lock_or_recover(&self.sessions);
+        let owned_by_us = match sessions.get(&self.pane_id) {
+            Some(SessionSlot::Reserved(id)) | Some(SessionSlot::Cancelled(id)) => {
+                *id == self.session_id
+            }
+            _ => false,
+        };
+        if owned_by_us {
+            sessions.remove(&self.pane_id);
         }
     }
 }
@@ -313,6 +362,15 @@ impl Drop for ReservationGuard {
 /// exit in addition to the explicit `stop` path.
 pub struct AgentManager {
     sessions: SessionMap,
+    /// Test-only knob: when set, `start_inner` sleeps for this long right
+    /// after placing its reservation, widening the reserve→publish window
+    /// enough for a test to reliably race a `stop()` into it (F1's second
+    /// race, review-2.md — that window is normally a handful of syscalls,
+    /// too narrow to hit deterministically from outside). Always `None`
+    /// outside `#[cfg(test)]`; nothing but the test module ever calls
+    /// `set_test_publish_delay`.
+    #[cfg(test)]
+    test_publish_delay: Mutex<Option<Duration>>,
 }
 
 impl Default for AgentManager {
@@ -325,6 +383,8 @@ impl AgentManager {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            test_publish_delay: Mutex::new(None),
         }
     }
 
@@ -359,21 +419,32 @@ impl AgentManager {
     where
         F: Fn(AgentFrame) + Send + Clone + 'static,
     {
-        // 1. Reject a duplicate and reserve this pane_id in the same
-        // critical section as the check — a replace would orphan the first
-        // child's three threads and interleave two sessions on one event
-        // name, so the caller must `agent_stop` first (Design decision 10).
-        // The check and the reservation must share one lock acquisition:
-        // checking `contains_key` and then releasing the lock before
-        // inserting (as a plain two-step check-then-act would) leaves a
-        // window where two concurrent `agent_start` calls for the same pane
-        // both pass the check, both spawn a real `claude` child, and the
-        // later of the two final inserts silently overwrites the earlier
-        // one's registry entry — orphaning that child beyond even
+        // 1. Mint this attempt's session id first — always a fresh session,
+        // this branch never `--resume`s — and reserve `pane_id` under that
+        // id in the same critical section as the duplicate check. A replace
+        // would orphan the first child's three threads and interleave two
+        // sessions on one event name, so the caller must `agent_stop` first
+        // (Design decision 10). The check and the reservation must share one
+        // lock acquisition: checking `contains_key` and then releasing the
+        // lock before inserting (as a plain two-step check-then-act would)
+        // leaves a window where two concurrent `agent_start` calls for the
+        // same pane both pass the check, both spawn a real `claude` child,
+        // and the later of the two final inserts silently overwrites the
+        // earlier one's registry entry — orphaning that child beyond even
         // `close_all`'s reach, since it is then in no registry at all (F1,
-        // review-1.md). Reserving here — and removing the reservation on
-        // any early return via `ReservationGuard` — closes that window
-        // without holding the lock across `Command::spawn()` itself.
+        // review-1.md). Reserving here — and removing the reservation on any
+        // early return via `ReservationGuard` — closes that window without
+        // holding the lock across `Command::spawn()` itself.
+        //
+        // The id is minted *before* the reservation (rather than after cwd
+        // validation, where it used to live) specifically so the reservation
+        // can carry it: `stop()` racing this call's provisioning window
+        // turns `Reserved(id)` into `Cancelled(id)` instead of just deleting
+        // the entry, and the publish step below checks that same id before
+        // going live — closing a second, narrower race where a `stop()`
+        // landing mid-spawn was silently undone a moment later (F1's second
+        // race, review-2.md).
+        let session_id = Uuid::new_v4().to_string();
         {
             let mut sessions = lock_or_recover(&self.sessions);
             if sessions.contains_key(&args.pane_id) {
@@ -382,13 +453,25 @@ impl AgentManager {
                     args.pane_id
                 ));
             }
-            sessions.insert(args.pane_id.clone(), SessionSlot::Reserved);
+            sessions.insert(args.pane_id.clone(), SessionSlot::Reserved(session_id.clone()));
         }
         let reservation = ReservationGuard {
             sessions: Arc::clone(&self.sessions),
             pane_id: args.pane_id.clone(),
+            session_id: session_id.clone(),
             armed: true,
         };
+
+        // Test-only hook (F1 regression test, review-2.md): widen the
+        // reserve→publish window on demand so a test can deterministically
+        // land a `stop()` on the `Reserved` slot instead of racing a
+        // handful of syscalls that are too fast to hit reliably from
+        // outside. Always a no-op in production — nothing outside
+        // `#[cfg(test)]` ever calls `set_test_publish_delay`.
+        #[cfg(test)]
+        if let Some(delay) = lock_or_recover(&self.test_publish_delay).take() {
+            thread::sleep(delay);
+        }
 
         // 2. Fail before spawning anything — the discipline of
         // `pty/mod.rs:175-178`, not the scheduler's warn-and-continue
@@ -403,10 +486,7 @@ impl AgentManager {
             return Err(format!("cwd is not a directory: {expanded_cwd}"));
         }
 
-        // 3. Always a fresh session — this branch never `--resume`s.
-        let session_id = Uuid::new_v4().to_string();
-
-        // 4. Build (or, in tests, override) the argv.
+        // 3. Build (or, in tests, override) the argv.
         let argv = match argv_override {
             Some(v) => v,
             None => build_agent_argv(&args, &session_id)?,
@@ -415,7 +495,7 @@ impl AgentManager {
             return Err("argv override must not be empty".to_string());
         }
 
-        // 5. Spawn with stdin PIPED and held open — the inversion this
+        // 4. Spawn with stdin PIPED and held open — the inversion this
         // module exists for (see module docs).
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
@@ -429,7 +509,7 @@ impl AgentManager {
         command.env("CODENEST_SESSION_MODE", "agent-pane");
         command.env("CODENEST_PANE_ID", &args.pane_id);
 
-        // 6. Own session/process group, so `stop` / `close_all` can signal
+        // 5. Own session/process group, so `stop` / `close_all` can signal
         // the child plus anything it forks as a single unit.
         // SAFETY: setsid is async-signal-safe and is the only call made in
         // the forked child before exec.
@@ -442,7 +522,7 @@ impl AgentManager {
             });
         }
 
-        // 7. Spawn. No registry entry and no frames on failure — nothing to
+        // 6. Spawn. No registry entry and no frames on failure — nothing to
         // leak.
         let mut child = match command.spawn() {
             Ok(c) => c,
@@ -461,20 +541,21 @@ impl AgentManager {
         let stdout = child.stdout.take().ok_or("agent stdout pipe missing")?;
         let stderr = child.stderr.take().ok_or("agent stderr pipe missing")?;
 
-        // 8. Held only by the waiter thread's try_wait loop below — never
+        // 7. Held only by the waiter thread's try_wait loop below — never
         // stored in the registry, since killing goes through the
         // process-group signal, not `Child::kill`.
         let child_arc: Arc<Mutex<Child>> = Arc::new(Mutex::new(child));
 
         let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
 
-        // 9a. Writer thread: owns the ChildStdin and the receiving half of
+        // 8a. Writer thread: owns the ChildStdin and the receiving half of
         // the channel. `agent_send` / `agent_interrupt` never touch stdin
         // directly — they hand one encoded line to this thread and return,
         // so a full pipe can never block a Tauri command, and two
         // concurrent sends can never interleave half a line (fatal to the
         // CLI — verified). Dropping every `Sender` (via `stop` / `close_all`
-        // removing the registry entry, or the manager itself being dropped)
+        // removing the registry entry, the cancellation path in step 9
+        // below dropping it directly, or the manager itself being dropped)
         // ends this loop and drops `stdin`, which is the CLI's documented
         // clean-exit path.
         thread::spawn(move || {
@@ -489,7 +570,7 @@ impl AgentManager {
 
         let pane_id = args.pane_id.clone();
 
-        // 9b. stdout reader: parses each assembled line as one stream-json
+        // 8b. stdout reader: parses each assembled line as one stream-json
         // frame. A line that fails to parse is emitted as an `error` frame,
         // never silently dropped, and the reader keeps going — one bad line
         // does not end the stream.
@@ -536,7 +617,7 @@ impl AgentManager {
             }
         });
 
-        // 9c. stderr reader: the behaviour change vs `scheduler/mod.rs:497-513`,
+        // 8c. stderr reader: the behaviour change vs `scheduler/mod.rs:497-513`,
         // which writes stderr to a transcript file and shows the user
         // nothing. Here every line reaches the frontend as a `stderr` frame.
         let emit_stderr = emit.clone();
@@ -569,12 +650,14 @@ impl AgentManager {
             }
         });
 
-        // 9d. Waiter thread: observes exit, joins the readers first so the
+        // 8d. Waiter thread: observes exit, joins the readers first so the
         // terminal `exit` frame is genuinely last (the ordering discipline
         // of `scheduler/mod.rs:609-610`), then self-cleans the registry —
         // guarded on `session_id` still matching, so a restart on the same
         // pane can never have its new entry evicted by the old session's
-        // delayed cleanup.
+        // delayed cleanup. Step 9 below mirrors this same "am I still the
+        // owner of this slot" check before its own publish (F1's second
+        // race, review-2.md).
         let sessions_for_wait = Arc::clone(&self.sessions);
         let pane_wait = pane_id.clone();
         let session_wait = session_id.clone();
@@ -609,17 +692,58 @@ impl AgentManager {
             emit_wait(AgentFrame::exit(&pane_wait, &session_wait, exit_code));
         });
 
-        // 10. Only now — after every failure path above has had its chance
+        // 9. Only now — after every failure path above has had its chance
         // to bail without a trace — does the session become visible to
-        // `send` / `interrupt` / `stop`. This overwrites the step-1
-        // reservation in place (same key, same lock), then disarms the
-        // guard so its `Drop` does not undo the insert it just made.
+        // `send` / `interrupt` / `stop`. But the reservation planted in
+        // step 1 might not be ours to publish over any more: a `stop()`
+        // racing this exact provisioning window (the duration of
+        // `Command::spawn` plus the four `thread::spawn` calls above) turns
+        // `Reserved(session_id)` into `Cancelled(session_id)` instead of
+        // deleting it (see `stop`'s comment), precisely so this check can
+        // tell the difference. Publish `Live` only if the slot is still
+        // `Reserved` under *this* attempt's `session_id`; anything else —
+        // cancelled by a racing `stop()`, or (should the single-owner
+        // reservation invariant ever be violated elsewhere) replaced or
+        // absent — means leave the registry alone unless it's still our own
+        // `Cancelled` entry to clear, and kill the child already spawned
+        // instead of letting it become a session nobody can reach (F1's
+        // second race, review-2.md) — mirrors the ownership check the
+        // waiter thread's own self-cleanup performs at step 8d.
+        let mut sessions = lock_or_recover(&self.sessions);
+        let still_reserved_by_us = matches!(
+            sessions.get(&args.pane_id),
+            Some(SessionSlot::Reserved(id)) if *id == session_id
+        );
+        if !still_reserved_by_us {
+            let still_cancelled_by_us = matches!(
+                sessions.get(&args.pane_id),
+                Some(SessionSlot::Cancelled(id)) if *id == session_id
+            );
+            if still_cancelled_by_us {
+                sessions.remove(&args.pane_id);
+            }
+            drop(sessions);
+            reservation.disarm();
+            // Same clean-exit path `stop` uses: drop the sender first so
+            // the writer thread's loop ends and it drops `stdin`, then
+            // signal the process group as a robust fallback.
+            drop(stdin_tx);
+            terminate_process_group(pid);
+            return Err(format!(
+                "agent session for pane {} was stopped before it finished starting",
+                args.pane_id
+            ));
+        }
+
+        // This overwrites the step-1 reservation in place (same key, same
+        // lock), then disarms the guard so its `Drop` does not undo the
+        // insert it just made.
         let handle = AgentSessionHandle {
             pane_id: args.pane_id.clone(),
             session_id: session_id.clone(),
             pid,
         };
-        lock_or_recover(&self.sessions).insert(
+        sessions.insert(
             args.pane_id,
             SessionSlot::Live(AgentSession {
                 session_id,
@@ -628,6 +752,7 @@ impl AgentManager {
                 next_request_id: AtomicU64::new(0),
             }),
         );
+        drop(sessions);
         reservation.disarm();
 
         Ok(handle)
@@ -679,27 +804,41 @@ impl AgentManager {
     /// observes the exit and emits the terminal `exit` frame — stop and a
     /// natural exit share one cleanup path.
     pub fn stop(&self, args: AgentPaneArgs) -> Result<(), String> {
-        let removed = lock_or_recover(&self.sessions).remove(&args.pane_id);
-        // A `Reserved` slot has no pid yet (still mid-spawn in some other
-        // `start_inner` call) — nothing to signal, so it is treated the same
-        // as an unknown pane. This matches the behaviour a caller already
-        // saw pre-fix for the equivalent window (the reservation did not
-        // exist at all before F1's fix, so `stop` racing that window found
-        // nothing in the map either); it does not have to be resolved here.
-        let Some(SessionSlot::Live(session)) = removed else {
-            return Ok(());
+        let mut sessions = lock_or_recover(&self.sessions);
+        let live_session = match sessions.remove(&args.pane_id) {
+            None => return Ok(()),
+            Some(SessionSlot::Live(session)) => session,
+            // Mid-spawn in some other `start_inner` call for this pane —
+            // there is no pid yet, so there is nothing to signal directly.
+            // Put the reservation back as `Cancelled`, still carrying its
+            // own id, instead of just discarding it (F1's second race,
+            // review-2.md): a bare `remove` here would let the in-flight
+            // `start_inner` see an empty slot at its own publish step and
+            // unconditionally publish `Live`, silently undoing this `stop`
+            // a moment later. Recording the cancellation under the
+            // reservation's own id lets that publish check refuse to
+            // publish and kill the child it just spawned instead of
+            // registering it.
+            Some(SessionSlot::Reserved(id)) => {
+                sessions.insert(args.pane_id, SessionSlot::Cancelled(id));
+                return Ok(());
+            }
+            // A second `stop()` racing the same window as a first one —
+            // already cancelled, so put it back untouched rather than
+            // dropping the id the in-flight `start_inner` still needs.
+            Some(SessionSlot::Cancelled(id)) => {
+                sessions.insert(args.pane_id, SessionSlot::Cancelled(id));
+                return Ok(());
+            }
         };
-        // Dropping `session` drops `stdin_tx`, which ends the writer
+        drop(sessions);
+        // Dropping `live_session` drops `stdin_tx`, which ends the writer
         // thread's loop and closes stdin — the CLI's own clean-exit path,
         // in addition to the signal below.
-        let pid = session.pid;
-        drop(session);
+        let pid = live_session.pid;
+        drop(live_session);
 
-        crate::scheduler::kill_group(pid, libc::SIGTERM);
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(SHUTDOWN_GRACE_MS));
-            crate::scheduler::kill_group(pid, libc::SIGKILL);
-        });
+        terminate_process_group(pid);
         Ok(())
     }
 
@@ -711,9 +850,12 @@ impl AgentManager {
     /// `scheduler::shutdown_running_jobs` (`scheduler/mod.rs:130-154`),
     /// including the early return when nothing is live.
     pub fn close_all(&self) {
-        // `Reserved` slots (mid-spawn in some concurrent `start_inner` call,
-        // no pid yet) are dropped along with everything else here but not
-        // signalled — there is nothing to signal yet.
+        // `Reserved`/`Cancelled` slots (mid-spawn in some concurrent
+        // `start_inner` call, no pid yet either way) are dropped along with
+        // everything else here but not signalled — there is nothing to
+        // signal yet. The in-flight `start_inner` call still owns killing
+        // whatever it eventually spawns, via its own publish-step ownership
+        // check (F1's second race, review-2.md).
         let sessions: Vec<AgentSession> = lock_or_recover(&self.sessions)
             .drain()
             .filter_map(|(_, slot)| slot.into_live())
@@ -757,6 +899,25 @@ impl AgentManager {
         lock_or_recover(&self.sessions)
             .get(pane_id)
             .is_some_and(|slot| slot.live().is_some())
+    }
+
+    /// Whether `pane_id` currently holds a `Reserved` (not yet published,
+    /// not cancelled) slot. `cfg(test)`-only, used to detect the
+    /// reserve→publish window from outside for the F1 regression test
+    /// below (review-2.md), together with `set_test_publish_delay`.
+    #[cfg(test)]
+    pub(crate) fn is_reserved(&self, pane_id: &str) -> bool {
+        matches!(
+            lock_or_recover(&self.sessions).get(pane_id),
+            Some(SessionSlot::Reserved(_))
+        )
+    }
+
+    /// Set (one-shot) the delay `start_inner` sleeps right after placing its
+    /// reservation — see the field doc on `AgentManager::test_publish_delay`.
+    #[cfg(test)]
+    pub(crate) fn set_test_publish_delay(&self, delay: Duration) {
+        *lock_or_recover(&self.test_publish_delay) = Some(delay);
     }
 }
 
@@ -1034,6 +1195,184 @@ mod tests {
         assert!(poll_until(|| mgr.active_count() == 0));
     }
 
+    // -- F1's second race: `stop()` landing while `start_inner` is still
+    // `Reserved` (review-2.md) ------------------------------------------
+
+    #[test]
+    fn stop_on_a_reserved_slot_marks_it_cancelled_instead_of_discarding_it() {
+        let mgr = AgentManager::new();
+        let pane_id = "pane-stop-reserved";
+        mgr.sessions
+            .lock()
+            .unwrap()
+            .insert(pane_id.to_string(), SessionSlot::Reserved("resv-id".to_string()));
+
+        mgr.stop(AgentPaneArgs {
+            pane_id: pane_id.to_string(),
+        })
+        .expect("stop on a Reserved slot must still succeed");
+
+        let sessions = mgr.sessions.lock().unwrap();
+        let cancelled_id = match sessions.get(pane_id) {
+            Some(SessionSlot::Cancelled(id)) => id.clone(),
+            _ => panic!("expected the slot to become Cancelled, carrying the reservation's id"),
+        };
+        assert_eq!(cancelled_id, "resv-id");
+    }
+
+    #[test]
+    fn stop_on_an_already_cancelled_slot_is_idempotent() {
+        let mgr = AgentManager::new();
+        let pane_id = "pane-stop-cancelled-twice";
+        mgr.sessions
+            .lock()
+            .unwrap()
+            .insert(pane_id.to_string(), SessionSlot::Cancelled("resv-id".to_string()));
+
+        mgr.stop(AgentPaneArgs {
+            pane_id: pane_id.to_string(),
+        })
+        .expect("stop on an already-Cancelled slot must still succeed");
+
+        let sessions = mgr.sessions.lock().unwrap();
+        let id = match sessions.get(pane_id) {
+            Some(SessionSlot::Cancelled(id)) => id.clone(),
+            _ => panic!("a second stop() must not drop the cancellation's id"),
+        };
+        assert_eq!(id, "resv-id");
+    }
+
+    /// A `Cancelled` slot still occupies `pane_id`: a fresh `agent_start`
+    /// for the same pane while a stopped reservation is still being
+    /// unwound must be rejected exactly like a live session would be, not
+    /// treated as free. This is what closes the three-call variant of F1's
+    /// original race (review-1.md) — `stop()` no longer vacates the key at
+    /// all, so a third `start` can never see a genuinely-empty slot during
+    /// this window.
+    #[test]
+    fn start_is_rejected_while_a_cancelled_reservation_still_occupies_the_pane() {
+        let mgr = AgentManager::new();
+        let pane_id = "pane-cancelled-blocks-restart";
+        mgr.sessions
+            .lock()
+            .unwrap()
+            .insert(pane_id.to_string(), SessionSlot::Cancelled("resv-id".to_string()));
+
+        let collector: Collector = Arc::new(Mutex::new(Vec::new()));
+        let err = mgr
+            .start_inner(start_args(pane_id), Some(echoer()), collector_emit(&collector))
+            .expect_err("a pane with a Cancelled reservation must still read as occupied");
+        assert!(err.contains("agent session already running"));
+    }
+
+    #[test]
+    fn reservation_guard_cleans_up_a_cancelled_slot_on_an_early_failure() {
+        let mgr = AgentManager::new();
+        let sessions = Arc::clone(&mgr.sessions);
+        let pane_id = "pane-cancel-early-fail".to_string();
+        let session_id = "fixed-session-id".to_string();
+
+        // Simulate the state a racing `stop()` would have produced: a
+        // reservation already cancelled under its own id.
+        sessions
+            .lock()
+            .unwrap()
+            .insert(pane_id.clone(), SessionSlot::Cancelled(session_id.clone()));
+
+        let guard = ReservationGuard {
+            sessions: Arc::clone(&sessions),
+            pane_id: pane_id.clone(),
+            session_id,
+            armed: true,
+        };
+        drop(guard);
+
+        assert!(
+            !sessions.lock().unwrap().contains_key(&pane_id),
+            "the guard must remove its own cancelled reservation rather than leave it dangling"
+        );
+    }
+
+    #[test]
+    fn reservation_guard_does_not_remove_a_slot_it_no_longer_owns() {
+        let mgr = AgentManager::new();
+        let sessions = Arc::clone(&mgr.sessions);
+        let pane_id = "pane-guard-mismatch".to_string();
+
+        sessions.lock().unwrap().insert(
+            pane_id.clone(),
+            SessionSlot::Reserved("someone-elses-id".to_string()),
+        );
+
+        let guard = ReservationGuard {
+            sessions: Arc::clone(&sessions),
+            pane_id: pane_id.clone(),
+            session_id: "my-id".to_string(),
+            armed: true,
+        };
+        drop(guard);
+
+        assert!(
+            sessions.lock().unwrap().contains_key(&pane_id),
+            "the guard must not remove a reservation belonging to a different session_id"
+        );
+    }
+
+    /// End-to-end regression test for F1's second race (review-2.md): a
+    /// `stop()` landing while `start_inner` is still `Reserved` — between
+    /// the reservation (step 1) and the publish (step 9) — must not be
+    /// silently undone by that same `start_inner` call re-publishing `Live`
+    /// afterward. `set_test_publish_delay` widens that window (otherwise a
+    /// handful of syscalls, too narrow to race reliably from a test) so
+    /// `stop()` deterministically lands on the `Reserved` slot instead of
+    /// racing before the reservation exists or after `Live` is published.
+    #[test]
+    fn stop_racing_the_reservation_window_kills_the_child_instead_of_publishing_it() {
+        let mgr = Arc::new(AgentManager::new());
+        mgr.set_test_publish_delay(Duration::from_millis(150));
+        let collector: Collector = Arc::new(Mutex::new(Vec::new()));
+
+        let start_mgr = Arc::clone(&mgr);
+        let start_collector = Arc::clone(&collector);
+        let start_handle = thread::spawn(move || {
+            start_mgr.start_inner(
+                start_args("pane-race-stop"),
+                Some(echoer()),
+                collector_emit(&start_collector),
+            )
+        });
+
+        assert!(
+            poll_until(|| mgr.is_reserved("pane-race-stop")),
+            "the reservation should become visible well within the delay window"
+        );
+        mgr.stop(AgentPaneArgs {
+            pane_id: "pane-race-stop".to_string(),
+        })
+        .expect("stop should succeed even while the pane is only reserved");
+
+        let result = start_handle.join().expect("start_inner thread should not panic");
+        let err = result.expect_err(
+            "start_inner racing a stop() during its own provisioning window must not publish Live",
+        );
+        assert!(err.contains("was stopped before it finished starting"));
+
+        assert_eq!(
+            mgr.active_count(),
+            0,
+            "the cancelled session must never become visible as Live"
+        );
+        assert!(
+            !mgr.contains("pane-race-stop"),
+            "the registry must not retain the cancelled entry"
+        );
+        assert!(poll_until(|| collector
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|f| f.kind == AgentFrameKind::Exit)));
+    }
+
     #[test]
     fn send_round_trips_one_line_through_the_child() {
         let mgr = AgentManager::new();
@@ -1068,6 +1407,56 @@ mod tests {
         })
         .expect("stop should succeed");
         assert!(poll_until(|| mgr.active_count() == 0));
+    }
+
+    #[test]
+    fn interrupt_round_trips_a_control_request_through_the_child() {
+        let mgr = AgentManager::new();
+        let collector: Collector = Arc::new(Mutex::new(Vec::new()));
+        mgr.start_inner(start_args("pane-k"), Some(echoer()), collector_emit(&collector))
+            .expect("start_inner should succeed with the echoer fixture");
+
+        mgr.interrupt(AgentPaneArgs {
+            pane_id: "pane-k".to_string(),
+        })
+        .expect("interrupt should succeed");
+
+        assert!(poll_until(|| collector
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|f| f.kind == AgentFrameKind::Control)));
+
+        let frames = collector.lock().unwrap();
+        let control_frames: Vec<&AgentFrame> =
+            frames.iter().filter(|f| f.kind == AgentFrameKind::Control).collect();
+        assert_eq!(control_frames.len(), 1, "expected exactly one echoed control_request frame");
+        assert_eq!(control_frames[0].raw["request_id"].as_str(), Some("codenest-0"));
+        assert_eq!(control_frames[0].raw["request"]["subtype"].as_str(), Some("interrupt"));
+        drop(frames);
+
+        mgr.stop(AgentPaneArgs {
+            pane_id: "pane-k".to_string(),
+        })
+        .expect("stop should succeed");
+        assert!(poll_until(|| mgr.active_count() == 0));
+    }
+
+    #[test]
+    fn interrupt_after_exit_is_an_error_not_a_panic() {
+        let mgr = AgentManager::new();
+        let collector: Collector = Arc::new(Mutex::new(Vec::new()));
+        mgr.start_inner(start_args("pane-l"), Some(instant()), collector_emit(&collector))
+            .expect("start_inner should succeed with the instant-exit fixture");
+
+        assert!(poll_until(|| mgr.active_count() == 0));
+
+        let err = mgr
+            .interrupt(AgentPaneArgs {
+                pane_id: "pane-l".to_string(),
+            })
+            .expect_err("interrupt after the registry self-cleaned must be an error");
+        assert!(err.contains("no live agent session for pane pane-l"));
     }
 
     #[test]
