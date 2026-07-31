@@ -1,0 +1,224 @@
+/* Assistant markdown. Element selectors under one hashed class, because
+   `react-markdown` renders plain tags and takes no per-element className.
+
+   Sizing matches `.msg` in `agent-conversation.module.css` (12.5px / 1.6) so a
+   rendered turn sits at the same optical weight as the user turn above it. The
+   one thing deliberately *not* inherited is `white-space: pre-wrap`: markdown
+   already carries its own block structure, and keeping pre-wrap would turn
+   every source line break into a second blank line. */
+
+.md {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg-1);
+  /* Overrides the `pre-wrap` inherited from the enclosing `.msg`. Without this
+     every source newline inside a paragraph would survive as a line break on
+     top of the block spacing below, double-spacing the whole reply. */
+  white-space: normal;
+}
+
+/* Collapse the outer margins so a turn's first and last block sit flush with
+   the turn box — inner spacing between blocks is what should be visible. */
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p {
+  margin: 0.5em 0;
+}
+
+.md strong {
+  color: var(--fg-0);
+  font-weight: 650;
+}
+
+.md em {
+  font-style: italic;
+}
+
+.md del {
+  opacity: 0.6;
+}
+
+/* Headings: a model reaches for `##` inside what is really a chat message, so
+   these stay close to body size — a full typographic scale would read as a
+   document, not a reply. */
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  color: var(--fg-0);
+  font-weight: 650;
+  line-height: 1.35;
+  margin: 1.1em 0 0.45em;
+}
+
+.md h1 {
+  font-size: 15px;
+}
+
+.md h2 {
+  font-size: 13.5px;
+}
+
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  font-size: 12.5px;
+}
+
+.md ul,
+.md ol {
+  margin: 0.5em 0;
+  padding-left: 1.35em;
+}
+
+.md li {
+  margin: 0.2em 0;
+}
+
+.md li::marker {
+  color: var(--fg-4);
+}
+
+/* GFM task lists. `contains-task-list` is remark-gfm's own class, so it has to
+   escape CSS-module hashing to match — the checkbox is the marker here, and
+   keeping the bullet as well reads as a rendering bug. */
+.md :global(ul.contains-task-list) {
+  list-style: none;
+  padding-left: 0.1em;
+}
+
+/* The checkbox is status, not a control (remark-gfm already emits it
+   `disabled`; this keeps the cursor from implying otherwise). */
+.md li input[type="checkbox"] {
+  margin-right: 0.4em;
+  accent-color: var(--accent);
+  pointer-events: none;
+}
+
+.md a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  cursor: pointer;
+}
+
+.md a:hover {
+  border-bottom-color: var(--accent);
+}
+
+.md code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-3);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--info);
+  word-break: break-word;
+}
+
+/* Fenced blocks scroll rather than wrap: a wrapped command line or diff is
+   harder to read than one the user scrolls. `code` inside resets the inline
+   chip styling above. */
+.md pre {
+  margin: 0.6em 0;
+  padding: 9px 11px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-3);
+  border-radius: var(--r-2);
+  overflow-x: auto;
+}
+
+.md pre code {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fg-1);
+  white-space: pre;
+  word-break: normal;
+}
+
+.md blockquote {
+  margin: 0.6em 0;
+  padding: 2px 0 2px 11px;
+  border-left: 2px solid var(--line-1);
+  color: var(--fg-3);
+}
+
+/* The quote's own padding is the spacing; its first paragraph's margin would
+   double it. */
+.md blockquote > :first-child {
+  margin-top: 0;
+}
+
+.md blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.md hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1px solid var(--line-3);
+}
+
+/* Tables — the reason this file exists. `tableWrap` owns the horizontal
+   scroll (see the `table` override in `agent-markdown.tsx`). */
+.tableWrap {
+  margin: 0.7em 0;
+  overflow-x: auto;
+  border: 1px solid var(--line-3);
+  border-radius: var(--r-2);
+}
+
+.tableWrap table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.tableWrap th,
+.tableWrap td {
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line-3);
+}
+
+.tableWrap th {
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tableWrap td {
+  color: var(--fg-1);
+}
+
+/* The wrapper already draws the outer border, so the final row's is redundant.
+   Scoped to `tbody` on purpose: the header row is also a `tr:last-child` inside
+   its own `thead`, and it is the one border that must survive — it is what
+   separates the header from the body. */
+.tableWrap tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.tableWrap tbody tr:hover td {
+  background: color-mix(in srgb, var(--fg-4) 8%, transparent);
+}
+
+.md img {
+  max-width: 100%;
+  border-radius: var(--r-2);
+}

@@ -15,6 +15,7 @@ import {
   type ConvBlock,
   type ConvTurn,
 } from "../../lib/agent-conversation";
+import { AgentMarkdown } from "./agent-markdown";
 import { AgentPermissionDialog } from "./agent-permission-dialog";
 import styles from "./agent-conversation.module.css";
 
@@ -32,10 +33,27 @@ interface AgentConversationProps {
   lastControlNote?: string | null;
 }
 
+/**
+ * One text block. The two roles render differently on purpose:
+ *
+ * * **A user turn is shown exactly as typed** — `splitInlineCode` for backtick
+ *   spans and nothing else. Re-interpreting what the user wrote would mangle
+ *   the things they most often paste: `**` around a glob, a `|`-heavy shell
+ *   pipeline read as a table, `_` inside an identifier read as emphasis.
+ * * **An assistant turn is markdown**, because that is what `claude` writes.
+ *   Left as plain text, its tables arrived as rows of `|---|---|`.
+ */
 function TextBlock({ text, muted }: { text: string; muted?: boolean }): ReactElement {
+  if (muted !== true) {
+    return (
+      <div className={styles.msg}>
+        <AgentMarkdown text={text} />
+      </div>
+    );
+  }
   const parts = splitInlineCode(text);
   return (
-    <div className={`${styles.msg} ${muted ? styles.msgUser : ""}`}>
+    <div className={`${styles.msg} ${styles.msgUser}`}>
       {parts.map((part, i) =>
         part.code ? (
           <code key={i} className={styles.code}>
