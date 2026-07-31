@@ -8,6 +8,7 @@ import {
   splitInlineCode,
   toolArgSummary,
   toolDiffstat,
+  buildUserMessageText,
   type ConvToolBlock,
 } from "../agent-conversation";
 import type { AgentFrame, AgentFrameKind } from "../ipc";
@@ -655,5 +656,74 @@ describe("agent-conversation reducer", () => {
         ],
       }),
     ).toEqual({ added: 3, removed: 3 });
+  });
+});
+
+// A pill's *body* is the instruction. Sending only titles made every attachment
+// decorative: a task titled "Get the weather in Lviv" whose description asked
+// for the same day last year produced an answer about today.
+describe("buildUserMessageText", () => {
+  it("sends a task's description, not only its title", () => {
+    const text = buildUserMessageText(
+      [
+        {
+          kind: "task",
+          taskId: 3,
+          title: "Get the weather in Lviv",
+          description: "What is the weather in the city same day last year.",
+        },
+      ],
+      "go",
+    );
+
+    expect(text).toBe(
+      "@task #3: Get the weather in Lviv\n" +
+        "What is the weather in the city same day last year.\n\ngo",
+    );
+  });
+
+  it("sends a template's body, which is the whole point of attaching one", () => {
+    const text = buildUserMessageText(
+      [{ kind: "template", slug: "review", title: "Review", body: "Check X then Y." }],
+      "",
+    );
+
+    expect(text).toBe("@template: Review\nCheck X then Y.\n\n");
+  });
+
+  it("omits an absent or blank body rather than leaving a dangling line", () => {
+    const text = buildUserMessageText(
+      [{ kind: "task", taskId: 7, title: "Bare", description: null }],
+      "go",
+    );
+
+    expect(text).toBe("@task #7: Bare\n\ngo");
+  });
+
+  it("separates multi-line blocks so one body cannot read as the next header", () => {
+    const text = buildUserMessageText(
+      [
+        { kind: "task", taskId: 1, title: "One", description: "First body." },
+        { kind: "task", taskId: 2, title: "Two", description: "Second body." },
+      ],
+      "go",
+    );
+
+    expect(text).toBe(
+      "@task #1: One\nFirst body.\n\n@task #2: Two\nSecond body.\n\ngo",
+    );
+  });
+
+  it("keeps a file pill a path — the agent reads the file itself", () => {
+    const text = buildUserMessageText(
+      [{ kind: "file", path: "/w/app/src/main.rs" }],
+      "explain",
+    );
+
+    expect(text).toBe("@file: /w/app/src/main.rs\n\nexplain");
+  });
+
+  it("sends a bare draft when nothing is attached", () => {
+    expect(buildUserMessageText([], "just this")).toBe("just this");
   });
 });

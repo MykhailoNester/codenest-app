@@ -439,25 +439,50 @@ export type UserMessagePill =
   | { kind: "task"; taskId: number; title: string; description: string | null }
   | { kind: "template"; slug: string; title: string; body: string };
 
-function pillHeaderLine(pill: UserMessagePill): string {
+/**
+ * One attached pill as the text the agent receives.
+ *
+ * The body matters as much as the title. A task's description is the actual
+ * instruction — "Get the weather in Lviv" titled a task whose description asked
+ * for *the same day last year*, and sending the title alone got an answer about
+ * today. A template is entirely its body; its title is just the label the user
+ * picked it by. Sending only titles made both attachments decorative.
+ *
+ * A file pill stays a path: the agent reads the file itself, and inlining
+ * contents here would duplicate what its own Read gives it, at the cost of the
+ * user's context window.
+ */
+function pillBlock(pill: UserMessagePill): string {
   switch (pill.kind) {
     case "file":
       return `@file: ${pill.path}`;
-    case "task":
-      return `@task #${pill.taskId}: ${pill.title}`;
-    case "template":
-      return `@template: ${pill.title}`;
+    case "task": {
+      const header = `@task #${pill.taskId}: ${pill.title}`;
+      const body = pill.description?.trim();
+      return body ? `${header}\n${body}` : header;
+    }
+    case "template": {
+      const header = `@template: ${pill.title}`;
+      const body = pill.body.trim();
+      return body ? `${header}\n${body}` : header;
+    }
   }
 }
 
-/** The exact text a send transmits: one header line per pill, a blank line,
- * then the draft. With no pills, the draft is sent verbatim. */
+/**
+ * The exact text a send transmits: one block per pill, then a blank line, then
+ * the draft. With no pills, the draft is sent verbatim.
+ *
+ * Blocks are separated by a blank line rather than a newline because a block can
+ * now be several lines — without it, one pill's description would read as part of
+ * the next pill's header.
+ */
 export function buildUserMessageText(
   pills: UserMessagePill[],
   draft: string,
 ): string {
   if (pills.length === 0) return draft;
-  const header = pills.map(pillHeaderLine).join("\n");
+  const header = pills.map(pillBlock).join("\n\n");
   return `${header}\n\n${draft}`;
 }
 
