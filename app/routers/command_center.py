@@ -42,7 +42,17 @@ async def post_regenerate() -> dict[str, Any]:
 async def get_health() -> dict[str, Any]:
     db = await get_db()
     issues = await command_center_service.get_workspace_health(db)
-    return {"issues": issues, "issue_count": len(issues)}
+    # Conflicts are not `verify_status` rows: the agent is intact, it is simply
+    # not in the workspace because another project's agent already answers to its
+    # name. Reported here because this is where the UI looks for "something needs
+    # your attention", and this needs a rename or a disable to resolve.
+    conflicts = await command_center_service.list_agent_name_conflicts(db)
+    return {
+        "issues": issues,
+        "issue_count": len(issues),
+        "agent_name_conflicts": conflicts,
+        "conflict_count": len(conflicts),
+    }
 
 
 @router.get("/agents")

@@ -72,14 +72,36 @@ def _ensure_workspace_dirs() -> None:
     )
 
 
-async def _collect_desired_links(db: aiosqlite.Connection) -> list[dict]:
-    """Return the desired set of workspace links from DB.
+async def _collect_desired_links(
+    db: aiosqlite.Connection,
+) -> tuple[list[dict], list[dict]]:
+    """Return ``(desired_links, agent_name_conflicts)`` from the DB.
 
-    Each item: {table, row_id, bucket, filename, canonical_path}
+    Each desired item: {table, row_id, bucket, filename, canonical_path}.
     Org agents win on collision (org_agents are listed first).
+
+    **Agents are additionally deduplicated by invocable name.** Claude Code
+    resolves an agent by its frontmatter ``name:``, not by its filename, so the
+    slug-prefixed filenames below do *not* disambiguate two projects that both
+    ship a ``code-reviewer``: both files would still declare that one name and
+    the CLI would silently pick one of them. A symlink cannot fix that — the link
+    and its target are the same bytes — so the shadowed agent is left out of the
+    workspace entirely and reported instead. Linking a file the CLI will ignore
+    would only make the ambiguity invisible.
+
+    Skills and commands are *not* deduplicated this way: they resolve by path
+    segment (``skills/<name>/SKILL.md``, ``commands/<name>.md``), so prefixing
+    their workspace entry genuinely does disambiguate them.
+
+    Names are compared exactly. A case-only difference is left as two distinct
+    agents deliberately: hiding one that the CLI might well treat as separate is
+    worse than reporting one conflict too few.
     """
     desired: list[dict] = []
     seen_filenames: set[str] = set()
+    # invocable name -> what claimed it, for conflict reporting.
+    claimed_names: dict[str, dict] = {}
+    conflicts: list[dict] = []
 
     # Org agents (always live in .claude/agents/<name>.md)
     cur = await db.execute(
@@ -90,6 +112,7 @@ async def _collect_desired_links(db: aiosqlite.Connection) -> list[dict]:
         safe_name = _safe_agent_name(name)
         filename = f"{safe_name}.md"
         seen_filenames.add(filename)
+        claimed_names[name] = {"kind": "org_agent", "owner": "shared", "name": name}
         desired.append(
             {
                 "table": "org_agents",
@@ -112,6 +135,27 @@ async def _collect_desired_links(db: aiosqlite.Connection) -> list[dict]:
     )
     for row in await cur.fetchall():
         row_id, name, canonical_path, _pid, pname = row
+        # Shadowed: something already answers to this invocable name, so linking
+        # this file would add a second agent the CLI cannot tell apart.
+        owner = claimed_names.get(name)
+        if owner is not None:
+            conflicts.append(
+                {
+                    "name": name,
+                    "kind": "project_agent",
+                    "project": pname,
+                    "canonical_path": canonical_path,
+                    "shadowed_by_kind": owner["kind"],
+                    "shadowed_by": owner["owner"],
+                    "row_id": row_id,
+                }
+            )
+            continue
+        claimed_names[name] = {
+            "kind": "project_agent",
+            "owner": pname,
+            "name": name,
+        }
         safe_name = _safe_agent_name(name)
         slug = _slugify(pname)
         base = f"{safe_name}.md"
@@ -197,7 +241,7 @@ async def _collect_desired_links(db: aiosqlite.Connection) -> list[dict]:
             }
         )
 
-    return desired
+    return desired, conflicts
 
 
 def _slugify(s: str) -> str:
@@ -520,6 +564,7 @@ async def bootstrap(db: aiosqlite.Connection, *, force: bool = False) -> dict:
         "org_agents_upgraded": upgraded,
         "links_regenerated": regen["total"],
         "links_failed": regen["failed"],
+        "agent_name_conflicts": regen["conflicts"],
         "default_profile_id": default_profile_id,
         "profiles_reconciled": profiles_created,
         "duration_ms": int((time.monotonic() - start) * 1000),
@@ -549,7 +594,7 @@ async def regenerate_workspace_links(db: aiosqlite.Connection) -> dict:
         # (its name is reserved in _collect_desired_links to avoid collisions).
         workspace_context_service.write_projects_skill(staging / "skills")
 
-        desired = await _collect_desired_links(db)
+        desired, conflicts = await _collect_desired_links(db)
         counts = {
             "org_agents_linked": 0,
             "project_agents_linked": 0,
@@ -600,7 +645,12 @@ async def regenerate_workspace_links(db: aiosqlite.Connection) -> dict:
             logger.warning("workspace context regen failed (continuing): %s", exc)
 
         total = sum(counts.values())
-        return {"total": total, "counts": counts, "failed": failed}
+        return {
+            "total": total,
+            "counts": counts,
+            "failed": failed,
+            "conflicts": conflicts,
+        }
 
 
 async def list_configured_agents(db: aiosqlite.Connection) -> dict:
@@ -894,6 +944,18 @@ async def promote_agent_to_org(
     detail_row = await detail_cur.fetchone()
     detail = dict(detail_row) if detail_row else {}
     return {"org_agent": detail, "already_existed": False, "regen": regen}
+
+
+async def list_agent_name_conflicts(db: aiosqlite.Connection) -> list[dict]:
+    """Project agents left out of the workspace because their name is taken.
+
+    Recomputed from the same collector the linker uses, rather than persisted, so
+    what is reported here is exactly what was acted on — there is no second
+    implementation to drift, and the answer follows an enable/disable or a rename
+    without needing a regeneration first.
+    """
+    _desired, conflicts = await _collect_desired_links(db)
+    return conflicts
 
 
 async def get_workspace_health(db: aiosqlite.Connection) -> list[dict]:
