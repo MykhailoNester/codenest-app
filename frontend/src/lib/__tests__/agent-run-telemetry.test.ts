@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   recordAgentLaunch,
   recordAgentExited,
+  reconcileAgentRuns,
 } from "../agent-run-telemetry";
 import {
   currentPaneTarget,
@@ -15,11 +16,22 @@ import {
   TERMINALS_WINDOW_HASH,
 } from "../window-target";
 
-const { fetchSidecarMock } = vi.hoisted(() => ({ fetchSidecarMock: vi.fn() }));
+const { fetchSidecarMock, listLivePanesMock, isTauriAvailableMock } = vi.hoisted(
+  () => ({
+    fetchSidecarMock: vi.fn(),
+    listLivePanesMock: vi.fn(),
+    isTauriAvailableMock: vi.fn(),
+  }),
+);
 
 vi.mock("../api", () => ({
   fetchSidecar: (path: string, init?: RequestInit) =>
     fetchSidecarMock(path, init),
+}));
+
+vi.mock("../ipc", () => ({
+  listLivePanes: () => listLivePanesMock(),
+  isTauriAvailable: () => isTauriAvailableMock(),
 }));
 
 function bodyOf(call: unknown[] | undefined): Record<string, unknown> {
@@ -29,6 +41,8 @@ function bodyOf(call: unknown[] | undefined): Record<string, unknown> {
 
 beforeEach(() => {
   fetchSidecarMock.mockReset().mockResolvedValue(undefined);
+  listLivePanesMock.mockReset().mockResolvedValue([]);
+  isTauriAvailableMock.mockReset().mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -136,5 +150,41 @@ describe("window-target", () => {
     expect(isTerminalsWindow()).toBe(false);
     expect(isScreenshotRingWindow()).toBe(true);
     expect(currentPaneTarget()).toBe("embedded");
+  });
+});
+
+describe("reconcileAgentRuns", () => {
+  it("sends the shell's live pane list and returns how many runs were ended", async () => {
+    listLivePanesMock.mockResolvedValue(["leaf-1", "pty-2"]);
+    fetchSidecarMock.mockResolvedValue({ ended: 3 });
+
+    await expect(reconcileAgentRuns()).resolves.toBe(3);
+
+    const call = fetchSidecarMock.mock.calls[0];
+    expect(call?.[0]).toBe("/api/v1/agents/runs/reconcile");
+    expect(bodyOf(call)).toEqual({ live_pane_ids: ["leaf-1", "pty-2"] });
+  });
+
+  it("does not sweep without a Tauri backend", async () => {
+    // Nothing can enumerate live children, so an empty list would read as
+    // "every run is dead" and end all of them.
+    isTauriAvailableMock.mockReturnValue(false);
+
+    await expect(reconcileAgentRuns()).resolves.toBeNull();
+    expect(fetchSidecarMock).not.toHaveBeenCalled();
+  });
+
+  it("reports null rather than 0 when the sweep itself fails", async () => {
+    // `null` is "no information"; 0 would claim nothing was stale.
+    fetchSidecarMock.mockRejectedValue(new Error("sidecar down"));
+
+    await expect(reconcileAgentRuns()).resolves.toBeNull();
+  });
+
+  it("reports null when the live-pane query fails", async () => {
+    listLivePanesMock.mockRejectedValue(new Error("no such command"));
+
+    await expect(reconcileAgentRuns()).resolves.toBeNull();
+    expect(fetchSidecarMock).not.toHaveBeenCalled();
   });
 });

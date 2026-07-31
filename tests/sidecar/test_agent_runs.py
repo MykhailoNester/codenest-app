@@ -1081,3 +1081,136 @@ async def test_runs_exited_endpoint_forwards_the_session_id(
     status = {r["session_id"]: r["status"] for r in await cur.fetchall()}
     assert status[old_session] == "ended"
     assert status[new_session] == "running"
+
+
+# ---------------------------------------------------------------------------
+# reconcile_running_runs — the sweep for ends that were never reported
+# ---------------------------------------------------------------------------
+
+
+async def _insert_run_started_at(
+    db: aiosqlite.Connection, pane_id: str, started_at: str
+) -> int:
+    """A running run with an explicit start time, for grace-window tests."""
+    cur = await db.execute(
+        """
+        INSERT INTO agent_runs (session_id, pane_id, status, started_at)
+        VALUES (?, ?, 'running', ?)
+        """,
+        (_gen_uuid(), pane_id, started_at),
+    )
+    await db.commit()
+    assert cur.lastrowid is not None
+    return cur.lastrowid
+
+
+def _ago(seconds: int) -> str:
+    from datetime import UTC, datetime, timedelta
+
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat(
+        timespec="seconds"
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_ends_runs_whose_pane_is_gone(
+    migrated_db: aiosqlite.Connection,
+):
+    """The leak the per-event reports cannot cover.
+
+    A popout window torn down mid-report, the app quitting, a crash, or an
+    unreachable sidecar all leave a row claiming the session is live — with a
+    Focus and a Stop that act on nothing.
+    """
+    alive = await _insert_run_started_at(migrated_db, "leaf-alive", _ago(600))
+    dead = await _insert_run_started_at(migrated_db, "leaf-dead", _ago(600))
+
+    ended = await agent_runs_service.reconcile_running_runs(migrated_db, ["leaf-alive"])
+    assert ended == 1
+
+    cur = await migrated_db.execute(
+        "SELECT id, status, ended_at FROM agent_runs WHERE id IN (?, ?)", (alive, dead)
+    )
+    rows = {r["id"]: r for r in await cur.fetchall()}
+    assert rows[alive]["status"] == "running"
+    assert rows[dead]["status"] == "ended"
+    assert rows[dead]["ended_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_reconcile_spares_a_run_younger_than_the_grace_window(
+    migrated_db: aiosqlite.Connection,
+):
+    """The live list is a snapshot taken just before the request.
+
+    A pane that started in between is legitimately absent from it, and ending
+    its run would kill the row of a session the user just launched.
+    """
+    fresh = await _insert_run_started_at(migrated_db, "leaf-new", _ago(2))
+
+    ended = await agent_runs_service.reconcile_running_runs(migrated_db, [])
+    assert ended == 0
+
+    cur = await migrated_db.execute(
+        "SELECT status FROM agent_runs WHERE id = ?", (fresh,)
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    assert row["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_leaves_already_ended_runs_alone(
+    migrated_db: aiosqlite.Connection,
+):
+    run_id = await _insert_run_started_at(migrated_db, "leaf-done", _ago(600))
+    await migrated_db.execute(
+        "UPDATE agent_runs SET status = 'ended', ended_at = ? WHERE id = ?",
+        ("2026-07-30T10:00:00+00:00", run_id),
+    )
+    await migrated_db.commit()
+
+    assert await agent_runs_service.reconcile_running_runs(migrated_db, []) == 0
+
+    cur = await migrated_db.execute(
+        "SELECT ended_at FROM agent_runs WHERE id = ?", (run_id,)
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    # The original end time must survive — reconciliation is not a re-stamp.
+    assert row["ended_at"] == "2026-07-30T10:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_endpoint_requires_a_list(
+    launch_client: tuple[TestClient, aiosqlite.Connection],
+):
+    """A missing list must not be read as "nothing is alive".
+
+    That reading would end every running run in the table — the worst possible
+    failure for a sweep whose whole job is telling live from dead.
+    """
+    client, db = launch_client
+    run_id = await _insert_run_started_at(db, "leaf-guard", _ago(600))
+
+    resp = client.post("/api/v1/agents/runs/reconcile", json={})
+    assert resp.status_code == 400
+
+    cur = await db.execute("SELECT status FROM agent_runs WHERE id = ?", (run_id,))
+    row = await cur.fetchone()
+    assert row is not None
+    assert row["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_endpoint_ends_stale_runs(
+    launch_client: tuple[TestClient, aiosqlite.Connection],
+):
+    client, db = launch_client
+    await _insert_run_started_at(db, "leaf-gone", _ago(600))
+
+    resp = client.post(
+        "/api/v1/agents/runs/reconcile", json={"live_pane_ids": ["leaf-other"]}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ended"] == 1

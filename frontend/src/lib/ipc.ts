@@ -223,6 +223,19 @@ export async function getActiveTerminalCount(): Promise<number> {
   return invoke<number>("get_active_terminal_count");
 }
 
+/**
+ * Every pane id the shell still holds a child for — PTYs and agent sessions
+ * from both windows, since one manager pair serves the whole app process.
+ *
+ * The input to run reconciliation: the shell owns the processes, so this is the
+ * only authoritative answer to "is this pane still alive?", and comparing it
+ * against the `running` rows is what clears sessions whose end was never
+ * reported (window torn down mid-report, app quit, crash, sidecar unreachable).
+ */
+export async function listLivePanes(): Promise<string[]> {
+  return invoke<string[]>("list_live_panes");
+}
+
 // ---------------------------------------------------------------------------
 // PTY lifecycle events
 // ---------------------------------------------------------------------------

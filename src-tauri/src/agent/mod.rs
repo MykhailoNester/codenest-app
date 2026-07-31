@@ -1054,6 +1054,21 @@ impl AgentManager {
         }
     }
 
+    /// The pane ids of every session this process currently holds.
+    ///
+    /// Reserved and cancelled slots are excluded — a reservation is a start
+    /// still in flight, and its `agent_runs` row does not exist yet (the row is
+    /// written after `agent_start` resolves), so it has nothing to reconcile
+    /// against. See `list_live_panes` (`lib.rs`) for why the shell answers this
+    /// rather than the sidecar.
+    pub fn live_pane_ids(&self) -> Vec<String> {
+        lock_or_recover(&self.sessions)
+            .iter()
+            .filter(|(_, slot)| slot.live().is_some())
+            .map(|(pane_id, _)| pane_id.clone())
+            .collect()
+    }
+
     /// Number of currently-live sessions.
     ///
     /// `cfg(test)`-only: unlike `pty::PtyManager::active_count`
@@ -1830,6 +1845,27 @@ mod tests {
                 "{mode} must pass validation and fail on the registry lookup instead, got: {err}"
             );
         }
+    }
+
+    /// The agent half of the reconciliation input. A session that has exited
+    /// must drop out, because "still listed" is what keeps its run row at
+    /// `running` — the whole point of the sweep is that an unreported death
+    /// leaves a row claiming a session is alive.
+    #[test]
+    fn live_pane_ids_tracks_running_sessions() {
+        let mgr = AgentManager::new();
+        assert!(mgr.live_pane_ids().is_empty());
+
+        let collector: Collector = Arc::new(Mutex::new(Vec::new()));
+        mgr.start_inner(start_args("pane-live"), Some(echoer()), collector_emit(&collector))
+            .expect("start_inner should succeed with the echoer fixture");
+        assert_eq!(mgr.live_pane_ids(), vec!["pane-live".to_string()]);
+
+        mgr.stop(AgentPaneArgs {
+            pane_id: "pane-live".to_string(),
+        })
+        .expect("stop should succeed");
+        assert!(poll_until(|| mgr.live_pane_ids().is_empty()));
     }
 
     #[test]

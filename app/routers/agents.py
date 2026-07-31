@@ -626,3 +626,36 @@ async def stream():
             "Connection": "keep-alive",
         },
     )
+
+
+@router.post("/api/v1/agents/runs/reconcile")
+async def api_reconcile_runs(request: Request):
+    """End every ``running`` run whose pane the shell no longer holds a child for.
+
+    The self-heal for the leak class no per-event report can cover: a popout
+    window torn down before its report left the webview, the app quitting or
+    crashing, or a sidecar that was unreachable at that moment. The row would
+    otherwise claim the session is live forever, with a Focus and a Stop that act
+    on nothing.
+
+    ``live_pane_ids`` comes from the Rust shell's ``list_live_panes`` command —
+    it owns the child processes, so it is the only component that can answer
+    truthfully. An absent or non-list value is rejected rather than treated as
+    "nothing is alive", which would end every running run in the table.
+    """
+    payload = await _read_json(request)
+    raw = payload.get("live_pane_ids")
+    if not isinstance(raw, list):
+        return JSONResponse(
+            {"ok": False, "error": "live_pane_ids must be a list"}, status_code=400
+        )
+    live = [str(p) for p in raw if isinstance(p, str)]
+
+    try:
+        db = await get_db()
+        ended = await agent_runs_service.reconcile_running_runs(db, live)
+    except Exception:
+        log.exception("agent_runs reconcile failed")
+        ended = 0
+
+    return JSONResponse({"ok": True, "ended": ended})

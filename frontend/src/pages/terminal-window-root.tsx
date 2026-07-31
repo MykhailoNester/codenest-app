@@ -15,6 +15,8 @@ import {
   TERMINAL_STORAGE_KEY,
 } from "../stores/terminal-store";
 import { collectLeaves, paneKind } from "../lib/layout-tree";
+import { recordAgentExitedAndWait } from "../lib/agent-run-telemetry";
+import { useAgentSessionStore } from "../stores/agent-session-store";
 import * as pendingLaunchStore from "../stores/pending-launch-store";
 import styles from "./terminal-window-root.module.css";
 import { listen } from "@tauri-apps/api/event";
@@ -128,6 +130,25 @@ export function TerminalWindowRoot(): ReactElement {
             paneKind(leaf) === "agent"
               ? agentStop(leaf.terminalId)
               : closeTerminal(leaf.terminalId),
+          ),
+        );
+        // Report the runs ended *before* the webview goes away, and await it.
+        // The frame-driven report cannot fire here: the page that owns the
+        // listener is being torn down, so the Command Center would keep showing
+        // these sessions as live until something else swept them up. Awaiting a
+        // loopback POST costs milliseconds against a window that is closing
+        // anyway, and `reconcileAgentRuns` remains the backstop for the paths
+        // that get no chance to report at all (a crash, or the app quitting).
+        await Promise.allSettled(
+          leaves.map((leaf) =>
+            paneKind(leaf) === "agent"
+              ? recordAgentExitedAndWait(
+                  leaf.terminalId,
+                  null,
+                  useAgentSessionStore.getState().panes[leaf.terminalId]
+                    ?.sessionId ?? null,
+                )
+              : Promise.resolve(),
           ),
         );
         // Allow the native close to proceed (no event.preventDefault()).

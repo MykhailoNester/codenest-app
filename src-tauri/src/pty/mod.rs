@@ -268,6 +268,17 @@ impl PtyManager {
         self.handles.lock().unwrap().len()
     }
 
+    /// The ids of every PTY this process currently holds.
+    ///
+    /// Feeds the run reconciliation in `list_live_panes` (`lib.rs`): the shell
+    /// owns the child processes, so it is the only honest answer to "is this
+    /// pane still alive?" — the sidecar can only know what someone told it, and
+    /// a report is exactly what goes missing when a window is torn down or the
+    /// app exits.
+    pub fn live_pane_ids(&self) -> Vec<String> {
+        self.handles.lock().unwrap().keys().cloned().collect()
+    }
+
     #[cfg(test)]
     pub(crate) fn contains(&self, id: &str) -> bool {
         self.handles.lock().unwrap().contains_key(id)
@@ -343,6 +354,27 @@ mod tests {
         )
         .expect("open_terminal_inner succeeds in test")
         .id
+    }
+
+    /// The input to run reconciliation: a pane id missing from this list is
+    /// what tells the sidecar a `running` row is stale.
+    #[test]
+    fn live_pane_ids_tracks_open_handles() {
+        let mgr = PtyManager::new();
+        assert!(mgr.live_pane_ids().is_empty());
+
+        let id_a = open_for_test(&mgr);
+        let id_b = open_for_test(&mgr);
+        let live = mgr.live_pane_ids();
+        assert_eq!(live.len(), 2);
+        assert!(live.contains(&id_a));
+        assert!(live.contains(&id_b));
+
+        mgr.close_terminal(CloseTerminalArgs { id: id_a.clone() })
+            .expect("close_terminal succeeds");
+
+        let live = mgr.live_pane_ids();
+        assert_eq!(live, vec![id_b], "a closed handle must drop out of the list");
     }
 
     #[test]

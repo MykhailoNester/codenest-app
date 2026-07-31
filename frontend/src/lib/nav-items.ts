@@ -104,6 +104,15 @@ export const KNOWN_FEATURES_ORDERED: readonly string[] = [
   "plugins",
 ] as const;
 
+/**
+ * The Sessions page's route. Exported because three places need to agree on it
+ * — the `<Route>`, the nav item below, and the Command Center's Focus action —
+ * and they did not: Focus navigated to `/terminals`, a path no route matches, so
+ * focusing an embedded pane silently did nothing while the popout path (which
+ * never navigates) worked. A constant makes that class of drift impossible.
+ */
+export const TERMINAL_ROUTE = "/terminal";
+
 export const NAV_GROUPS = [
   { id: "workspace", label: "Workspace", defaultOpen: true },
   { id: "agents", label: "Agents", defaultOpen: false },
@@ -183,7 +192,7 @@ export const NAV_ITEMS = [
     slug: "terminal",
     label: "Sessions",
     icon: "terminal",
-    path: "/terminal",
+    path: TERMINAL_ROUTE,
     group: "agents",
   },
   // Knowledge — repositories of stuff

@@ -14,7 +14,8 @@ Architecture note
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import aiosqlite
@@ -151,6 +152,49 @@ async def mark_ended_by_pane(
         )
     await db.commit()
     return cursor.rowcount
+
+
+RECONCILE_GRACE_SECONDS = 60
+
+
+async def reconcile_running_runs(
+    db: aiosqlite.Connection,
+    live_pane_ids: Iterable[str],
+    grace_seconds: int = RECONCILE_GRACE_SECONDS,
+) -> int:
+    """End every ``running`` run whose pane no longer has a child. Returns the count.
+
+    A run is moved to ``ended`` by whoever noticed the child die, and that report
+    is what goes missing when a popout window is torn down mid-report, when the
+    app quits or crashes, or when the sidecar was unreachable at that moment. The
+    row then claims the session is live forever, offering a Focus and a Stop that
+    act on nothing. This is the sweep that repairs it, against the shell's list of
+    panes it still holds children for — the only authoritative answer.
+
+    Runs younger than ``grace_seconds`` are left alone. The caller's list is a
+    snapshot taken just before the request, so a pane that started in between
+    would otherwise be "not live" and get ended immediately after launching. A
+    genuinely dead young run is simply caught by the next sweep.
+    """
+    live = {str(p) for p in live_pane_ids if p}
+    cutoff = datetime.now(UTC) - timedelta(seconds=max(0, grace_seconds))
+    cur = await db.execute(
+        "SELECT id, pane_id FROM agent_runs WHERE status = 'running' AND started_at <= ?",
+        (cutoff.isoformat(timespec="seconds"),),
+    )
+    stale = [row["id"] for row in await cur.fetchall() if row["pane_id"] not in live]
+    if not stale:
+        return 0
+    now = _now()
+    # Interpolates only the `?` placeholders, one per id — every value is still
+    # bound. SQLite has no array parameter, so a variable-length IN needs this.
+    placeholders = ",".join("?" for _ in stale)
+    await db.execute(
+        f"UPDATE agent_runs SET status = 'ended', ended_at = ? WHERE id IN ({placeholders})",
+        (now, *stale),
+    )
+    await db.commit()
+    return len(stale)
 
 
 async def link_session(

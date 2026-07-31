@@ -18,6 +18,7 @@
  */
 
 import { fetchSidecar } from "./api";
+import { isTauriAvailable, listLivePanes } from "./ipc";
 
 /** Where the pane lives — mirrors `agent_runs.target`. */
 export type PaneTarget = "embedded" | "popout";
@@ -81,13 +82,64 @@ export function recordAgentExited(
   exitCode: number | null,
   sessionId?: string | null,
 ): void {
-  void fetchSidecar("/api/v1/agents/runs/exited", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      pane_id: paneId,
-      exit_code: exitCode,
-      ...(sessionId ? { session_id: sessionId } : {}),
-    }),
-  }).catch(() => undefined);
+  void recordAgentExitedAndWait(paneId, exitCode, sessionId);
+}
+
+/**
+ * `recordAgentExited`, but awaitable — for the one caller that cannot afford
+ * fire-and-forget: a window handling its own close must get the report out
+ * before the webview (and with it the pending fetch) is torn down. Never
+ * rejects, so it is safe inside a `Promise.allSettled` on a teardown path.
+ */
+export async function recordAgentExitedAndWait(
+  paneId: string,
+  exitCode: number | null,
+  sessionId?: string | null,
+): Promise<void> {
+  try {
+    await fetchSidecar("/api/v1/agents/runs/exited", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pane_id: paneId,
+        exit_code: exitCode,
+        ...(sessionId ? { session_id: sessionId } : {}),
+      }),
+    });
+  } catch {
+    // Telemetry never surfaces as a failure — see the module doc.
+  }
+}
+
+/**
+ * End every `running` run whose pane the shell no longer has a child for.
+ *
+ * The self-heal for the leak the per-event reports cannot cover. `recordAgentExited`
+ * is a fetch from the webview that noticed the death, so it is lost exactly when
+ * that webview is going away — closing a popout window kills its panes and then
+ * tears down the page that was going to report them — and equally when the app
+ * quits, when it crashes, or when the sidecar happens to be unreachable. The row
+ * then claims a session is live forever, with a Focus and a Stop that act on
+ * nothing.
+ *
+ * Resolves to the number of rows ended, or `null` when the sweep could not run
+ * (no Tauri backend, or an unreachable sidecar). Callers treat `null` as "no
+ * information", never as "nothing was stale".
+ */
+export async function reconcileAgentRuns(): Promise<number | null> {
+  if (!isTauriAvailable()) return null;
+  try {
+    const livePaneIds = await listLivePanes();
+    const result = await fetchSidecar<{ ended: number }>(
+      "/api/v1/agents/runs/reconcile",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ live_pane_ids: livePaneIds }),
+      },
+    );
+    return result.ended;
+  } catch {
+    return null;
+  }
 }

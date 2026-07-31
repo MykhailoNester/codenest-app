@@ -43,6 +43,8 @@ import type { AgentRun, AgentSession } from "../lib/api";
 import { useNavigate } from "react-router-dom";
 import { useTerminalStore } from "../stores/terminal-store";
 import { collectLeaves } from "../lib/layout-tree";
+import { TERMINAL_ROUTE } from "../lib/nav-items";
+import { reconcileAgentRuns } from "../lib/agent-run-telemetry";
 import { openTerminalsWindow, emitFocusPaneToTerminals } from "../lib/ipc";
 
 /** Cutoff ISO timestamp for a window string relative to now. */
@@ -79,7 +81,6 @@ export function CommandCenterPage(): ReactElement {
 
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { tabs } = useTerminalStore();
 
   // ?session=<session_id> deep-link from notification bell click.
   const [searchParams] = useSearchParams();
@@ -285,6 +286,25 @@ export function CommandCenterPage(): ReactElement {
     }, 250);
   });
 
+  // Clear runs whose session died without its end ever being reported — a
+  // popout window torn down mid-report, the app quitting or crashing, a sidecar
+  // that was unreachable at that moment. Those rows sit at "running" forever,
+  // offering a Focus and a Stop that act on nothing, and this panel is the only
+  // place the staleness is visible — so the sweep runs when it is opened,
+  // against the shell's list of panes it still holds children for. Refetch the
+  // list afterwards only when something actually changed.
+  const reconciled = useRef(false);
+  useEffect(() => {
+    if (reconciled.current) return;
+    reconciled.current = true;
+    void reconcileAgentRuns().then((ended) => {
+      if (ended !== null && ended > 0) {
+        void queryClient.invalidateQueries({ queryKey: ["agent-runs"] });
+        void queryClient.invalidateQueries({ queryKey: ["command-center"] });
+      }
+    });
+  }, [queryClient]);
+
   const counts = ccData?.counts;
   const activeSessions = allSessions.filter((s) => s.status === "active");
   const activeCount = activeSessions.length;
@@ -330,15 +350,32 @@ export function CommandCenterPage(): ReactElement {
       }
 
       // Embedded (or legacy null target treated as embedded).
-      const targetTab = tabs.find((tab) =>
-        collectLeaves(tab.layout).some((l) => l.terminalId === paneId),
-      );
-      if (targetTab) {
-        useTerminalStore.getState().setActiveTab(targetTab.id);
-      }
-      navigate("/terminals");
+      //
+      // Navigate first so the Sessions page is mounting while the tab is being
+      // resolved, then focus. The store may hold no tabs at all yet: it is
+      // hydrated by `TerminalsLayout`'s own effect, so a session started in a
+      // previous app run — or in another window — is not in this store until
+      // that page has mounted once. `hydrateFromStorage` is idempotent and
+      // guarded against concurrent calls, so asking for it here just brings
+      // forward the work the navigation is about to trigger anyway.
+      navigate(TERMINAL_ROUTE);
+      void (async () => {
+        const store = useTerminalStore.getState();
+        await store.hydrateFromStorage();
+        const fresh = useTerminalStore.getState();
+        const targetTab = fresh.tabs.find((tab) =>
+          collectLeaves(tab.layout).some((l) => l.terminalId === paneId),
+        );
+        if (!targetTab) return;
+        // Order matters: `setActiveTab` focuses the tab's *first* leaf, so the
+        // specific pane has to be focused after it. Without the second call a
+        // split tab would open with the wrong pane focused — the popout path
+        // has always done both (`terminal-window-root.tsx`).
+        fresh.setActiveTab(targetTab.id);
+        fresh.setFocusedLeaf(paneId);
+      })();
     },
-    [navigate, tabs],
+    [navigate],
   );
 
   // Drill-in: open the per-agent replay/activity panel.

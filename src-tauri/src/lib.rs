@@ -23,7 +23,7 @@ use fswatch::{fs_watch_set_roots, fs_watch_status};
 use window::clamp_window_to_monitor;
 
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Manager, State};
 
 // ---------------------------------------------------------------------------
 // Sidecar commands
@@ -296,6 +296,30 @@ async fn request_notification_permission(app: tauri::AppHandle) -> Result<String
     Ok(label)
 }
 
+/// Every pane id this process still has a child for — PTYs and agent sessions
+/// together, since a run row does not record which kind it came from.
+///
+/// This is the input to run reconciliation. An `agent_runs` row is moved to
+/// `ended` by whoever noticed the child die, and that report is precisely what
+/// goes missing in the cases the user sees as a leak: a popout window torn down
+/// mid-report, the app quitting, a crash, or a sidecar that was unreachable at
+/// the moment of the POST. The row then claims a session is live forever, with
+/// Focus and Stop pointing at nothing.
+///
+/// The shell is the only component that can answer honestly — it owns the child
+/// processes, while the sidecar knows only what it was told — so it reports the
+/// truth and the sidecar reconciles its rows against it. Both windows' panes are
+/// included: there is one manager pair per app process, not per window.
+#[tauri::command]
+fn list_live_panes(
+    pty: State<'_, Arc<pty::PtyManager>>,
+    agent: State<'_, Arc<agent::AgentManager>>,
+) -> Vec<String> {
+    let mut ids = pty.live_pane_ids();
+    ids.extend(agent.live_pane_ids());
+    ids
+}
+
 // ---------------------------------------------------------------------------
 // App entry
 // ---------------------------------------------------------------------------
@@ -556,6 +580,7 @@ pub fn run() {
             read_file_text,
             emit_native_notification,
             request_notification_permission,
+            list_live_panes,
             preview_open,
             preview_set_bounds,
             preview_navigate,

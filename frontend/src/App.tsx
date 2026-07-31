@@ -24,7 +24,7 @@ import {
   useOnboardingState,
   SCREENSHOT_HOTKEY_DEFAULT,
 } from "./lib/api";
-import { FEATURES } from "./lib/nav-items";
+import { FEATURES, TERMINAL_ROUTE } from "./lib/nav-items";
 import {
   isRegistered as isShortcutRegistered,
   register as registerShortcut,
@@ -473,7 +473,7 @@ function AppInner(): ReactElement {
             </FeatureRoute>
           }
         />
-        <Route path="/terminal" element={<TerminalPage />} />
+        <Route path={TERMINAL_ROUTE} element={<TerminalPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/workspace" element={<WorkspaceSettingsPage />} />
         <Route path="*" element={<Navigate to="/command" replace />} />
