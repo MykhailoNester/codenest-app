@@ -734,12 +734,6 @@ function applyExit(state: ConversationState, raw: unknown): ConversationState {
 }
 
 /**
- * Reduces one `AgentFrame` into the next `ConversationState`. `now` (browser
- * `Date.now()` in production) is injected rather than read internally so
- * tests are deterministic (Design decision 10 — every clock in this task is
- * frontend-only; nothing here touches SQLite or a Python datetime).
- */
-/**
  * Fold a `control_response` into the state. One `control` frame kind carries
  * the answer to every control request the app sends — `interrupt`, `set_model`,
  * `set_permission_mode` — and the responses are not correlated back to their
@@ -771,6 +765,12 @@ function applyControl(
   return state;
 }
 
+/**
+ * Reduces one `AgentFrame` into the next `ConversationState`. `now` (browser
+ * `Date.now()` in production) is injected rather than read internally so
+ * tests are deterministic (Design decision 10 — every clock in this task is
+ * frontend-only; nothing here touches SQLite or a Python datetime).
+ */
 export function applyFrame(
   state: ConversationState,
   frame: AgentFrame,

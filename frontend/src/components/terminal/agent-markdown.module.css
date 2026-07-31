@@ -218,7 +218,20 @@
   background: color-mix(in srgb, var(--fg-4) 8%, transparent);
 }
 
-.md img {
-  max-width: 100%;
+/* An image renders as a click-to-open chip, never as a fetched `<img>` — see
+   the `img` override in `agent-markdown.tsx`. */
+.imgLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px dashed var(--line-1);
   border-radius: var(--r-2);
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.imgLink:hover {
+  border-style: solid;
 }

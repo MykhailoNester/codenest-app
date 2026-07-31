@@ -115,20 +115,40 @@ async def mark_ended_by_pane(
     db: aiosqlite.Connection,
     pane_id: str,
     exit_code: int | None = None,
+    session_id: str | None = None,
 ) -> int:
-    """Mark all running ``agent_runs`` rows for ``pane_id`` as ended.
+    """Mark running ``agent_runs`` rows for ``pane_id`` as ended.
 
     Returns the number of rows updated.
+
+    ``session_id`` narrows the update to one run. A pane id is reused across
+    restarts — an agent pane keeps its leaf id for the pane's whole life — so
+    "every running row for this pane" would let a late report about the session
+    that *just* ended mark the freshly-started replacement as ended too, leaving
+    a live session showing as dead (and losing its Focus/Stop actions) for the
+    rest of its life. Callers that know which session ended should say so; the
+    unscoped form stays for the PTY path, whose ``pty-exited`` event carries no
+    session id.
     """
     now = _now()
-    cursor = await db.execute(
-        """
-        UPDATE agent_runs
-        SET status = 'ended', ended_at = ?
-        WHERE pane_id = ? AND status = 'running'
-        """,
-        (now, pane_id),
-    )
+    if session_id:
+        cursor = await db.execute(
+            """
+            UPDATE agent_runs
+            SET status = 'ended', ended_at = ?
+            WHERE pane_id = ? AND status = 'running' AND session_id = ?
+            """,
+            (now, pane_id, session_id),
+        )
+    else:
+        cursor = await db.execute(
+            """
+            UPDATE agent_runs
+            SET status = 'ended', ended_at = ?
+            WHERE pane_id = ? AND status = 'running'
+            """,
+            (now, pane_id),
+        )
     await db.commit()
     return cursor.rowcount
 

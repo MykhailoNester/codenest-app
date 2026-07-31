@@ -964,3 +964,120 @@ async def test_launch_without_cwd_or_project_still_records_the_run(
     run = await agent_runs_service.get_run_by_pane(db, "leaf-3")
     assert run is not None
     assert run["project_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# mark_ended_by_pane — a pane id outlives the run that used it
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mark_ended_by_pane_scoped_to_one_session(
+    migrated_db: aiosqlite.Connection,
+):
+    """A Restart reuses the pane id, so the outgoing run's report must not end
+    the replacement.
+
+    Both reports are fire-and-forget HTTP calls with no ordering guarantee
+    between them, so a late "the old session ended" could otherwise land after
+    the new row exists and mark a live session dead — losing its Focus/Stop
+    actions for the rest of its life.
+    """
+    provider_id = await _provider_id(migrated_db)
+    old_session, new_session = _gen_uuid(), _gen_uuid()
+    for session_id in (old_session, new_session):
+        await agent_runs_service.persist_on_launch(
+            migrated_db,
+            session_id=session_id,
+            provider_id=provider_id,
+            project_id=None,
+            pane_id="leaf-restart",
+            model=None,
+            prompt_preview=None,
+            source_kind=None,
+            source_id=None,
+        )
+
+    updated = await agent_runs_service.mark_ended_by_pane(
+        migrated_db, "leaf-restart", 0, old_session
+    )
+    assert updated == 1
+
+    cur = await migrated_db.execute(
+        "SELECT session_id, status FROM agent_runs WHERE pane_id = 'leaf-restart'"
+    )
+    status = {r["session_id"]: r["status"] for r in await cur.fetchall()}
+    assert status[old_session] == "ended"
+    assert status[new_session] == "running"
+
+
+@pytest.mark.asyncio
+async def test_mark_ended_by_pane_unscoped_still_ends_every_run(
+    migrated_db: aiosqlite.Connection,
+):
+    """The PTY path has no session id — `pty-exited` does not carry one."""
+    provider_id = await _provider_id(migrated_db)
+    for _ in range(2):
+        await agent_runs_service.persist_on_launch(
+            migrated_db,
+            session_id=_gen_uuid(),
+            provider_id=provider_id,
+            project_id=None,
+            pane_id="pty-1",
+            model=None,
+            prompt_preview=None,
+            source_kind=None,
+            source_id=None,
+        )
+
+    assert await agent_runs_service.mark_ended_by_pane(migrated_db, "pty-1", 0) == 2
+
+
+@pytest.mark.asyncio
+async def test_mark_ended_by_pane_unknown_session_ends_nothing(
+    migrated_db: aiosqlite.Connection,
+):
+    provider_id = await _provider_id(migrated_db)
+    await agent_runs_service.persist_on_launch(
+        migrated_db,
+        session_id=_gen_uuid(),
+        provider_id=provider_id,
+        project_id=None,
+        pane_id="leaf-x",
+        model=None,
+        prompt_preview=None,
+        source_kind=None,
+        source_id=None,
+    )
+
+    updated = await agent_runs_service.mark_ended_by_pane(
+        migrated_db, "leaf-x", 0, _gen_uuid()
+    )
+    assert updated == 0
+
+
+@pytest.mark.asyncio
+async def test_runs_exited_endpoint_forwards_the_session_id(
+    launch_client: tuple[TestClient, aiosqlite.Connection],
+):
+    client, db = launch_client
+    old_session, new_session = _gen_uuid(), _gen_uuid()
+    for session_id in (old_session, new_session):
+        client.post(
+            "/api/v1/agents/events/launch",
+            json={"pane_id": "leaf-http", "session_id": session_id},
+        )
+
+    resp = client.post(
+        "/api/v1/agents/runs/exited",
+        json={"pane_id": "leaf-http", "exit_code": 0, "session_id": old_session},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 1
+
+    cur = await db.execute(
+        "SELECT session_id, status FROM agent_runs WHERE pane_id = 'leaf-http'"
+    )
+    status = {r["session_id"]: r["status"] for r in await cur.fetchall()}
+    assert status[old_session] == "ended"
+    assert status[new_session] == "running"

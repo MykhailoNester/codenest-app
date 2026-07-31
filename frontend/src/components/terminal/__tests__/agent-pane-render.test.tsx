@@ -97,8 +97,11 @@ const { recordAgentLaunchMock, recordAgentExitedMock } = vi.hoisted(() => ({
 
 vi.mock("../../../lib/agent-run-telemetry", () => ({
   recordAgentLaunch: (payload: unknown) => recordAgentLaunchMock(payload),
-  recordAgentExited: (paneId: string, exitCode: number | null) =>
-    recordAgentExitedMock(paneId, exitCode),
+  recordAgentExited: (
+    paneId: string,
+    exitCode: number | null,
+    sessionId?: string | null,
+  ) => recordAgentExitedMock(paneId, exitCode, sessionId),
 }));
 
 const agentStartMock = ipc.agentStart as unknown as ReturnType<typeof vi.fn>;
@@ -542,7 +545,13 @@ describe("agent pane render", () => {
       });
     });
 
-    expect(recordAgentExitedMock).toHaveBeenCalledWith("agent-run-exit", 0);
+    // Scoped to the session that ended: the leaf id alone would also match a
+    // replacement started by a Restart.
+    expect(recordAgentExitedMock).toHaveBeenCalledWith(
+      "agent-run-exit",
+      0,
+      "session-1",
+    );
   });
 
   it("switches the permission mode of a live session over the control channel instead of restarting", async () => {

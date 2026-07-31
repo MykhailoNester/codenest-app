@@ -462,13 +462,18 @@ async def api_run_exited(request: Request):
     exit_code: int | None = (
         int(exit_code_raw) if isinstance(exit_code_raw, (int, float)) else None
     )
+    # Optional: an agent pane knows which session ended, and a pane id alone
+    # cannot tell one run from its restarted replacement.
+    session_id: str | None = payload.get("session_id") or None
 
     if not pane_id:
         return JSONResponse({"ok": True, "updated": 0})
 
     try:
         db = await get_db()
-        updated = await agent_runs_service.mark_ended_by_pane(db, pane_id, exit_code)
+        updated = await agent_runs_service.mark_ended_by_pane(
+            db, pane_id, exit_code, session_id
+        )
     except Exception:
         log.exception("agent_runs mark_ended_by_pane failed")
         updated = 0

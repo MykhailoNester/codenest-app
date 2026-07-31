@@ -117,6 +117,31 @@ describe("AgentMarkdown", () => {
     expect(document.querySelector("b")).toBeNull();
   });
 
+  it("offers markdown images as a click instead of fetching them", () => {
+    // `![](…)` is markdown, so it survives the no-raw-HTML rule and would
+    // otherwise hit the network the moment the reply renders — no CSP stands in
+    // the way. A tracking pixel in a page the model just quoted back would then
+    // report the user's address with nothing clicked.
+    render(
+      <AgentMarkdown text="![a chart](https://tracker.example/pixel.gif)" />,
+    );
+
+    expect(document.querySelector("img")).toBeNull();
+    const link = screen.getByText(/a chart/);
+    expect(link.tagName).toBe("A");
+
+    fireEvent.click(link);
+    expect(openPathMock).toHaveBeenCalledWith(
+      "https://tracker.example/pixel.gif",
+    );
+  });
+
+  it("labels an image with no alt text rather than rendering an empty link", () => {
+    render(<AgentMarkdown text="![](https://example.com/x.png)" />);
+
+    expect(screen.getByText(/image/).tagName).toBe("A");
+  });
+
   it("renders a fenced code block as a pre, keeping its own line breaks", () => {
     render(<AgentMarkdown text={"```sh\nmake check-all\nls -la\n```"} />);
 

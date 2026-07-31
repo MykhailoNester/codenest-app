@@ -87,6 +87,26 @@ describe("recordAgentExited", () => {
     });
   });
 
+  it("names the session that ended when one is known", () => {
+    // A pane keeps its id across a Restart, and these posts are unordered — so
+    // an unscoped report could end the replacement instead of the run it means.
+    recordAgentExited("leaf-1", 0, "sess-old");
+
+    expect(bodyOf(fetchSidecarMock.mock.calls[0])).toEqual({
+      pane_id: "leaf-1",
+      exit_code: 0,
+      session_id: "sess-old",
+    });
+  });
+
+  it("omits the session id for the PTY path, which has none", () => {
+    recordAgentExited("pty-1", 0, null);
+
+    expect(bodyOf(fetchSidecarMock.mock.calls[0])).not.toHaveProperty(
+      "session_id",
+    );
+  });
+
   it("swallows a sidecar failure", () => {
     fetchSidecarMock.mockRejectedValue(new Error("sidecar down"));
 

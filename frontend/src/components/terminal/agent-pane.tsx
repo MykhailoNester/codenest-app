@@ -136,7 +136,9 @@ async function ensureFrameSubscription(leafId: string): Promise<void> {
       // crash, and a Stop pressed from that panel (the child dies, the waiter
       // thread emits this). An explicit teardown reports separately, because
       // it disposes this subscription before stopping the child.
-      recordAgentExited(leafId, exitCodeOf(frame.raw));
+      // Scoped to the session that ended, not just the pane: a leaf keeps its
+      // id across a Restart, so an unscoped report could end the replacement.
+      recordAgentExited(leafId, exitCodeOf(frame.raw), frame.session_id);
     }
   })
     .then((dispose) => {
@@ -345,8 +347,14 @@ export function AgentPane({
       // removed the listener that would have carried it, so this is the only
       // place a teardown-driven end can be seen. The sidecar ignores a second
       // report for an already-ended run, so the overlap with the frame path is
-      // harmless.
-      recordAgentExited(leafId, null);
+      // harmless. The session id comes from the store because the frame that
+      // carried it is no longer arriving — and naming the session is what keeps
+      // a Restart's teardown from ending the session it is restarting into.
+      recordAgentExited(
+        leafId,
+        null,
+        useAgentSessionStore.getState().panes[leafId]?.sessionId ?? null,
+      );
       void agentStop(leafId).finally(() => startedPanes.delete(bootKey));
     };
     // `cwd`, and every store action below, are stable references (zustand

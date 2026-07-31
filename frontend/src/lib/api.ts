@@ -34,7 +34,7 @@ import {
 
 // Re-exported so any existing `import { FEATURE_CACHE_KEY } from "./api"`
 // caller still resolves — the constant itself now lives in `nav-items.ts`
-// (a leaf module with no imports) so `lib/composer-feature.ts` can read it
+// (a leaf module with no imports) so a non-react-query consumer can read it
 // without pulling in react-query.
 export { FEATURE_CACHE_KEY };
 
@@ -2523,8 +2523,8 @@ export function useEnabledFeatures(): Record<string, boolean> {
 
   // Persist fresh live data to localStorage whenever it arrives, announcing
   // the write (only when it actually changed, to avoid a pointless notify on
-  // every refetch) so non-react-query consumers — `lib/composer-feature.ts`
-  // — can re-read it without a QueryClient.
+  // every refetch) so a non-react-query consumer can re-read it without a
+  // QueryClient.
   useEffect(() => {
     if (!data?.enabled_features) return;
     try {

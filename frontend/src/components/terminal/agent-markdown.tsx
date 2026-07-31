@@ -56,6 +56,30 @@ export function AgentMarkdown({ text }: { text: string }): ReactElement {
               <table>{children}</table>
             </div>
           ),
+          // Images are offered, not fetched. `![](…)` is markdown, so unlike an
+          // embedded `<img>` tag it survives the no-raw-HTML rule and would
+          // otherwise hit the network the instant the reply renders — no CSP
+          // stands in the way (`tauri.conf.json` sets `csp: null`). A tracking
+          // pixel inside a page the model just quoted back would then report
+          // the user's address with nothing clicked. Rendering the same
+          // click-to-open affordance as a link keeps that a choice.
+          img: ({ src, alt, title }) => {
+            const href = typeof src === "string" ? src : "";
+            return (
+              <a
+                href={href || "#"}
+                className={styles.imgLink}
+                title={title ?? href}
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (href === "") return;
+                  void openPath(href).catch(() => undefined);
+                }}
+              >
+                🖼 {alt !== undefined && alt !== "" ? alt : "image"}
+              </a>
+            );
+          },
         }}
       >
         {text}

@@ -69,14 +69,25 @@ export function recordAgentLaunch(payload: AgentLaunchPayload): void {
  * still `running`), which is what lets every path that can end a session report
  * without coordinating: the `exit` frame, an explicit teardown, and `pty-exited`
  * may all fire for the same pane.
+ *
+ * `sessionId` names *which* run ended. A pane keeps its id across a restart, so
+ * without it a report about the session that just ended could also end the
+ * replacement started moments later — these calls are fire-and-forget and
+ * therefore unordered. Pass it whenever it is known; the PTY path's
+ * `pty-exited` event carries no session id and correctly omits it.
  */
 export function recordAgentExited(
   paneId: string,
   exitCode: number | null,
+  sessionId?: string | null,
 ): void {
   void fetchSidecar("/api/v1/agents/runs/exited", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pane_id: paneId, exit_code: exitCode }),
+    body: JSON.stringify({
+      pane_id: paneId,
+      exit_code: exitCode,
+      ...(sessionId ? { session_id: sessionId } : {}),
+    }),
   }).catch(() => undefined);
 }
