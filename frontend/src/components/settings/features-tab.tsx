@@ -46,19 +46,9 @@ const FEATURE_META: Record<string, { label: string; description: string }> = {
     label: "Feed",
     description: "Live activity feed of agent events and system notifications.",
   },
-  explorer: {
-    label: "Explorer",
-    description:
-      "Workspace file navigator panel on the Terminal page, with ⌘P file search.",
-  },
   budgets: {
     label: "Budgets",
     description: "Cost budget tracking by workspace, project, or agent.",
-  },
-  composer: {
-    label: "Composer (native agent panes)",
-    description:
-      "Native agent conversation panes with a composer, in place of a terminal. Experimental.",
   },
   sync: {
     label: "Sync",

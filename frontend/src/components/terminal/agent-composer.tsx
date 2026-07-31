@@ -6,10 +6,15 @@
  * state — nothing renders from a literal (see the plan's "NO MOCK UI" rule).
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent, ReactElement } from "react";
 import { useLibraryItems, useTasks, type Task, type LibraryItem } from "../../lib/api";
-import { agentInterrupt } from "../../lib/ipc";
+import {
+  agentInterrupt,
+  agentSetModel,
+  agentSetPermissionMode,
+} from "../../lib/ipc";
+import { useAgentCatalogStore } from "../../stores/agent-catalog-store";
 import {
   buildUserMessageText,
   previewUserMessageLine,
@@ -30,6 +35,15 @@ import styles from "./agent-composer.module.css";
 interface AgentComposerProps {
   leafId: string;
   status: ConversationState["status"];
+  /** `providers.id` this pane's session runs against, as persisted on the leaf. */
+  providerId: number | null;
+  /** The model this pane's session runs, as persisted on the leaf. */
+  model: string | null;
+  /** The permission mode persisted on the leaf; `null` means the CLI default. */
+  permissionMode: string | null;
+  /** Stop and respawn the session — the only way to apply a provider change,
+   *  since the binary and env are fixed at spawn. */
+  onRequestRestart: () => void;
 }
 
 const MAX_HISTORY_PILLS = 6;
@@ -162,7 +176,288 @@ function ContextPicker({
   );
 }
 
-export function AgentComposer({ leafId, status }: AgentComposerProps): ReactElement {
+/**
+ * The permission modes offered for a *live* switch, in ascending order of how
+ * much they let the agent do unasked. Deliberately not `agent::PERMISSION_MODES`
+ * verbatim: that list is the spawn-time flag surface and includes
+ * `bypassPermissions`, which the CLI refuses over the control channel unless the
+ * session was launched with `--dangerously-skip-permissions` (verified against
+ * CLI 2.1.220). Offering it here would be a control that fails every time it is
+ * used, so it is left to the spawn path.
+ *
+ * `manual` is the CLI's `--help` spelling of the mode it applies as `default`,
+ * which is why {@link modeSelectValue} has to treat the two as one option.
+ */
+const LIVE_PERMISSION_MODES: ReadonlyArray<{
+  value: string;
+  label: string;
+  title: string;
+}> = [
+  {
+    value: "plan",
+    label: "plan",
+    title: "Plan mode — the agent researches and proposes, and may not edit or run anything.",
+  },
+  {
+    value: "manual",
+    label: "ask",
+    title: "Ask for everything the CLI would normally ask about (the default).",
+  },
+  {
+    value: "acceptEdits",
+    label: "auto-edit",
+    title: "File edits apply without asking; everything else still asks.",
+  },
+  {
+    value: "auto",
+    label: "auto",
+    title:
+      "The CLI decides what is safe to run unasked. Some installs gate this mode off, in which case the switch is refused.",
+  },
+  {
+    value: "dontAsk",
+    label: "don't ask",
+    title: "Stop asking altogether for the rest of this session.",
+  },
+];
+
+/**
+ * Which option to select for the mode the session reports. The CLI normalises
+ * `manual` to `default` and reports the applied value, so a session running
+ * `default` must light up the `manual` option rather than falling through to
+ * "no selection".
+ */
+function modeSelectValue(applied: string | null): string {
+  if (applied === null) return "";
+  if (applied === "default") return "manual";
+  return LIVE_PERMISSION_MODES.some((m) => m.value === applied) ? applied : "";
+}
+
+/**
+ * The provider + model + permission-mode row. The provider and model lists come
+ * from Settings → Providers (the `providers` / `provider_models` tables), so
+ * this surface never invents a model name of its own.
+ *
+ * The three selectors behave differently on purpose:
+ *
+ * * **Model** switches the *live* session over the stdin control channel
+ *   (`set_model`) — the same thing `/model` does in the TUI. Nothing restarts,
+ *   the conversation is kept, and the next assistant message simply comes back
+ *   from the new model. If the session is not running there is nothing to
+ *   switch, so the pick is just recorded for the next start.
+ * * **Mode** switches over that same channel (`set_permission_mode`) — what
+ *   Shift+Tab does in the TUI, which a `--print` child has no way to receive.
+ *   The displayed value is the mode the *CLI* reports (`init`, then each
+ *   `control_response`), never the optimistic pick, because the CLI both
+ *   normalises the value and can refuse the switch.
+ * * **Provider** cannot be applied in flight: it decides argv[0] and the env
+ *   overlay (`CLAUDE_CONFIG_DIR`, i.e. *which account*), both fixed at spawn.
+ *   Changing it restarts the session, which is why it asks first once a
+ *   conversation exists.
+ */
+function ProviderModelRow({
+  leafId,
+  providerId,
+  model,
+  permissionMode,
+  live,
+  onRequestRestart,
+}: {
+  leafId: string;
+  providerId: number | null;
+  model: string | null;
+  /** The mode persisted on the leaf — what the *next* start will use. Shown
+   *  until the running session reports its own, which then wins. */
+  permissionMode: string | null;
+  /** Whether a session is currently running for this pane. */
+  live: boolean;
+  onRequestRestart: () => void;
+}): ReactElement | null {
+  const providers = useAgentCatalogStore((s) => s.providers);
+  const load = useAgentCatalogStore((s) => s.load);
+  const rememberSelection = useAgentCatalogStore((s) => s.rememberSelection);
+  const setLeafAgentConfig = useTerminalStore((s) => s.setLeafAgentConfig);
+  const turnCount = useAgentSessionStore((s) => s.panes[leafId]?.turns.length ?? 0);
+  // The CLI's own answer, not what was picked here — see `modeSelectValue`.
+  const appliedMode = useAgentSessionStore(
+    (s) => s.panes[leafId]?.permissionMode ?? null,
+  );
+  const refusedMode = useAgentSessionStore(
+    (s) => s.panes[leafId]?.permissionModeError ?? null,
+  );
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [modeError, setModeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // No catalog (sidecar unreachable, or no provider registered yet) — render
+  // nothing rather than an empty dropdown that implies a choice exists.
+  if (providers.length === 0) return null;
+
+  const active = providers.find((p) => p.id === providerId) ?? providers[0]!;
+  const models = active.models;
+
+  /**
+   * The leaf carries no provider even though the catalog has one: this session
+   * was started before the catalog was known, so it is running *without* that
+   * provider's binary and env — against the default `~/.claude` config, which
+   * is what produces `401 OAuth access token is invalid` on the first turn.
+   *
+   * The dropdown still has to show something, and it shows the provider that
+   * *would* be used, so this flag is what stops that from being a lie: the row
+   * says the session is not running it and offers the restart that applies it.
+   * (Prevention lives in `agent-pane.tsx`, which now waits for the catalog
+   * before spawning; this is the honest report for a session that predates the
+   * fix or hit a genuinely unreachable sidecar.)
+   */
+  const unapplied = live && providerId === null;
+
+  function handleProviderChange(nextId: number): void {
+    if (nextId === active.id) return;
+    if (
+      live &&
+      turnCount > 0 &&
+      !window.confirm(
+        "Switching provider restarts this session — the conversation so far is cleared. Continue?",
+      )
+    ) {
+      return;
+    }
+    const next = providers.find((p) => p.id === nextId);
+    if (!next) return;
+    // The model is cleared, not carried over: a model registered against one
+    // provider is not necessarily valid for another, and `resolveSelection`
+    // will pick the new provider's own default.
+    setLeafAgentConfig(leafId, { providerId: nextId, model: next.defaultModel });
+    rememberSelection({ providerId: nextId, model: next.defaultModel });
+    onRequestRestart();
+  }
+
+  function handleModelChange(nextModel: string): void {
+    if (nextModel === model) return;
+    setLeafAgentConfig(leafId, { model: nextModel });
+    rememberSelection({ providerId: active.id, model: nextModel });
+    setModelError(null);
+    if (!live) return;
+    void agentSetModel(leafId, nextModel).catch((err: unknown) => {
+      // The switch did not take: say so instead of leaving the dropdown
+      // claiming a model the session is not running.
+      setModelError(err instanceof Error ? err.message : String(err));
+    });
+  }
+
+  // The session's own report wins once it has one; until then (not started, or
+  // started but pre-`init`) the leaf's persisted pick is the honest answer.
+  const shownMode =
+    modeSelectValue(appliedMode) || modeSelectValue(permissionMode);
+
+  function handleModeChange(nextMode: string): void {
+    if (nextMode === "" || nextMode === shownMode) return;
+    // Recorded first so a restart boots into the chosen mode even if the live
+    // switch below is refused — the flag path accepts modes the control path
+    // will not.
+    setLeafAgentConfig(leafId, { permissionMode: nextMode });
+    setModeError(null);
+    if (!live) return;
+    void agentSetPermissionMode(leafId, nextMode).catch((err: unknown) => {
+      setModeError(err instanceof Error ? err.message : String(err));
+    });
+  }
+
+  return (
+    <div className={styles.selectors}>
+      <label className={styles.selectWrap}>
+        <span className={styles.selectLabel}>provider</span>
+        <select
+          className={`${styles.select} ${unapplied ? styles.selectStale : ""}`}
+          value={active.id}
+          onChange={(e) => handleProviderChange(Number(e.currentTarget.value))}
+          aria-label="Agent provider"
+        >
+          {providers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.displayName}
+            </option>
+          ))}
+        </select>
+      </label>
+      {unapplied ? (
+        <button
+          type="button"
+          className={styles.selectWarn}
+          onClick={onRequestRestart}
+          title={`This session started before ${active.displayName} was known, so it is running without that provider's environment — which is what a 401 on the first message means. Restart to apply it.`}
+        >
+          ⚠ restart to apply
+        </button>
+      ) : null}
+      <label className={styles.selectWrap}>
+        <span className={styles.selectLabel}>model</span>
+        <select
+          className={styles.select}
+          value={model ?? active.defaultModel ?? ""}
+          onChange={(e) => handleModelChange(e.currentTarget.value)}
+          disabled={models.length === 0}
+          aria-label="Agent model"
+        >
+          {models.length === 0 ? (
+            <option value="">CLI default</option>
+          ) : (
+            models.map((m) => (
+              <option key={m.model_name} value={m.model_name}>
+                {m.display_name}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+      {modelError !== null ? (
+        <span className={styles.selectError} title={modelError}>
+          model switch failed
+        </span>
+      ) : null}
+      <label className={styles.selectWrap}>
+        <span className={styles.selectLabel}>mode</span>
+        <select
+          className={styles.select}
+          value={shownMode}
+          onChange={(e) => handleModeChange(e.currentTarget.value)}
+          aria-label="Permission mode"
+          title={
+            LIVE_PERMISSION_MODES.find((m) => m.value === shownMode)?.title ??
+            "How much this session does without asking. Applies to the running session — nothing restarts."
+          }
+        >
+          {shownMode === "" ? <option value="">CLI default</option> : null}
+          {LIVE_PERMISSION_MODES.map((m) => (
+            <option key={m.value} value={m.value} title={m.title}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {(modeError ?? refusedMode) !== null ? (
+        <span
+          className={styles.selectError}
+          title={modeError ?? refusedMode ?? ""}
+        >
+          mode switch refused
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+export function AgentComposer({
+  leafId,
+  status,
+  providerId,
+  model,
+  permissionMode,
+  onRequestRestart,
+}: AgentComposerProps): ReactElement {
   const pane = useComposerStore((s) => s.panes[leafId]);
   const draft = pane?.draft ?? "";
   const pills = pane?.pills ?? [];
@@ -191,7 +486,12 @@ export function AgentComposer({ leafId, status }: AgentComposerProps): ReactElem
 
   const messagePills = pills.map(pillToMessagePill);
   const composedText = buildUserMessageText(messagePills, draft);
-  const sendDisabled = composedText.trim().length === 0;
+  // An exited session has no stdin to write to, so Send is refused rather than
+  // failing silently in `agentSend` — the pane's status bar carries the
+  // Restart button. Typing itself stays enabled: the draft survives the
+  // restart, which is the point of keeping the composer mounted.
+  const sessionEnded = status === "exited";
+  const sendDisabled = composedText.trim().length === 0 || sessionEnded;
   const lineCount = draft.length === 0 ? 0 : draft.split("\n").length;
 
   function handleDraftChange(el: HTMLTextAreaElement): void {
@@ -257,13 +557,19 @@ export function AgentComposer({ leafId, status }: AgentComposerProps): ReactElem
     <div className={styles.composer} data-agent-composer>
       <div className={styles.cmode}>
         <span className={`${styles.mbadge} ${styles.mbadgeComposing}`}>◆ Conversation</span>
-        <span className={styles.mwhy}>
-          native session · <code>stream-json</code> stdio · no PTY in the path
-        </span>
+        <ProviderModelRow
+          leafId={leafId}
+          providerId={providerId}
+          model={model}
+          permissionMode={permissionMode}
+          live={status !== "exited"}
+          onRequestRestart={onRequestRestart}
+        />
         <button
           type="button"
           className={styles.mswap}
           onClick={() => void splitPane(leafId, "h")}
+          title="Open a shell pane beside this one (⌘⇧T)"
         >
           ⌘⇧T open shell beside
         </button>
@@ -354,9 +660,15 @@ export function AgentComposer({ leafId, status }: AgentComposerProps): ReactElem
           </span>
         )}
         <span className={styles.hint}>
-          <span className={styles.kbd}>⇧↩</span> newline ·{" "}
-          <span className={styles.kbd}>esc</span> interrupt ·{" "}
-          <span className={styles.kbd}>⌘Z</span> undo
+          {sessionEnded ? (
+            "session ended · Restart to send"
+          ) : (
+            <>
+              <span className={styles.kbd}>⇧↩</span> newline ·{" "}
+              <span className={styles.kbd}>esc</span> interrupt ·{" "}
+              <span className={styles.kbd}>⌘Z</span> undo
+            </>
+          )}
         </span>
         <button
           type="button"

@@ -22,9 +22,33 @@ export interface PaneLeaf {
    * What this leaf renders. Optional and defaults to `"shell"` via
    * `paneKind()` — never required, so every leaf already persisted in
    * localStorage (before this field existed) stays valid JSON and rehydrates
-   * as a shell pane exactly as it did before.
+   * as a shell pane exactly as it did before. New leaves are created as
+   * `"agent"`; `"shell"` is the explicit opt-in (⌥⌘T, the tab bar's shell
+   * button, "open shell beside").
    */
   kind?: PaneKind;
+  /**
+   * `providers.id` this agent leaf runs against — supplies the spawn's binary
+   * token and env overlay. Agent leaves only; absent means "resolve from the
+   * catalog" (last used, else the first enabled provider). Persisted with the
+   * layout so a pane keeps its provider across a relaunch.
+   */
+  providerId?: number;
+  /**
+   * The model this agent leaf runs. Agent leaves only; absent means the
+   * provider's own registered default. Persisted with the layout, and kept in
+   * step with live `set_model` switches so a restart reuses the model the pane
+   * was last actually running.
+   */
+  model?: string;
+  /**
+   * The permission mode this agent leaf runs (`agent::PERMISSION_MODES`). Agent
+   * leaves only; absent means "no `--permission-mode` flag at spawn", i.e. the
+   * CLI's own configured default. Persisted with the layout and kept in step
+   * with live `set_permission_mode` switches, so a restart boots straight into
+   * the mode the pane was last running rather than silently dropping back.
+   */
+  permissionMode?: string;
   /**
    * Command written to the PTY stdin after the shell is ready (e.g. a
    * provider CLI invocation from `applyGridLayout`).  Held in the in-memory
@@ -286,4 +310,45 @@ export function markLeafExited(
  */
 export function paneKind(leaf: PaneLeaf): PaneKind {
   return leaf.kind ?? "shell";
+}
+
+/**
+ * Set the provider/model/permission mode an agent leaf runs with. A `null`
+ * value clears the field (back to "resolve from the catalog"); `undefined`
+ * leaves it untouched, so a caller can change the model without restating the
+ * provider. Non-agent leaves are returned unchanged — a shell has no model.
+ */
+export function updateLeafAgentConfig(
+  root: LayoutNode,
+  targetId: string,
+  config: {
+    providerId?: number | null;
+    model?: string | null;
+    permissionMode?: string | null;
+  },
+): LayoutNode {
+  if (root.type === "leaf") {
+    if (root.terminalId !== targetId || paneKind(root) !== "agent") return root;
+    const next: PaneLeaf = { ...root };
+    if (config.providerId !== undefined) {
+      if (config.providerId === null) delete next.providerId;
+      else next.providerId = config.providerId;
+    }
+    if (config.model !== undefined) {
+      if (config.model === null) delete next.model;
+      else next.model = config.model;
+    }
+    if (config.permissionMode !== undefined) {
+      if (config.permissionMode === null) delete next.permissionMode;
+      else next.permissionMode = config.permissionMode;
+    }
+    return next;
+  }
+  return {
+    ...root,
+    children: [
+      updateLeafAgentConfig(root.children[0], targetId, config),
+      updateLeafAgentConfig(root.children[1], targetId, config),
+    ],
+  };
 }

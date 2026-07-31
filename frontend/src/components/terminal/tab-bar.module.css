@@ -97,3 +97,40 @@
   color: var(--fg-1);
   background: rgba(255, 255, 255, 0.02);
 }
+
+/* Second `+`: opens a shell tab explicitly (⌥⌘T). Same affordance as `.add`
+   with an icon instead of a glyph, so the pair reads as one control. */
+.addShell {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-3);
+  cursor: pointer;
+  padding: 0 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.addShell:hover {
+  color: var(--fg-1);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Per-tab kind marker (prototype `.tab .kinddot`, CSS line 170): a violet
+   square for an agent tab, a grey circle for a shell tab. */
+.kindDot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+}
+
+.kindDotAgent {
+  border-radius: 2px;
+  background: var(--violet);
+}
+
+.kindDotShell {
+  border-radius: 50%;
+  background: var(--fg-4);
+}

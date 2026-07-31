@@ -152,11 +152,56 @@
   color: var(--fg-2);
 }
 .d3-side__grouphead svg {
-  transition: transform 0.15s ease;
+  transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
   flex: 0 0 auto;
 }
 .d3-side__grouphead.is-open svg {
   transform: rotate(90deg);
+}
+/* Animated group open/close.
+   `grid-template-rows: 0fr → 1fr` is the one way to transition to a content-
+   driven height without measuring it in JS: the row box is animatable while
+   the child keeps its natural height. `min-height: 0` on the inner wrapper is
+   required — without it the grid item refuses to shrink below its content and
+   the collapse jumps. `visibility` (not `display`) finishes hidden so the
+   collapsed group is not hit-testable, and is delayed on the way out so it
+   does not blank the items before the height has finished animating. */
+.d3-side__items {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.14s ease,
+    visibility 0s linear 0.18s;
+}
+.d3-side__items.is-open {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  opacity: 1;
+  transition:
+    grid-template-rows 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.14s ease 0.04s,
+    visibility 0s;
+}
+/* Exactly one grid child, which is what makes the row template meaningful —
+   several children would each get their own row and only the first would
+   animate. It also owns the 1 px item gap that `.d3-side__group` used to
+   provide when the buttons were its direct children. */
+.d3-side__itemsinner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .d3-side__items,
+  .d3-side__items.is-open,
+  .d3-side__grouphead svg {
+    transition: none;
+  }
 }
 .d3-nav {
   display: flex;

@@ -232,3 +232,77 @@
 .pasteBtnConfirm:hover {
   opacity: 0.88;
 }
+
+/* Kind badge in the pane header (prototype `.phead .kind.shell`, CSS line 188).
+   Mirrors agent-pane.module.css's `.kind` in geometry with the neutral shell
+   palette instead of the agent's violet, so the two headers align exactly. */
+.kind {
+  flex: none;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: var(--r-1);
+  background: var(--bg-4);
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+}
+
+/* Mode footer (prototype `.collapsed`, CSS line 364) — the shell pane's
+   counterpart to the agent pane's composer strip. */
+.modeFooter {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border-top: 1px solid var(--line-1);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+
+.modeBadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--r-1);
+  background: var(--bg-4);
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+}
+
+.modeWhy {
+  color: var(--fg-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.modeSwap {
+  margin-left: auto;
+  flex: none;
+  appearance: none;
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  border-radius: var(--r-1);
+  padding: 2px 7px;
+  font-family: inherit;
+  font-size: 9.5px;
+  cursor: pointer;
+}
+
+.modeSwap:hover {
+  border-color: var(--accent-line);
+  color: var(--fg-1);
+}

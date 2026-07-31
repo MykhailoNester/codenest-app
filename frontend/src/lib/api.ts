@@ -26,6 +26,11 @@ import {
   FEATURE_CACHE_KEY,
   FEATURE_CACHE_EVENT,
 } from "./nav-items";
+import {
+  AGENT_CATALOG_RESET_EVENT,
+  AGENT_CATALOG_STORAGE_KEY,
+  AGENT_SELECTION_STORAGE_KEY,
+} from "./agent-storage-keys";
 
 // Re-exported so any existing `import { FEATURE_CACHE_KEY } from "./api"`
 // caller still resolves — the constant itself now lives in `nav-items.ts`
@@ -4621,11 +4626,24 @@ export function useFactoryReset(): UseMutationResult<
       qc.clear();
       // Clear the feature-defaults cache so the sidebar reverts to FEATURE_DEFAULTS
       // on next cold launch rather than showing the pre-reset feature state.
+      //
+      // The agent catalog needs the same treatment for a sharper reason: a reset
+      // deletes the `providers` / `provider_models` rows it caches, but the reset
+      // navigates to onboarding *without* reloading the webview — so both the
+      // localStorage copy and the store's in-memory copy (`loaded: true`, which
+      // makes a refresh a no-op) would survive the rows they describe, and the
+      // first pane opened after re-onboarding would spawn against the deleted
+      // provider's binary and `CLAUDE_CONFIG_DIR`. The event drops the in-memory
+      // half; `agent-catalog-store.ts` listens for it. Keys live in
+      // `lib/agent-storage-keys.ts` so this file never imports the store.
       try {
         localStorage.removeItem(FEATURE_CACHE_KEY);
+        localStorage.removeItem(AGENT_CATALOG_STORAGE_KEY);
+        localStorage.removeItem(AGENT_SELECTION_STORAGE_KEY);
       } catch {
         /* non-fatal */
       }
+      window.dispatchEvent(new Event(AGENT_CATALOG_RESET_EVENT));
     },
   });
 }

@@ -42,9 +42,7 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         "parallel",  # Parallel agent runs (slug: parallel)
         "preview",  # Dev-server preview pane (slug: preview)
         "feed",  # Activity feed (slug: feed)
-        "explorer",  # Workspace navigator side panel (Terminal page, no nav slug)
         "budgets",  # Cost budgets (slug: budgets)
-        "composer",  # Native agent pane + composer (pane chrome, no nav slug)
         "sync",  # Sync targets (slug: sync)
         "snippets",  # Snippet library (slug: library)
         "gallery",  # Template/agent gallery (slug: marketplace)
@@ -53,6 +51,16 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         "plugins",  # Plugins (slug: plugins)
     }
 )
+
+# Slugs that used to be toggleable and are now unconditional parts of the
+# Terminal page: ``composer`` (the native agent pane + composer, which is the
+# default session surface) and ``explorer`` (the workspace navigator beside
+# it). Accepted on write so an existing install — whose stored
+# ``enabled_features`` still carries them, seeded by
+# ``000_baseline_schema.sql`` — can PUT its map back without a 422, but never
+# echoed by the reader below, which merges only ``KNOWN_FEATURES``. A genuine
+# typo is still rejected.
+_RETIRED_FEATURES: frozenset[str] = frozenset({"composer", "explorer"})
 
 # Default payload used when the ``enabled_features`` setting is absent. Core
 # modules (plus Schedules) are ON; the remaining extras are OFF (hidden from
@@ -64,12 +72,10 @@ _FEATURES_DEFAULT: dict[str, bool] = {
     "parallel": True,
     "preview": True,
     "budgets": True,
-    "composer": False,
     "schedules": True,
     "snippets": False,
     "gallery": False,
     "feed": False,
-    "explorer": False,
     "mcp": False,
     "integrations": False,
     "plugins": False,
@@ -90,7 +96,7 @@ def _validate_features_setting(value_json: str) -> None:
             detail="enabled_features must be an object mapping feature slugs to booleans",
         )
 
-    unknown = set(value.keys()) - KNOWN_FEATURES
+    unknown = set(value.keys()) - KNOWN_FEATURES - _RETIRED_FEATURES
     if unknown:
         raise HTTPException(
             status_code=422,

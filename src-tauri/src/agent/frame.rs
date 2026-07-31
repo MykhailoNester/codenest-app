@@ -332,6 +332,59 @@ pub fn encode_interrupt(request_id: &str) -> Result<String, String> {
     encode_line(&value)
 }
 
+/// Encode a `control_request` switching the model for the *live* session —
+/// the wire equivalent of typing `/model` in the TUI, so a pane can change
+/// model without losing its conversation.
+///
+/// Verified against CLI 2.1.220 by round-tripping a two-turn session: the CLI
+/// answers `{"type":"control_response","response":{"subtype":"success",
+/// "request_id":"<id>"}}`, the next assistant message carries the new
+/// `message.model`, and the final `result.modelUsage` records both models. The
+/// same subtype list also documents the failure modes we must not produce
+/// (`set_model: model must be a string`, `invalid_model_type`), which is why
+/// `model` is a plain `&str` here and validated non-empty by the caller.
+pub fn encode_set_model(request_id: &str, model: &str) -> Result<String, String> {
+    let value = serde_json::json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": { "subtype": "set_model", "model": model },
+    });
+    encode_line(&value)
+}
+
+/// Encode a `control_request` switching the permission mode of the *live*
+/// session — the wire equivalent of Shift+Tab in the TUI, which a `--print`
+/// child has no way to receive.
+///
+/// Verified against CLI 2.1.220 by round-tripping each mode through a child
+/// spawned with exactly [`super::build_agent_argv`]'s flags. The mode is
+/// engine-local: the response arrives with no model turn in between, so this
+/// costs nothing. Success echoes the *applied* mode, which is not always the
+/// requested one — `manual` is an alias the CLI normalises to `default`:
+///
+/// ```jsonc
+/// // → {"type":"control_request","request_id":"…","request":{"subtype":"set_permission_mode","mode":"manual"}}
+/// // ← {"type":"control_response","response":{"subtype":"success","request_id":"…","response":{"mode":"default"}}}
+/// ```
+///
+/// Two verified failure modes, both `{"subtype":"error","error":"…"}`:
+/// `bypassPermissions` is refused outright ("because the session was not
+/// launched with --dangerously-skip-permissions" — it is spawn-time only, and
+/// no live request can reach it), and an unrecognised mode answers "Cannot set
+/// permission mode: must be one of acceptEdits, auto, bypassPermissions,
+/// default, dontAsk, plan". That list is the CLI's canonical set; the caller
+/// validates against [`super::PERMISSION_MODES`], which is the `--help` flag
+/// spelling of the same set (`manual` where the canonical list says `default`)
+/// and is accepted here because the CLI aliases it before validating.
+pub fn encode_set_permission_mode(request_id: &str, mode: &str) -> Result<String, String> {
+    let value = serde_json::json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": { "subtype": "set_permission_mode", "mode": mode },
+    });
+    encode_line(&value)
+}
+
 /// Encode a `control_response` answering a `can_use_tool` permission request.
 /// Both variants below were round-tripped against CLI 2.1.220 (the plan's
 /// Wire verification, runs B and C):
@@ -707,6 +760,25 @@ mod tests {
             "type": "control_request",
             "request_id": "req_1",
             "request": { "subtype": "interrupt" },
+        });
+        assert_eq!(value, expected);
+    }
+
+    /// Pins the shape that was round-tripped against CLI 2.1.220 — a live
+    /// model switch is a `control_request`, so it must be exactly one line
+    /// like every other stdin write (a literal newline mid-stdin is fatal to
+    /// `--input-format stream-json`).
+    #[test]
+    fn encode_set_model_matches_the_verified_control_request() {
+        let encoded = encode_set_model("req_2", "claude-haiku-4-5-20251001").expect("encode");
+        assert_eq!(encoded.matches('\n').count(), 1);
+        assert!(encoded.ends_with('\n'));
+
+        let value: Value = serde_json::from_str(encoded.trim_end()).expect("must parse");
+        let expected = serde_json::json!({
+            "type": "control_request",
+            "request_id": "req_2",
+            "request": { "subtype": "set_model", "model": "claude-haiku-4-5-20251001" },
         });
         assert_eq!(value, expected);
     }

@@ -1,7 +1,8 @@
 /* Direct port of prototype:290-368 onto the real tokens. Class names match
    the plan's table (step 16):
-   .composer .cmode .mbadge.composing .mwhy .mswap -> composer cmode mbadge
-     mbadgeComposing mwhy mswap
+   .composer .cmode .mbadge.composing .mswap -> composer cmode mbadge
+     mbadgeComposing mswap   (the prototype's `.mwhy` prose slot is now the
+     provider/model selectors — see `.selectors` at the end of this file)
    .cctx .pill(.file/.task/.tpl/.add/.dropped) -> cctx pill pillFile pillTask
      pillTpl pillAdd pillDropped
    .cedit .mention .gut .dropzone -> cedit mention gut dropzone
@@ -47,15 +48,6 @@
   background: var(--violet-soft);
   color: var(--violet);
   border: 1px solid rgba(168, 85, 247, 0.3);
-}
-
-.mwhy {
-  color: var(--fg-4);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 .mswap {
@@ -445,4 +437,96 @@
 .pickerEmpty {
   padding: 8px 9px;
   color: var(--fg-4);
+}
+
+/* ── provider + model selectors (mode row) ──────────────────────────────────
+   Native <select>s deliberately: the mode row is 10 px mono chrome inside a
+   pane that can be a third of the window wide, and a custom popover here would
+   be the third dropdown implementation in this file's neighbourhood. They are
+   styled down to the row's scale and inherit the mono face so they read as part
+   of the strip rather than as OS widgets. */
+.selectors {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.selectWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.selectLabel {
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: none;
+}
+
+.select {
+  appearance: none;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 9.5px;
+  padding: 2px 5px;
+  max-width: 11rem;
+  min-width: 0;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.select:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--fg-1);
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.selectError {
+  flex: none;
+  color: var(--err);
+  font-size: 9.5px;
+}
+
+/* The selected provider is not the one the live session is running (it started
+   before the catalog was known) — the value shown is what a restart *would*
+   use, so it is marked as not-yet-applied rather than presented as fact. */
+.selectStale {
+  border-color: rgba(245, 158, 11, 0.45);
+  color: var(--warn);
+}
+
+.selectWarn {
+  flex: none;
+  appearance: none;
+  background: var(--warn-soft);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--r-1);
+  color: var(--warn);
+  font-family: inherit;
+  font-size: 9.5px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+
+.selectWarn:hover {
+  background: rgba(245, 158, 11, 0.22);
 }

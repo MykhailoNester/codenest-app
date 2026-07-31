@@ -95,3 +95,16 @@ export function elapsedSecondsSince(iso: string): number {
 export function elapsedSecondsBetween(startIso: string, endIso: string): number {
   return Math.max(0, Math.floor((parseUtcMs(endIso) - parseUtcMs(startIso)) / 1000));
 }
+
+/**
+ * Whole seconds since an epoch-milliseconds timestamp.
+ *
+ * The agent-pane strip (`agent-session-hud.tsx`) measures from frame arrival
+ * times, which are already `Date.now()` values from the reducer, so it has no
+ * ISO string to hand to `elapsedSecondsSince` above. Reading the clock lives
+ * here rather than at the call site because that call site is a component
+ * render, where `react-hooks/purity` rightly forbids it.
+ */
+export function elapsedSecondsSinceMs(startMs: number): number {
+  return Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+}

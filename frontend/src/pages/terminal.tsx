@@ -4,12 +4,9 @@ import { Shell } from "../components/layout/shell";
 import { TabBar } from "../components/terminal/tab-bar";
 import { SplitContainer } from "../components/terminal/split-container";
 import { WorkspaceNavigator } from "../components/explorer/workspace-navigator";
-import { FindPaletteOverlay } from "../components/explorer/find-palette-overlay";
 import { useTerminalShortcuts } from "../hooks/use-terminal-shortcuts";
 import { useTerminalFileDrop } from "../hooks/use-terminal-file-drop";
 import { useTerminalStore } from "../stores/terminal-store";
-import { useComposerFeature } from "../lib/composer-feature";
-import { useEnabledFeatures } from "../lib/api";
 import styles from "./terminal.module.css";
 
 interface TerminalsLayoutProps {
@@ -31,22 +28,13 @@ interface TerminalsLayoutProps {
    */
   onCloseTab?: (tabId: string) => void;
   /**
-   * Whether this mount gets the 262 px Explorer panel at all. `true` only
-   * for the main window (`TerminalPage`) — a popout is a focused surface
-   * the panel would eat a third of, so `TerminalWindowRoot` omits this and
-   * gets `<FindPaletteOverlay>` instead. Defaults to `false` so a bare
+   * Whether this mount gets the 262 px workspace navigator panel at all.
+   * `true` only for the main window (`TerminalPage`) — a popout is a focused
+   * surface the panel would eat a third of, so `TerminalWindowRoot` omits this
+   * and gets `<FindPaletteOverlay>` instead. Defaults to `false` so a bare
    * `render(<TerminalsLayout />)` (the persistence test) never renders it.
    */
   showNavigator?: boolean;
-  /**
-   * The resolved `explorer` feature toggle, resolved by the caller — never
-   * fetched here. `TerminalsLayout` must stay renderable without a
-   * `QueryClientProvider` — `terminal-tab-persistence.test.tsx` renders it
-   * bare five times — so the `useEnabledFeatures()` call is hoisted to
-   * `TerminalPage` / `TerminalWindowRoot`, both of which already sit inside
-   * one. Defaults to `false`.
-   */
-  explorerOn?: boolean;
 }
 
 /**
@@ -58,17 +46,11 @@ export function TerminalsLayout({
   skipHydration = false,
   onCloseTab,
   showNavigator = false,
-  explorerOn = false,
 }: TerminalsLayoutProps): ReactElement {
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const hydrated = useTerminalStore((s) => s.hydrated);
   const hydrateFromStorage = useTerminalStore((s) => s.hydrateFromStorage);
-  // Resolved once here — provider-free (no QueryClient needed) — and
-  // threaded into `SplitContainer` as a required prop rather than read
-  // inside it, so the recursion does no per-node work. See
-  // `lib/composer-feature.ts` and Design decision 2 in the plan.
-  const composerEnabled = useComposerFeature();
 
   useTerminalShortcuts();
   useTerminalFileDrop();
@@ -104,7 +86,6 @@ export function TerminalsLayout({
                   node={tab.layout}
                   showHeader={tab.layout.type === "split"}
                   active={tab.id === activeTabId}
-                  composerEnabled={composerEnabled}
                 />
               </div>
             ))
@@ -118,21 +99,26 @@ export function TerminalsLayout({
     </div>
   );
 
-  if (!explorerOn) return page;
+  // Bare `page` when there is no navigator, rather than a row with the ⌘P
+  // palette in the navigator's place. `TerminalsLayout` must stay renderable
+  // with no `QueryClientProvider` — three test files render it directly — and
+  // `<FindPaletteOverlay/>` is built on react-query, so the popout window
+  // composes the palette itself (`TerminalWindowRoot`) instead of receiving it
+  // from here. Same rendered result in the app, provider-free in a test.
+  if (!showNavigator) return page;
 
   return (
     <div className={styles.row}>
-      {showNavigator ? <WorkspaceNavigator /> : <FindPaletteOverlay />}
+      <WorkspaceNavigator />
       {page}
     </div>
   );
 }
 
 export function TerminalPage(): ReactElement {
-  const explorerOn = useEnabledFeatures().explorer !== false;
   return (
     <Shell scrollable={false}>
-      <TerminalsLayout showNavigator explorerOn={explorerOn} />
+      <TerminalsLayout showNavigator />
     </Shell>
   );
 }

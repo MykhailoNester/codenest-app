@@ -174,7 +174,7 @@ export interface LaunchSpec {
    */
   promptFanout?: PromptFanout;
   /**
-   * Selected model string (e.g. "claude-sonnet-4-6").
+   * Selected model string (e.g. "claude-sonnet-5").
    * Absent when the provider has a single "default" model.
    */
   model?: string;

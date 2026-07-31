@@ -1,15 +1,21 @@
 /**
  * The native agent pane — a conversation plus a composer, in place of an
- * xterm terminal. Owns the duplex `claude` session's lifecycle end to end:
- * subscribes to `agent_frame:{leafId}` before calling `agent_start` (so an
- * `init` frame emitted in the gap can never be lost), and is the *only*
- * place a session is stopped — pane close, tab close, feature-toggle-off,
- * and window teardown all unmount this component (Design decision 4 in the
- * agent-pane-composer plan).
+ * xterm terminal. Owns the duplex `claude` session's lifecycle: subscribes to
+ * `agent_frame:{leafId}` before calling `agent_start` (so an `init` frame
+ * emitted in the gap can never be lost), and stops the session when its leaf
+ * is genuinely gone.
+ *
+ * "Genuinely gone" is the load-bearing part. An unmount alone does not mean
+ * teardown: closing a *sibling* pane collapses the split, which reconciles this
+ * subtree at a new position in the tree and therefore unmounts and remounts it.
+ * Treating that as teardown is what used to kill a working session and leave
+ * "Session ended (exit 0)" behind the moment the user closed the shell beside
+ * it. So both cleanups below ask the store whether the leaf still exists and
+ * keep the session — and the conversation, and the draft — when it does.
  */
 
-import { useEffect, useState } from "react";
-import type { ReactElement } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { DragEvent, ReactElement } from "react";
 import {
   agentStart,
   agentStop,
@@ -19,10 +25,19 @@ import {
   type AgentFrame,
 } from "../../lib/ipc";
 import { useAgentSessionStore } from "../../stores/agent-session-store";
-import { useComposerStore } from "../../stores/composer-store";
+import { useComposerStore, CODENEST_PATHS_MIME } from "../../stores/composer-store";
 import { useTerminalStore } from "../../stores/terminal-store";
+import {
+  recordAgentLaunch,
+  recordAgentExited,
+} from "../../lib/agent-run-telemetry";
+import { currentPaneTarget } from "../../lib/window-target";
+import { useAgentCatalogStore } from "../../stores/agent-catalog-store";
+import { readPathDragPayload } from "../../lib/explorer/drag-payload";
+import { emptyConversation } from "../../lib/agent-conversation";
 import { AgentConversation } from "./agent-conversation";
 import { AgentComposer } from "./agent-composer";
+import { AgentSessionHud } from "./agent-session-hud";
 import { Icon } from "../icon";
 import styles from "./agent-pane.module.css";
 
@@ -32,6 +47,13 @@ interface AgentPaneProps {
   title: string;
   showHeader?: boolean;
   active: boolean;
+  /** `providers.id` persisted on this leaf, if the user has picked one. */
+  providerId?: number;
+  /** The model persisted on this leaf, if the user has picked one. */
+  model?: string;
+  /** The permission mode persisted on this leaf, if the user has picked one.
+   *  Absent means no `--permission-mode` flag at spawn: the CLI's own default. */
+  permissionMode?: string;
 }
 
 /**
@@ -54,12 +76,101 @@ interface AgentPaneProps {
  * `boot()` can never read a stale entry left by the *previous* boot's still
  * in-flight `agentStop` — the two keys don't collide, so there is nothing
  * left to race. This is deliberately structural rather than "clear the flag
- * synchronously in `handleRetry`": that alternative works today but depends
+ * synchronously in `requestRestart`": that alternative works today but depends
  * on every future retryToken-bumping call site remembering to clear it
  * first, whereas keying by the pair is correct by construction regardless
  * of what triggers a `retryToken` bump later.
  */
 const startedPanes = new Set<string>();
+
+/**
+ * `leafId` -> the live `agent_frame:{leafId}` listener's disposer.
+ *
+ * The subscription deliberately outlives the component. A pane unmounts for
+ * reasons that have nothing to do with its session ending — a sibling pane
+ * closing, or a route change away from the Terminal page — and a session whose
+ * frames nobody is listening to loses them for good: the assistant text of a
+ * turn that finished while the user was on another page would simply never
+ * appear, and a missed `result` frame would leave the pane's status stuck on
+ * "running" forever. Keeping the listener registered means frames keep landing
+ * in `agent-session-store` regardless, so a remount renders the *current* state
+ * of the conversation rather than a stale snapshot plus a gap.
+ *
+ * Disposed only where the session itself is stopped (see the lifecycle effect's
+ * cleanup), which keeps "is there a listener?" and "is there a child?" in step.
+ */
+const frameSubscriptions = new Map<string, () => void>();
+
+/**
+ * `leafId` -> the mounted pane's control-note setter, if one is mounted.
+ *
+ * The long-lived listener above writes conversation state through the store,
+ * but the control-frame breadcrumb is component state, and the mount that
+ * registered it may be gone by the time a frame arrives. An indirection through
+ * this map means the listener always talks to whichever mount is current, and to
+ * nothing at all when there is none — rather than holding a closure over a
+ * setter from an unmounted tree.
+ */
+const controlNoteSinks = new Map<string, (note: string) => void>();
+
+/** In-flight subscribe calls, so two mounts of one leaf can't double-register. */
+const pendingSubscriptions = new Map<string, Promise<void>>();
+
+async function ensureFrameSubscription(leafId: string): Promise<void> {
+  if (frameSubscriptions.has(leafId)) return;
+  const pending = pendingSubscriptions.get(leafId);
+  if (pending) return pending;
+
+  const promise = subscribeAgentFrames(leafId, (frame: AgentFrame) => {
+    // `getState()` rather than a captured action: this closure outlives the
+    // component that created it.
+    useAgentSessionStore.getState().applyFrame(leafId, frame);
+    if (frame.kind === "control") {
+      controlNoteSinks.get(leafId)?.(summarizeControlFrame(frame.raw));
+    }
+    if (frame.kind === "exit") {
+      // An agent pane has no PTY, so `pty-exited` — the liveness sink every
+      // provider pane relies on — never fires for it. This frame is the
+      // equivalent, and without it a Command Center row would sit at
+      // "running" forever after the session ended. Covers a natural exit, a
+      // crash, and a Stop pressed from that panel (the child dies, the waiter
+      // thread emits this). An explicit teardown reports separately, because
+      // it disposes this subscription before stopping the child.
+      recordAgentExited(leafId, exitCodeOf(frame.raw));
+    }
+  })
+    .then((dispose) => {
+      // A `disposeFrameSubscription` that landed while this was in flight wins:
+      // it removed the pending entry, so drop the listener we just created.
+      if (!pendingSubscriptions.has(leafId)) {
+        dispose();
+        return;
+      }
+      frameSubscriptions.set(leafId, dispose);
+    })
+    .finally(() => {
+      pendingSubscriptions.delete(leafId);
+    });
+
+  pendingSubscriptions.set(leafId, promise);
+  return promise;
+}
+
+function disposeFrameSubscription(leafId: string): void {
+  frameSubscriptions.get(leafId)?.();
+  frameSubscriptions.delete(leafId);
+  // Clearing this also signals an in-flight `ensureFrameSubscription` to throw
+  // its listener away instead of registering it.
+  pendingSubscriptions.delete(leafId);
+  controlNoteSinks.delete(leafId);
+}
+
+/** `exit_code` off an `exit` frame — same field the reducer's `applyExit` reads. */
+function exitCodeOf(raw: unknown): number | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const code = (raw as Record<string, unknown>)["exit_code"];
+  return typeof code === "number" ? code : null;
+}
 
 function summarizeControlFrame(raw: unknown): string {
   if (typeof raw === "object" && raw !== null) {
@@ -79,10 +190,12 @@ export function AgentPane({
   title,
   showHeader = true,
   active,
+  providerId,
+  model,
+  permissionMode,
 }: AgentPaneProps): ReactElement {
   const conversation = useAgentSessionStore((s) => s.panes[leafId]);
   const markStarting = useAgentSessionStore((s) => s.markStarting);
-  const applyFrame = useAgentSessionStore((s) => s.applyFrame);
   const resolvePermission = useAgentSessionStore((s) => s.resolvePermission);
   const allowSession = useAgentSessionStore((s) => s.allowSession);
   const reset = useAgentSessionStore((s) => s.reset);
@@ -94,10 +207,23 @@ export function AgentPane({
   const maximizedLeafId = useTerminalStore((s) => s.maximizedLeafId);
   const toggleMaximize = useTerminalStore((s) => s.toggleMaximize);
   const closePane = useTerminalStore((s) => s.closePane);
+  const setLeafAgentConfig = useTerminalStore((s) => s.setLeafAgentConfig);
+
+  const loadCatalog = useAgentCatalogStore((s) => s.load);
 
   const [startError, setStartError] = useState<string | null>(null);
   const [lastControlNote, setLastControlNote] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
+  const [dropActive, setDropActive] = useState(false);
+  /**
+   * Set by [`requestRestart`] immediately before it bumps `retryToken`, and
+   * read (then cleared) by the lifecycle effect's cleanup. This is how the
+   * cleanup tells "the user asked for a fresh session" apart from "React moved
+   * this subtree" — the two are indistinguishable from inside a cleanup
+   * otherwise, and only the former may stop the running child. A ref, not
+   * state, because it must be readable in the same commit that sets it.
+   */
+  const restartRef = useRef(false);
 
   useEffect(() => {
     // See the doc comment on `startedPanes` above (review round 1, F1) —
@@ -105,27 +231,19 @@ export function AgentPane({
     // against the previous boot's still in-flight `agentStop`.
     const bootKey = `${leafId}:${retryToken}`;
     let cancelled = false;
-    let unlisten: (() => void) | undefined;
 
     async function boot(): Promise<void> {
       setStartError(null);
       setTargetPane(leafId);
+      // Route control-frame notes to *this* mount for as long as it lives.
+      controlNoteSinks.set(leafId, setLastControlNote);
 
-      const dispose = await subscribeAgentFrames(leafId, (frame: AgentFrame) => {
-        applyFrame(leafId, frame);
-        if (frame.kind === "control") {
-          setLastControlNote(summarizeControlFrame(frame.raw));
-        }
-      });
-      if (cancelled) {
-        dispose();
-        return;
-      }
-      unlisten = dispose;
+      await ensureFrameSubscription(leafId);
+      if (cancelled) return;
 
       // Already starting/started for this (leafId, retryToken) pair
       // (StrictMode double-mount) — the frame subscription above still
-      // delivers frames to this instance either way.
+      // delivers frames either way.
       if (startedPanes.has(bootKey)) return;
 
       markStarting(leafId);
@@ -136,9 +254,67 @@ export function AgentPane({
         return;
       }
 
+      // Resolve which provider/model this session runs with, then write the
+      // resolution back onto the leaf so a Restart, a reload and the composer's
+      // selectors all agree on what is actually running. Without the provider's
+      // env the child reads the default `~/.claude` config — for a user who
+      // authenticated only their `claude-work` / `claude-personal` aliases that
+      // is an unauthenticated config, and every turn fails with
+      // `401 OAuth access token is invalid`.
+      //
+      // Spawning is therefore held until the catalog is *known*, not merely
+      // attempted. On a cold launch this pane can mount while the sidecar is
+      // still starting, and a session started in that window would run against
+      // the wrong config dir for its whole life — argv and env are fixed at
+      // spawn, so there is no recovering from it later. The cached catalog
+      // usually makes this instant; only a first-ever run actually waits, and
+      // an authoritative "no providers configured" resolves immediately.
+      if (useAgentCatalogStore.getState().providers.length > 0) {
+        void loadCatalog();
+      } else {
+        await useAgentCatalogStore.getState().loadWithRetry();
+      }
+      if (cancelled) return;
+      const catalog = useAgentCatalogStore.getState();
+      const selection = catalog.resolveSelection({
+        providerId: providerId ?? null,
+        model: model ?? null,
+      });
+      const provider = catalog.providerById(selection.providerId);
+      setLeafAgentConfig(leafId, {
+        providerId: selection.providerId,
+        model: selection.model,
+      });
+
       startedPanes.add(bootKey);
       try {
-        await agentStart({ paneId: leafId, cwd: resolvedCwd });
+        const handle = await agentStart({
+          paneId: leafId,
+          cwd: resolvedCwd,
+          ...(provider ? { command: provider.command, env: provider.env } : {}),
+          ...(selection.model !== null ? { model: selection.model } : {}),
+          // Boots straight into the mode the pane was last switched to, so a
+          // Restart is not a silent drop back to the CLI default.
+          ...(permissionMode !== undefined ? { permissionMode } : {}),
+        });
+        // Register the session as a run so it appears in the Command Center's
+        // AGENTS panel with working Focus/Stop. Posted after the spawn, not
+        // before, so a failed start never leaves a phantom "running" row —
+        // and with the *real* session id off the handle rather than a
+        // frontend-minted one, which is what lets Claude hooks enrich it.
+        //
+        // `target` comes from which window this pane was created in: the
+        // Command Center raises the detached window for a `popout` row and
+        // activates a main-window tab for an `embedded` one, so getting it
+        // wrong makes Focus a no-op.
+        recordAgentLaunch({
+          pane_id: leafId,
+          session_id: handle.session_id,
+          provider: selection.providerId,
+          cwd: resolvedCwd,
+          model: selection.model,
+          target: currentPaneTarget(),
+        });
       } catch (err) {
         startedPanes.delete(bootKey);
         if (!cancelled) {
@@ -151,33 +327,65 @@ export function AgentPane({
 
     return () => {
       cancelled = true;
-      unlisten?.();
+      if (controlNoteSinks.get(leafId) === setLastControlNote) {
+        controlNoteSinks.delete(leafId);
+      }
+      // Only a genuine teardown — or an explicit restart — stops the session.
+      // A remount (sibling pane closed → split collapsed → this subtree
+      // reconciled elsewhere; or the whole Terminal page unmounted by a route
+      // change) must leave the running `claude` child alone, and its frame
+      // subscription in place, so the conversation continues uninterrupted.
+      const restarting = restartRef.current;
+      restartRef.current = false;
+      if (!restarting && useTerminalStore.getState().leafExists(leafId)) {
+        return;
+      }
+      disposeFrameSubscription(leafId);
+      // Reported here rather than from the `exit` frame: the line above just
+      // removed the listener that would have carried it, so this is the only
+      // place a teardown-driven end can be seen. The sidecar ignores a second
+      // report for an already-ended run, so the overlap with the frame path is
+      // harmless.
+      recordAgentExited(leafId, null);
       void agentStop(leafId).finally(() => startedPanes.delete(bootKey));
     };
     // `cwd`, and every store action below, are stable references (zustand
     // actions never change identity) or intentionally excluded — only
     // `leafId` and a user-clicked Restart should re-run this lifecycle.
+    // `permissionMode` in particular must stay out: it changes on every live
+    // mode switch, and re-running this effect would restart the session the
+    // control channel just switched in place.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leafId, retryToken]);
 
   // Composer draft/pills and conversation state are wiped only on a genuine
-  // teardown of this leaf — a real unmount (pane/tab close, feature toggled
-  // off) or `leafId` itself changing — never on a `retryToken`-only re-run
-  // (review round 1, F2). Deliberately a *separate* effect, keyed on
-  // `leafId` alone: the effect above re-runs its cleanup on every Restart
-  // click (it must, to stop the old session), but this one's cleanup must
-  // not, or a draft/pills the user had pending when the session exited
+  // teardown of this leaf — the leaf leaving the store (pane/tab close) or
+  // `leafId` itself changing — never on a `retryToken`-only re-run (review
+  // round 1, F2) and never on a remount. Deliberately a *separate* effect,
+  // keyed on `leafId` alone: the effect above re-runs its cleanup on every
+  // Restart click (it must, to stop the old session), but this one's cleanup
+  // must not, or a draft/pills the user had pending when the session exited
   // would be silently discarded the instant they click Restart — the exact
   // guarantee the plan's Design decision 12 states ("a composer draft
-  // survives a session exit and restart").
+  // survives a session exit and restart"). The `leafExists` guard extends the
+  // same protection to a sibling-close remount, which would otherwise wipe a
+  // live conversation the user can still see on screen.
   useEffect(() => {
     return () => {
+      if (useTerminalStore.getState().leafExists(leafId)) return;
       clearPane(leafId);
       reset(leafId);
     };
   }, [leafId, clearPane, reset]);
 
-  function handleRetry(): void {
+  /**
+   * Tear the current session down and start a fresh one — the Restart button,
+   * and the composer's provider switch (a different binary or env cannot be
+   * applied to a running child, unlike a model switch, which goes over the
+   * control channel).
+   */
+  function requestRestart(): void {
+    restartRef.current = true;
     setRetryToken((t) => t + 1);
   }
 
@@ -219,25 +427,68 @@ export function AgentPane({
 
   const isFocused = focusedLeafId === leafId;
   const isMaximized = maximizedLeafId === leafId;
-  const conv = conversation ?? {
-    turns: [],
-    status: "starting" as const,
-    streaming: false,
-    streamText: "",
-    thinking: false,
-    thinkingTokens: 0,
-    sessionId: null,
-    model: null,
-    permissions: [],
-    lastResult: null,
-    exitCode: null,
-  };
+  // `emptyConversation()` rather than an inline literal, so a field added to
+  // `ConversationState` cannot be forgotten here.
+  const conv = conversation ?? emptyConversation();
+
+  /**
+   * Pane-wide drop target, so dragging files onto an agent pane behaves like
+   * dragging them onto a shell pane: anywhere inside the pane works, not just
+   * the composer's textarea. Paths land as context pills (there is no PTY to
+   * paste bytes into) and the agent reads them with its own Read tool, which is
+   * also how a dropped screenshot reaches it. The OS/Finder equivalent arrives
+   * through Tauri's `onDragDropEvent` and is handled in
+   * `use-terminal-file-drop.ts`, which hit-tests `data-agent-pane-id` below.
+   */
+  const acceptsDrag = (dt: DataTransfer): boolean =>
+    dt.types.includes(CODENEST_PATHS_MIME);
+
+  function handlePaneDragOver(e: DragEvent<HTMLDivElement>): void {
+    if (!acceptsDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+
+  function handlePaneDrop(e: DragEvent<HTMLDivElement>): void {
+    // Never let a drop bubble to a parent handler, recognised or not.
+    e.preventDefault();
+    e.stopPropagation();
+    setDropActive(false);
+    const paths =
+      readPathDragPayload(e.dataTransfer) ??
+      e.dataTransfer
+        .getData("text/plain")
+        .split("\n")
+        .filter((p) => p.length > 0);
+    if (paths.length === 0) return;
+    useComposerStore.getState().attachContextToPane(leafId, paths);
+    setFocusedLeaf(leafId);
+  }
 
   return (
     <div
-      className={`${styles.pane} ${isFocused ? styles.paneFocused : ""}`}
+      className={[
+        styles.pane,
+        isFocused ? styles.paneFocused : "",
+        dropActive ? styles.paneDrop : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       data-agent-pane-id={leafId}
       onMouseDown={() => setFocusedLeaf(leafId)}
+      onDragOver={handlePaneDragOver}
+      onDragEnter={(e) => {
+        if (!acceptsDrag(e.dataTransfer)) return;
+        e.preventDefault();
+        setDropActive(true);
+      }}
+      onDragLeave={(e) => {
+        // Only clear when the pointer actually left the pane, not when it
+        // crossed into a child element (dragleave fires for both).
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDropActive(false);
+      }}
+      onDrop={handlePaneDrop}
     >
       {showHeader ? (
         <div className={styles.header}>
@@ -266,6 +517,11 @@ export function AgentPane({
         </div>
       ) : null}
 
+      {/* Status strip — between the header and the conversation, exactly where
+          the prototype puts `.hud`, and where `<TerminalPane/>` puts its own.
+          Rendered outside `.body` so it never scrolls with the conversation. */}
+      <AgentSessionHud state={conv} cwd={cwd} />
+
       <div className={styles.body}>
         <AgentConversation
           state={conv}
@@ -276,44 +532,45 @@ export function AgentPane({
           lastControlNote={lastControlNote}
         />
 
+        {/*
+          A dead session shows its status bar *above* a still-mounted composer
+          rather than replacing it. Replacing it made the input surface vanish
+          exactly when the user most wants to type the next prompt — and since
+          the composer owns the provider/model selectors, it also took away the
+          controls needed to restart on a different model. The draft, the pills
+          and the history all survive here, so Restart resumes with whatever was
+          already typed.
+        */}
         {startError !== null ? (
           <div className={styles.startError}>
             <span>{startError}</span>
-            <button type="button" className={styles.restartBtn} onClick={handleRetry}>
+            <button type="button" className={styles.restartBtn} onClick={requestRestart}>
               Retry
             </button>
           </div>
         ) : conv.status === "exited" ? (
           <div className={styles.endedBar}>
             <span>Session ended (exit {conv.exitCode ?? "?"})</span>
-            <button type="button" className={styles.restartBtn} onClick={handleRetry}>
+            <button type="button" className={styles.restartBtn} onClick={requestRestart}>
               Restart
             </button>
           </div>
-        ) : (
-          <AgentComposer leafId={leafId} status={conv.status} />
-        )}
-      </div>
-    </div>
-  );
-}
+        ) : null}
 
-/** Rendered by `<SplitContainer/>` instead of `<AgentPane/>` when the
- * `composer` feature is off. A persisted agent leaf is never silently
- * rendered as a shell — this notice is the honest alternative. */
-export function AgentPaneDisabled({ leafId }: { leafId: string }): ReactElement {
-  const closePane = useTerminalStore((s) => s.closePane);
-  return (
-    <div className={styles.pane} data-agent-pane-id={leafId}>
-      <div className={styles.disabled}>
-        <span>Agent panes are off — enable Composer in Settings → Features.</span>
-        <button
-          type="button"
-          className={styles.restartBtn}
-          onClick={() => void closePane(leafId)}
-        >
-          Close
-        </button>
+        <AgentComposer
+          leafId={leafId}
+          status={conv.status}
+          providerId={providerId ?? null}
+          model={model ?? null}
+          permissionMode={permissionMode ?? null}
+          onRequestRestart={requestRestart}
+        />
+
+        {dropActive ? (
+          <div className={styles.paneDropHint}>
+            drop to attach as context
+          </div>
+        ) : null}
       </div>
     </div>
   );

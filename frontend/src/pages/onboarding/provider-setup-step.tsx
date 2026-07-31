@@ -40,15 +40,37 @@ interface Tier {
 }
 
 const TIERS: Tier[] = [
+  { key: "fable", label: "Fable", dotColor: "var(--warn, #f59e0b)" },
   { key: "opus", label: "Opus", dotColor: "var(--violet, #a855f7)" },
   { key: "sonnet", label: "Sonnet", dotColor: "var(--accent, #3b82f6)" },
   { key: "haiku", label: "Haiku", dotColor: "var(--info, #38bdf8)" },
 ];
 
+/**
+ * Seeded model IDs, matching the aliases Claude Code 2.1.220 documents for
+ * `--model` ("Provide an alias for the latest model (e.g. 'fable', 'opus', or
+ * 'sonnet') or a model's full name (e.g. 'claude-fable-5')").
+ *
+ * Two rules these have to follow, both verified against the installed CLI
+ * rather than assumed:
+ *
+ * 1. **Dashes, never dots.** `claude-haiku-4.5` does not appear anywhere in the
+ *    CLI binary; `claude-haiku-4-5` appears throughout. A dotted ID is rejected
+ *    at the API, and the failure surfaces as an opaque error inside the pane.
+ * 2. **No date suffix on an alias.** `claude-haiku-4-5` is the alias that
+ *    tracks the latest Haiku 4.5 build; the dated `claude-haiku-4-5-20251001`
+ *    is a pinned snapshot. Seeding the alias means a user who never revisits
+ *    this screen keeps following the current build.
+ *
+ * The user maintains these as new models ship — the inputs below are editable
+ * and the values land in `provider_models`, which is what the agent pane's
+ * model dropdown reads.
+ */
 const DEFAULT_MODELS: Record<string, string> = {
-  opus: "claude-opus-4-8",
-  sonnet: "claude-sonnet-4-6",
-  haiku: "claude-haiku-4-5-20251001",
+  fable: "claude-fable-5",
+  opus: "claude-opus-5",
+  sonnet: "claude-sonnet-5",
+  haiku: "claude-haiku-4-5",
 };
 
 /** One Anthropic alias entry in the multi-provider list. */
@@ -680,9 +702,10 @@ export function ProviderSetupStep({ registerCommit }: Props): ReactElement {
             </div>
           ))}
           <p className={styles.hint}>
-            Claude ships three tiers. Enter the exact IDs you want available;
-            you maintain them as new models ship. The ★ tier is the workspace
-            default for this account.
+            Enter the exact IDs you want available; you maintain them as new
+            models ship. The ★ tier is the workspace default for this account.
+            Clear a row to leave that tier out — Fable needs 30-day data
+            retention, so remove it if your account is not eligible.
           </p>
         </div>
       ))}

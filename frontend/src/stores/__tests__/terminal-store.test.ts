@@ -16,7 +16,7 @@ vi.mock("../../lib/ipc", () => {
 
 import { useTerminalStore, TERMINAL_STORAGE_KEY } from "../terminal-store";
 import type { LayoutNode, PaneLeaf, Split } from "../../lib/layout-tree";
-import { collectLeaves } from "../../lib/layout-tree";
+import { collectLeaves, paneKind } from "../../lib/layout-tree";
 import type { LaunchSpec } from "../../lib/launch";
 import * as ipc from "../../lib/ipc";
 
@@ -75,8 +75,29 @@ describe("useTerminalStore", () => {
   });
 
   describe("addTab", () => {
-    it("creates a tab with one leaf and allocates one PTY", async () => {
+    it("defaults to an agent leaf and allocates no PTY", async () => {
       await useTerminalStore.getState().addTab();
+      const { tabs, activeTabId, focusedLeafId } = useTerminalStore.getState();
+      expect(tabs).toHaveLength(1);
+      const leaf = tabs[0]!.layout as PaneLeaf;
+      expect(paneKind(leaf)).toBe("agent");
+      expect(tabs[0]!.title).toBe("Agent 1");
+      expect(activeTabId).toBe(tabs[0]!.id);
+      expect(focusedLeafId).toBe(leaf.terminalId);
+      // The composer is the default surface: no shell is spawned for it.
+      expect(openTerminalMock).not.toHaveBeenCalled();
+    });
+
+    it("numbers agent and shell tabs independently", async () => {
+      await useTerminalStore.getState().addTab();
+      await useTerminalStore.getState().addTab({ kind: "shell" });
+      await useTerminalStore.getState().addTab();
+      const titles = useTerminalStore.getState().tabs.map((t) => t.title);
+      expect(titles).toEqual(["Agent 1", "Shell 1", "Agent 2"]);
+    });
+
+    it("with kind: 'shell' creates a tab with one leaf and allocates one PTY", async () => {
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const { tabs, activeTabId, focusedLeafId } = useTerminalStore.getState();
       expect(tabs).toHaveLength(1);
       expect(tabs[0]!.layout.type).toBe("leaf");
@@ -89,7 +110,7 @@ describe("useTerminalStore", () => {
 
   describe("splitPane", () => {
     it("replaces the target leaf with a Split(h, [original, new], 0.5)", async () => {
-      await useTerminalStore.getState().addTab();
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const { tabs } = useTerminalStore.getState();
       const targetId = (tabs[0]!.layout as PaneLeaf).terminalId;
 
@@ -103,8 +124,32 @@ describe("useTerminalStore", () => {
       expect(useTerminalStore.getState().focusedLeafId).toBe("pty-2");
     });
 
+    it("leaves every other tab untouched (open-shell-beside regression)", async () => {
+      await useTerminalStore.getState().addTab(); // Agent 1
+      await useTerminalStore.getState().addTab(); // Agent 2
+      await useTerminalStore.getState().addTab({ kind: "shell" }); // Shell 1
+      const before = useTerminalStore.getState();
+      expect(before.tabs).toHaveLength(3);
+      // Split the *middle* tab's pane, the way the composer's "open shell
+      // beside" button does.
+      const middle = before.tabs[1]!;
+      useTerminalStore.getState().setActiveTab(middle.id);
+      const targetId = (middle.layout as PaneLeaf).terminalId;
+
+      await useTerminalStore.getState().splitPane(targetId, "h");
+
+      const after = useTerminalStore.getState();
+      expect(after.tabs.map((t) => t.id)).toEqual(
+        before.tabs.map((t) => t.id),
+      );
+      expect(after.tabs[1]!.layout.type).toBe("split");
+      // The untouched tabs keep their exact layout objects.
+      expect(after.tabs[0]!.layout).toBe(before.tabs[0]!.layout);
+      expect(after.tabs[2]!.layout).toBe(before.tabs[2]!.layout);
+    });
+
     it("uses vertical direction when requested", async () => {
-      await useTerminalStore.getState().addTab();
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const targetId = (useTerminalStore.getState().tabs[0]!.layout as PaneLeaf)
         .terminalId;
       await useTerminalStore.getState().splitPane(targetId, "v");
@@ -113,7 +158,7 @@ describe("useTerminalStore", () => {
     });
 
     it("with kind: 'agent' inserts an agent leaf and calls openTerminal zero times", async () => {
-      await useTerminalStore.getState().addTab();
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const targetId = (useTerminalStore.getState().tabs[0]!.layout as PaneLeaf)
         .terminalId;
       openTerminalMock.mockClear();
@@ -133,7 +178,7 @@ describe("useTerminalStore", () => {
     });
 
     it("with no opts still calls openTerminal once and produces a leaf with no kind", async () => {
-      await useTerminalStore.getState().addTab();
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const targetId = (useTerminalStore.getState().tabs[0]!.layout as PaneLeaf)
         .terminalId;
       openTerminalMock.mockClear();
@@ -149,7 +194,7 @@ describe("useTerminalStore", () => {
 
   describe("closePane", () => {
     it("on a split: removes the leaf and collapses parent split to sibling", async () => {
-      await useTerminalStore.getState().addTab();
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const targetId = (useTerminalStore.getState().tabs[0]!.layout as PaneLeaf)
         .terminalId;
       await useTerminalStore.getState().splitPane(targetId, "h");
@@ -162,8 +207,8 @@ describe("useTerminalStore", () => {
     });
 
     it("on the last leaf in a non-last tab: closes the tab", async () => {
-      await useTerminalStore.getState().addTab(); // tab 1
-      await useTerminalStore.getState().addTab(); // tab 2
+      await useTerminalStore.getState().addTab({ kind: "shell" }); // tab 1
+      await useTerminalStore.getState().addTab({ kind: "shell" }); // tab 2
       const tabs = useTerminalStore.getState().tabs;
       expect(tabs).toHaveLength(2);
       const tab1 = tabs[0]!;
@@ -178,22 +223,25 @@ describe("useTerminalStore", () => {
       expect(remaining[0]!.id).not.toBe(tab1.id);
     });
 
-    it("on the last leaf in the last tab: re-seeds with a new empty tab", async () => {
-      await useTerminalStore.getState().addTab();
+    it("on the last leaf in the last tab: re-seeds with a new agent tab", async () => {
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const targetId = (useTerminalStore.getState().tabs[0]!.layout as PaneLeaf)
         .terminalId;
       await useTerminalStore.getState().closePane(targetId);
 
       const tabs = useTerminalStore.getState().tabs;
       expect(tabs).toHaveLength(1);
-      // The new tab has its own fresh PTY
-      expect((tabs[0]!.layout as PaneLeaf).terminalId).toBe("pty-2");
+      // The re-seed goes through `addTab()`, so the replacement is the default
+      // surface — an agent pane — even when what was closed was a shell.
+      const seeded = tabs[0]!.layout as PaneLeaf;
+      expect(paneKind(seeded)).toBe("agent");
+      expect(seeded.terminalId).not.toBe(targetId);
     });
   });
 
   describe("closeTab", () => {
     it("on the only tab: re-seeds with a new empty tab", async () => {
-      await useTerminalStore.getState().addTab();
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const onlyTabId = useTerminalStore.getState().tabs[0]!.id;
       await useTerminalStore.getState().closeTab(onlyTabId);
       const tabs = useTerminalStore.getState().tabs;
@@ -203,6 +251,40 @@ describe("useTerminalStore", () => {
   });
 
   describe("hydrateFromStorage", () => {
+    it("keeps the tabs whose panes restore when one tab's PTY cannot be allocated", async () => {
+      // The regression behind "opening a shell cleared all my other tabs": a
+      // single unopenable pane (its cwd was deleted, the sidecar was mid-start)
+      // rejected the whole `Promise.all`, fell through to the outer catch, and
+      // re-seeded the store with ONE fresh tab — silently discarding every
+      // other restored tab.
+      const storedTab = (id: string, cwd: string): unknown => ({
+        id,
+        title: id,
+        layout: { type: "leaf", terminalId: `old-${id}`, title: "zsh", cwd },
+      });
+      localStorage.setItem(
+        TERMINAL_STORAGE_KEY,
+        JSON.stringify({
+          tabs: [
+            storedTab("tab-a", "/ok/a"),
+            storedTab("tab-doomed", "/gone"),
+            storedTab("tab-c", "/ok/c"),
+          ],
+          activeTabId: "tab-c",
+        }),
+      );
+      openTerminalMock.mockImplementation(async (opts?: { cwd?: string }) => {
+        if (opts?.cwd === "/gone") throw new Error("cwd does not exist");
+        return { id: `pty-${opts?.cwd ?? "x"}` };
+      });
+
+      await useTerminalStore.getState().hydrateFromStorage();
+
+      const { tabs, activeTabId } = useTerminalStore.getState();
+      expect(tabs.map((t) => t.id)).toEqual(["tab-a", "tab-c"]);
+      expect(activeTabId).toBe("tab-c");
+    });
+
     it("rebuilds layout with fresh PTY ids when storage has two leaves", async () => {
       const stored = {
         tabs: [
@@ -295,7 +377,8 @@ describe("useTerminalStore", () => {
         useTerminalStore.getState().hydrateFromStorage(),
       ]);
       expect(useTerminalStore.getState().tabs).toHaveLength(1);
-      expect(openTerminalMock).toHaveBeenCalledTimes(1);
+      // The seeded default is an agent tab, which has no PTY behind it.
+      expect(openTerminalMock).not.toHaveBeenCalled();
       expect(useTerminalStore.getState().hydrating).toBe(false);
     });
   });
@@ -334,7 +417,7 @@ describe("useTerminalStore", () => {
       shellId: string;
       agentId: string;
     }> {
-      await useTerminalStore.getState().addTab();
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const tab = useTerminalStore.getState().tabs[0]!;
       const shellId = (tab.layout as PaneLeaf).terminalId;
       await useTerminalStore
@@ -379,7 +462,7 @@ describe("useTerminalStore", () => {
 
   describe("updateRatio", () => {
     it("writes the new ratio onto the parent split of the focused leaf", async () => {
-      await useTerminalStore.getState().addTab();
+      await useTerminalStore.getState().addTab({ kind: "shell" });
       const targetId = (useTerminalStore.getState().tabs[0]!.layout as PaneLeaf)
         .terminalId;
       await useTerminalStore.getState().splitPane(targetId, "h");

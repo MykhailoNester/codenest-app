@@ -8,13 +8,13 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { TerminalsLayout } from "./terminal";
-import { useEvent, closeTerminal } from "../lib/ipc";
-import { useEnabledFeatures } from "../lib/api";
+import { FindPaletteOverlay } from "../components/explorer/find-palette-overlay";
+import { useEvent, closeTerminal, agentStop } from "../lib/ipc";
 import {
   useTerminalStore,
   TERMINAL_STORAGE_KEY,
 } from "../stores/terminal-store";
-import { collectLeafIds, collectLeaves } from "../lib/layout-tree";
+import { collectLeaves, paneKind } from "../lib/layout-tree";
 import * as pendingLaunchStore from "../stores/pending-launch-store";
 import styles from "./terminal-window-root.module.css";
 import { listen } from "@tauri-apps/api/event";
@@ -42,10 +42,13 @@ export function TerminalWindowRoot(): ReactElement {
   const [sidecarDown, setSidecarDown] = useState(false);
   const closeUnlistenRef = useRef<UnlistenFn | null>(null);
   const terminalStore = useTerminalStore();
-  // The popout rule (Design decision 3 / research §12 "Popped-out windows"):
-  // a detached window never gets the 262 px panel, only the ⌘P palette — so
-  // `showNavigator` is deliberately omitted below.
-  const explorerOn = useEnabledFeatures().explorer !== false;
+  // The detached window gets the workspace navigator as well as the ⌘P palette.
+  // This deliberately supersedes the original popout rule ("a detached window
+  // never gets the 262 px panel, only the palette"): a popped-out pane is where
+  // real work happens, and having to come back to the main window to browse the
+  // tree — or to drag a file into the composer — was the thing that made the
+  // popout feel like a lesser surface. Both windows now compose the same
+  // navigator against the same store.
 
   // Tab-close handler for the detached window.  Uses `closeTabNoReSeed` so
   // that removing the last tab does not spawn a replacement shell — instead the
@@ -107,13 +110,26 @@ export function TerminalWindowRoot(): ReactElement {
 
     void win
       .onCloseRequested(async () => {
-        // Kill every PTY that was opened in this window so the Rust PtyManager
-        // map does not accumulate zombie handles after the WebView is torn down.
-        // Errors from individual close_terminal calls are silenced — the window
-        // is closing regardless.
+        // Kill every child this window started so neither the Rust PtyManager
+        // nor the AgentManager accumulates handles after the WebView is torn
+        // down. Errors from individual calls are silenced — the window is
+        // closing regardless.
+        //
+        // Agent leaves need `agentStop`, not `closeTerminal`: they have no PTY,
+        // and `<AgentPane/>`'s unmount cleanup deliberately does not stop a
+        // session whose leaf still exists (that is what keeps a session alive
+        // across a sibling-close remount), so a closing popout must stop them
+        // explicitly here. Both calls are idempotent for an unknown id, so the
+        // split by kind is a clarity measure rather than a correctness one.
         const { tabs } = useTerminalStore.getState();
-        const ids = tabs.flatMap((t) => collectLeafIds(t.layout));
-        await Promise.allSettled(ids.map((id) => closeTerminal(id)));
+        const leaves = tabs.flatMap((t) => collectLeaves(t.layout));
+        await Promise.allSettled(
+          leaves.map((leaf) =>
+            paneKind(leaf) === "agent"
+              ? agentStop(leaf.terminalId)
+              : closeTerminal(leaf.terminalId),
+          ),
+        );
         // Allow the native close to proceed (no event.preventDefault()).
       })
       .then((dispose) => {
@@ -212,10 +228,16 @@ export function TerminalWindowRoot(): ReactElement {
         </div>
       )}
       <div className={styles.body}>
+        {/* The palette is mounted here rather than inside `TerminalsLayout` so
+            that component stays renderable without a `QueryClientProvider`
+            (the palette needs one; three test files render the layout bare).
+            `showNavigator` is safe for the same reason in reverse — this window
+            is wrapped in a provider by `App`. */}
+        <FindPaletteOverlay />
         <TerminalsLayout
           skipHydration={hasPendingLaunch}
           onCloseTab={handleCloseTab}
-          explorerOn={explorerOn}
+          showNavigator
         />
       </div>
     </div>

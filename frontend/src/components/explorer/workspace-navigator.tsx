@@ -214,9 +214,26 @@ export function WorkspaceNavigator(): ReactElement {
     }
   };
 
-  if (panelCollapsed) {
-    return (
-      <div className={styles.rail}>
+  const widthPx = dragWidth ?? panelWidth;
+
+  // Collapse/expand animates the panel's own width, so the body stays mounted
+  // in both states — a `panelCollapsed` early-return swapping the aside for a
+  // 14 px rail could not animate, because there was no shared element to
+  // transition. The rail button is the only thing that swaps.
+  //
+  // The transition is suppressed mid-drag (`data-dragging`): a width that eases
+  // toward the pointer instead of tracking it makes the resize handle feel
+  // broken.
+  return (
+    <aside
+      className={
+        panelCollapsed ? `${styles.exp} ${styles.expCollapsed}` : styles.exp
+      }
+      style={panelCollapsed ? undefined : { width: widthPx }}
+      data-dragging={dragWidth !== null ? "true" : undefined}
+      data-collapsed={panelCollapsed ? "true" : "false"}
+    >
+      {panelCollapsed ? (
         <button
           type="button"
           className={styles.railBtn}
@@ -226,14 +243,19 @@ export function WorkspaceNavigator(): ReactElement {
         >
           ⇥
         </button>
-      </div>
-    );
-  }
+      ) : null}
 
-  const widthPx = dragWidth ?? panelWidth;
-
-  return (
-    <aside className={styles.exp} style={{ width: widthPx }}>
+      {/* `inert` while collapsed keeps the clipped body out of tab order and
+          out of the accessibility tree — invisible must not mean focusable. */}
+      {/* The body keeps its *expanded* width even while collapsed, so the
+          narrowing aside clips it instead of reflowing every row into a 14 px
+          column and back again on expand. */}
+      <div
+        className={styles.expbody}
+        style={{ width: widthPx }}
+        aria-hidden={panelCollapsed}
+        inert={panelCollapsed}
+      >
       <div className={styles.exphead}>
         <h3 className={styles.title}>Explorer</h3>
         <button
@@ -403,6 +425,7 @@ export function WorkspaceNavigator(): ReactElement {
         onPointerUp={onResizerPointerUp}
         onKeyDown={onResizerKeyDown}
       />
+      </div>
     </aside>
   );
 }

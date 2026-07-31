@@ -78,6 +78,23 @@ pub(crate) const PERMISSION_MODES: [&str; 6] =
 pub struct AgentStartArgs {
     pub pane_id: String,
     pub cwd: String,
+    /// The provider's `command_template` binary token (e.g. `claude`,
+    /// `claude-work`). `None` — and any token this process cannot exec —
+    /// resolves to plain `claude`; see [`resolve_binary`]. Never a full
+    /// command line: only the first token is meaningful, because this module
+    /// spawns directly with no shell in the path.
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Provider env overlay, applied on top of the inherited environment.
+    /// This is what reproduces a shell alias's behaviour for a direct spawn:
+    /// `claude-work` is `CLAUDE_CONFIG_DIR=~/.claude-work command claude`, and
+    /// without the variable the child reads the default `~/.claude` config —
+    /// which for a user who only ever authenticated the aliases is
+    /// unauthenticated, so every turn fails with `401 OAuth access token is
+    /// invalid`. Values are tilde-expanded (a stored `~/.claude-work` must
+    /// become an absolute path: there is no shell to expand it).
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -101,6 +118,25 @@ pub struct AgentSendArgs {
 #[serde(rename_all = "camelCase")]
 pub struct AgentPaneArgs {
     pub pane_id: String,
+}
+
+/// Arguments for [`agent_set_model`] — switches the model of a session that is
+/// already running, the wire equivalent of `/model` in the TUI.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSetModelArgs {
+    pub pane_id: String,
+    pub model: String,
+}
+
+/// Arguments for [`agent_set_permission_mode`] — switches the permission mode
+/// of a session that is already running, the wire equivalent of Shift+Tab in
+/// the TUI.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSetPermissionModeArgs {
+    pub pane_id: String,
+    pub mode: String,
 }
 
 /// Arguments for [`agent_respond_permission`] — answers one `can_use_tool`
@@ -139,17 +175,24 @@ pub struct AgentSessionHandle {
 // Argv construction
 // ---------------------------------------------------------------------------
 
-/// Resolve `"claude"` to a spawnable executable name.
+/// Resolve a provider's `command_template` binary token to a spawnable
+/// executable name.
 ///
-/// A private, simplified copy of the PATH probe in
-/// `scheduler::resolve_binary` (`scheduler/mod.rs:1049-1067`). The
-/// scheduler's version also unwinds a provider's `command_template` alias
-/// (e.g. a shell function that isn't directly exec-able); an interactive
-/// agent pane has no provider and no template, so there is nothing to fall
-/// back *from* — this just probes PATH for a clearer error path. Either way
-/// `Command::spawn` reports `ErrorKind::NotFound` on a genuinely missing
-/// binary, which `start_inner` turns into the documented error message.
+/// Same three rules as `scheduler::resolve_binary`
+/// (`scheduler/mod.rs:1049-1067`), and for the same reason: a bare token that
+/// is not on PATH is almost certainly a *shell alias* (`claude-work` is
+/// `alias claude-work="CLAUDE_CONFIG_DIR=~/.claude-work command claude"`),
+/// which a direct, shell-less spawn cannot run. Falling back to the canonical
+/// `claude` binary is correct because the alias's only real payload — its
+/// `CLAUDE_CONFIG_DIR` — reaches the child through
+/// [`AgentStartArgs::env`] instead. An agent pane now *does* have a provider,
+/// so unlike the earlier version of this function there is something concrete
+/// to fall back from.
 fn resolve_binary(token: &str) -> String {
+    // A path (absolute or relative) is used verbatim.
+    if token.contains('/') {
+        return token.to_string();
+    }
     if let Ok(path) = std::env::var("PATH") {
         for dir in path.split(':') {
             if !dir.is_empty() && Path::new(dir).join(token).is_file() {
@@ -157,7 +200,7 @@ fn resolve_binary(token: &str) -> String {
             }
         }
     }
-    token.to_string()
+    "claude".to_string()
 }
 
 /// Expand a leading `~` or `~/` to `$HOME`. Private copy of the same helper
@@ -186,7 +229,18 @@ fn expand_tilde(value: &str) -> String {
 /// on (contrast `scheduler/mod.rs:891`, which pushes the prompt as the last
 /// arg for a one-shot run).
 fn build_agent_argv(args: &AgentStartArgs, session_id: &str) -> Result<Vec<String>, String> {
-    let mut argv = vec![resolve_binary("claude")];
+    // Only the first whitespace-separated token of `command` is used: the rest
+    // of a provider's `command_template` is placeholder syntax
+    // (`{session_id} {mcp_config} {extra_args}`) meant for the PTY path, and
+    // this module owns its own flags below.
+    let token = args
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .and_then(|c| c.split_whitespace().next())
+        .unwrap_or("claude");
+    let mut argv = vec![resolve_binary(token)];
 
     argv.push("--print".to_string());
     argv.push("--input-format".to_string());
@@ -535,6 +589,19 @@ impl AgentManager {
         // what lets the sidecar's hook ingest bind a session to a pane later.
         command.env("CODENEST_SESSION_MODE", "agent-pane");
         command.env("CODENEST_PANE_ID", &args.pane_id);
+        // Provider env overlay — applied after the two markers above so a
+        // provider can never shadow them, and tilde-expanded because there is
+        // no shell in this path to do it (a stored `~/.claude-work` reaching
+        // the child verbatim would make the CLI create a literal `~` directory
+        // and then fail to authenticate against it).
+        if let Some(env) = args.env.as_ref() {
+            for (key, value) in env {
+                if key.is_empty() {
+                    continue;
+                }
+                command.env(key, expand_tilde(value));
+            }
+        }
 
         // 5. Own session/process group, so `stop` / `close_all` can signal
         // the child plus anything it forks as a single unit.
@@ -844,6 +911,68 @@ impl AgentManager {
             .map_err(|_| format!("agent session stdin closed for pane {}", args.pane_id))
     }
 
+    /// Switch the model of a live session over the stdin control channel —
+    /// what `/model` does in the TUI. Structurally identical to
+    /// [`Self::interrupt`] (mint a request id, encode one line, hand it to the
+    /// writer thread); the CLI answers with a `control_response` that arrives
+    /// as an ordinary [`frame::AgentFrameKind::Control`] frame.
+    ///
+    /// Deliberately *not* a restart: the conversation, the session id and the
+    /// pane's scrollback all survive, and the next assistant message simply
+    /// carries the new `message.model`. A caller that changes something argv
+    /// cannot express mid-flight — the binary or the env, i.e. the provider —
+    /// must stop and start instead.
+    pub fn set_model(&self, args: AgentSetModelArgs) -> Result<(), String> {
+        let model = args.model.trim();
+        if model.is_empty() {
+            return Err("model must not be empty".to_string());
+        }
+        let sessions = lock_or_recover(&self.sessions);
+        let session = sessions
+            .get(&args.pane_id)
+            .and_then(SessionSlot::live)
+            .ok_or_else(|| format!("no live agent session for pane {}", args.pane_id))?;
+        let n = session.next_request_id.fetch_add(1, Ordering::SeqCst);
+        let line = frame::encode_set_model(&format!("codenest-{n}"), model)?;
+        session
+            .stdin_tx
+            .send(line)
+            .map_err(|_| format!("agent session stdin closed for pane {}", args.pane_id))
+    }
+
+    /// Switch the permission mode of a live session over the stdin control
+    /// channel — what Shift+Tab does in the TUI, which a `--print` child cannot
+    /// receive. Structurally identical to [`Self::set_model`].
+    ///
+    /// The mode is validated against [`PERMISSION_MODES`] before the registry is
+    /// touched, so a typo is a synchronous error here rather than an
+    /// asynchronous `control_response` the caller has to correlate. The CLI can
+    /// still refuse a *valid* mode — `bypassPermissions` unless the session was
+    /// spawned with `--dangerously-skip-permissions`, or `auto` where that mode
+    /// is gated off — and that arrives as a [`frame::AgentFrameKind::Control`]
+    /// error frame, which is why the frontend treats the mode echoed by the
+    /// success response as authoritative rather than its own optimistic value.
+    pub fn set_permission_mode(&self, args: AgentSetPermissionModeArgs) -> Result<(), String> {
+        let mode = args.mode.trim();
+        if mode.is_empty() {
+            return Err("permission mode must not be empty".to_string());
+        }
+        if !PERMISSION_MODES.contains(&mode) {
+            return Err(format!("unsupported permission mode: {mode}"));
+        }
+        let sessions = lock_or_recover(&self.sessions);
+        let session = sessions
+            .get(&args.pane_id)
+            .and_then(SessionSlot::live)
+            .ok_or_else(|| format!("no live agent session for pane {}", args.pane_id))?;
+        let n = session.next_request_id.fetch_add(1, Ordering::SeqCst);
+        let line = frame::encode_set_permission_mode(&format!("codenest-{n}"), mode)?;
+        session
+            .stdin_tx
+            .send(line)
+            .map_err(|_| format!("agent session stdin closed for pane {}", args.pane_id))
+    }
+
     /// Stop a pane's session. Idempotent — an unknown pane is `Ok(())`,
     /// mirroring `pty::close_terminal` (`pty/mod.rs:309-316`).
     ///
@@ -974,8 +1103,8 @@ impl AgentManager {
 // Tauri commands
 // ---------------------------------------------------------------------------
 //
-// All four are sync (not async): `start`'s own work is a `spawn` plus four
-// `thread::spawn`s, and the other three are a channel `send` or a signal —
+// All of them are sync (not async): `start`'s own work is a `spawn` plus four
+// `thread::spawn`s, and the rest are a channel `send` or a signal —
 // none blocks, so none needs the `spawn_blocking` wrapper
 // `commands/hooks.rs:201` uses for a genuinely blocking probe. Sync commands
 // also take `State<'_, …>` without the async-lifetime dance.
@@ -1005,6 +1134,22 @@ pub fn agent_stop(args: AgentPaneArgs, state: State<'_, Arc<AgentManager>>) -> R
 }
 
 #[tauri::command]
+pub fn agent_set_model(
+    args: AgentSetModelArgs,
+    state: State<'_, Arc<AgentManager>>,
+) -> Result<(), String> {
+    state.set_model(args)
+}
+
+#[tauri::command]
+pub fn agent_set_permission_mode(
+    args: AgentSetPermissionModeArgs,
+    state: State<'_, Arc<AgentManager>>,
+) -> Result<(), String> {
+    state.set_permission_mode(args)
+}
+
+#[tauri::command]
 pub fn agent_respond_permission(
     args: AgentPermissionArgs,
     state: State<'_, Arc<AgentManager>>,
@@ -1029,6 +1174,8 @@ mod tests {
         AgentStartArgs {
             pane_id: pane_id.into(),
             cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+            command: None,
+            env: None,
             model: None,
             agent: None,
             permission_mode: None,
@@ -1084,6 +1231,33 @@ mod tests {
         assert!(contains_pair(&argv, "--model", "claude-sonnet-4-5"));
         assert!(contains_pair(&argv, "--agent", "code-reviewer"));
         assert!(contains_pair(&argv, "--allowedTools", "Read,Write"));
+    }
+
+    /// A provider whose `command_template` names a shell alias must still
+    /// spawn: the alias is not exec-able, so argv[0] falls back to `claude`
+    /// and the alias's `CLAUDE_CONFIG_DIR` reaches the child via
+    /// `AgentStartArgs::env` instead. This is the 401-OAuth fix — a pane that
+    /// spawned bare `claude` read the default `~/.claude` config.
+    #[test]
+    fn build_agent_argv_falls_back_to_claude_for_a_shell_alias() {
+        let mut args = start_args("argv-alias");
+        args.command = Some("claude-work {session_id} {mcp_config}".to_string());
+        let argv = build_agent_argv(&args, "sess").expect("build_agent_argv should succeed");
+
+        assert_eq!(argv[0], "claude");
+        // The template's placeholders belong to the PTY path — none of them
+        // may leak into a duplex argv.
+        assert!(!argv.iter().any(|a| a.contains('{')));
+    }
+
+    /// An absolute path is a real executable, not an alias, so it is used
+    /// verbatim — same rule as `scheduler::resolve_binary`.
+    #[test]
+    fn build_agent_argv_uses_an_absolute_command_verbatim() {
+        let mut args = start_args("argv-abs");
+        args.command = Some("/opt/homebrew/bin/claude".to_string());
+        let argv = build_agent_argv(&args, "sess").expect("build_agent_argv should succeed");
+        assert_eq!(argv[0], "/opt/homebrew/bin/claude");
     }
 
     #[test]
@@ -1499,6 +1673,163 @@ mod tests {
         })
         .expect("stop should succeed");
         assert!(poll_until(|| mgr.active_count() == 0));
+    }
+
+    /// A live model switch must reach the child as one `control_request` on
+    /// the same stdin the session already owns — no restart, no second
+    /// process. The `echoer` fixture reflects stdin back as stdout, so the
+    /// frame the collector sees *is* the line the writer thread sent.
+    #[test]
+    fn set_model_round_trips_a_control_request_through_the_child() {
+        let mgr = AgentManager::new();
+        let collector: Collector = Arc::new(Mutex::new(Vec::new()));
+        mgr.start_inner(start_args("pane-model"), Some(echoer()), collector_emit(&collector))
+            .expect("start_inner should succeed with the echoer fixture");
+
+        mgr.set_model(AgentSetModelArgs {
+            pane_id: "pane-model".to_string(),
+            model: "claude-opus-5".to_string(),
+        })
+        .expect("set_model should succeed");
+
+        assert!(poll_until(|| collector
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|f| f.kind == AgentFrameKind::Control)));
+
+        let frames = collector.lock().unwrap();
+        let control_frames: Vec<&AgentFrame> =
+            frames.iter().filter(|f| f.kind == AgentFrameKind::Control).collect();
+        assert_eq!(control_frames.len(), 1);
+        assert_eq!(control_frames[0].raw["request"]["subtype"].as_str(), Some("set_model"));
+        assert_eq!(control_frames[0].raw["request"]["model"].as_str(), Some("claude-opus-5"));
+        drop(frames);
+
+        assert_eq!(
+            mgr.active_count(),
+            1,
+            "a model switch must leave the session running — it is not a restart"
+        );
+
+        mgr.stop(AgentPaneArgs {
+            pane_id: "pane-model".to_string(),
+        })
+        .expect("stop should succeed");
+        assert!(poll_until(|| mgr.active_count() == 0));
+    }
+
+    #[test]
+    fn set_model_rejects_an_empty_model_before_touching_the_registry() {
+        let mgr = AgentManager::new();
+        let err = mgr
+            .set_model(AgentSetModelArgs {
+                pane_id: "no-such-pane".to_string(),
+                model: "   ".to_string(),
+            })
+            .expect_err("an empty model must be rejected");
+        assert!(err.contains("model must not be empty"));
+    }
+
+    #[test]
+    fn set_model_unknown_pane_is_an_error() {
+        let mgr = AgentManager::new();
+        let err = mgr
+            .set_model(AgentSetModelArgs {
+                pane_id: "no-such-pane".to_string(),
+                model: "claude-opus-5".to_string(),
+            })
+            .expect_err("an unknown pane must be an error, not a panic");
+        assert!(err.contains("no live agent session"));
+    }
+
+    /// A live permission-mode switch must reach the child as one
+    /// `control_request` on the session's existing stdin — the whole point of
+    /// the control channel over a restart, since a restart loses the
+    /// conversation the mode is being changed for.
+    #[test]
+    fn set_permission_mode_round_trips_a_control_request_through_the_child() {
+        let mgr = AgentManager::new();
+        let collector: Collector = Arc::new(Mutex::new(Vec::new()));
+        mgr.start_inner(start_args("pane-mode"), Some(echoer()), collector_emit(&collector))
+            .expect("start_inner should succeed with the echoer fixture");
+
+        mgr.set_permission_mode(AgentSetPermissionModeArgs {
+            pane_id: "pane-mode".to_string(),
+            mode: "acceptEdits".to_string(),
+        })
+        .expect("set_permission_mode should succeed");
+
+        assert!(poll_until(|| collector
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|f| f.kind == AgentFrameKind::Control)));
+
+        let frames = collector.lock().unwrap();
+        let control_frames: Vec<&AgentFrame> =
+            frames.iter().filter(|f| f.kind == AgentFrameKind::Control).collect();
+        assert_eq!(control_frames.len(), 1);
+        assert_eq!(
+            control_frames[0].raw["request"]["subtype"].as_str(),
+            Some("set_permission_mode")
+        );
+        assert_eq!(control_frames[0].raw["request"]["mode"].as_str(), Some("acceptEdits"));
+        drop(frames);
+
+        assert_eq!(
+            mgr.active_count(),
+            1,
+            "a mode switch must leave the session running — it is not a restart"
+        );
+
+        mgr.stop(AgentPaneArgs {
+            pane_id: "pane-mode".to_string(),
+        })
+        .expect("stop should succeed");
+        assert!(poll_until(|| mgr.active_count() == 0));
+    }
+
+    /// Validated locally so a typo is a synchronous error, not an async
+    /// `control_response` error the caller would have to correlate by id.
+    #[test]
+    fn set_permission_mode_rejects_an_unknown_mode_before_touching_the_registry() {
+        let mgr = AgentManager::new();
+        let err = mgr
+            .set_permission_mode(AgentSetPermissionModeArgs {
+                pane_id: "no-such-pane".to_string(),
+                mode: "yolo".to_string(),
+            })
+            .expect_err("an unknown mode must be rejected");
+        assert!(err.contains("unsupported permission mode"));
+
+        let empty = mgr
+            .set_permission_mode(AgentSetPermissionModeArgs {
+                pane_id: "no-such-pane".to_string(),
+                mode: "   ".to_string(),
+            })
+            .expect_err("an empty mode must be rejected");
+        assert!(empty.contains("permission mode must not be empty"));
+    }
+
+    /// Every mode the spawn-time flag accepts must also be accepted here: the
+    /// composer offers one list, and `manual` in particular is the `--help`
+    /// spelling the CLI aliases to `default` on the control path.
+    #[test]
+    fn set_permission_mode_accepts_every_documented_mode() {
+        let mgr = AgentManager::new();
+        for mode in PERMISSION_MODES {
+            let err = mgr
+                .set_permission_mode(AgentSetPermissionModeArgs {
+                    pane_id: "no-such-pane".to_string(),
+                    mode: mode.to_string(),
+                })
+                .expect_err("no session is registered, so this must fail on the lookup");
+            assert!(
+                err.contains("no live agent session"),
+                "{mode} must pass validation and fail on the registry lookup instead, got: {err}"
+            );
+        }
     }
 
     #[test]

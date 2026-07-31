@@ -229,8 +229,21 @@ function SidebarInner({
                 <Icon name="chevronRight" size={12} />
                 <span>{group.label}</span>
               </button>
-              {open &&
-                items.map((it) => {
+              {/*
+                The items stay mounted in both states and the wrapper animates
+                its own height, because a group that unmounted its children on
+                collapse (`{open && …}`) could not animate at all — there was
+                nothing to transition from. `aria-hidden` + `inert` keep a
+                collapsed group out of the accessibility tree and out of tab
+                order, so "invisible but present" never becomes focusable.
+              */}
+              <div
+                className={`d3-side__items${open ? " is-open" : ""}`}
+                aria-hidden={!open}
+                inert={!open}
+              >
+                <div className="d3-side__itemsinner">
+                {items.map((it) => {
                   const isActive = pathname === it.path;
                   if (it.slug === "terminal") {
                     return (
@@ -284,6 +297,8 @@ function SidebarInner({
                     </button>
                   );
                 })}
+                </div>
+              </div>
             </div>
           );
         })}

@@ -1,9 +1,16 @@
-"""Tests for the `composer` feature slug — the native agent pane's gate.
+"""Tests for the retired `composer` / `explorer` feature slugs.
 
-Pins Design decision 1 of the agent-pane-composer plan: no migration is
-needed because `get_lookups` merges the stored `enabled_features` setting on
-top of `_FEATURES_DEFAULT`, so a slug absent from the baseline seed row still
-resolves to its Python default on every install, old or new.
+Both used to gate parts of the Terminal page: `composer` the native agent pane
+(now the default session surface) and `explorer` the workspace navigator beside
+it. Neither is toggleable any more, so this file pins the *retirement* contract
+rather than the gate:
+
+* the reader never serves them, on any install, however the setting is stored —
+  which is what lets the frontend drop its own gate;
+* a write that still carries them is accepted, because
+  `000_baseline_schema.sql` seeded them into `enabled_features` on every
+  existing install and that migration can never be edited;
+* a genuine typo is still a 422.
 """
 
 from __future__ import annotations
@@ -33,35 +40,42 @@ async def test_app(migrated_db: aiosqlite.Connection):
     db_module._db = original
 
 
-def test_composer_is_a_known_feature_slug() -> None:
-    assert "composer" in settings_service.KNOWN_FEATURES
-
-
-def test_composer_defaults_off() -> None:
-    assert settings_service._FEATURES_DEFAULT["composer"] is False
+def test_retired_slugs_are_not_toggleable() -> None:
+    for slug in ("composer", "explorer"):
+        assert slug not in settings_service.KNOWN_FEATURES
+        assert slug not in settings_service._FEATURES_DEFAULT
+        assert slug in settings_service._RETIRED_FEATURES
 
 
 @pytest.mark.asyncio
-async def test_lookups_serve_composer_false_on_a_freshly_migrated_db(test_app) -> None:
-    """The baseline seed row has no `composer` key at all — this is what
-    makes editing `migrations/000_baseline_schema.sql` unnecessary."""
+async def test_lookups_never_serve_a_retired_slug(test_app) -> None:
     client, _ = test_app
     resp = client.get("/api/v1/settings/lookups")
     assert resp.status_code == 200
-    assert resp.json()["enabled_features"]["composer"] is False
+    features = resp.json()["enabled_features"]
+    assert "composer" not in features
+    assert "explorer" not in features
 
 
 @pytest.mark.asyncio
-async def test_composer_can_be_turned_on_and_reads_back_true(test_app) -> None:
+async def test_a_stored_retired_slug_is_accepted_but_dropped(test_app) -> None:
+    """An existing install PUTs the map it already has — including the slugs
+    the baseline seeded — and must not get a 422 for it."""
     client, _ = test_app
     resp = client.put(
         "/api/v1/settings/enabled_features",
-        json={"value_json": json.dumps({"composer": True})},
+        json={
+            "value_json": json.dumps(
+                {"composer": False, "explorer": False, "feed": True}
+            )
+        },
     )
     assert resp.status_code == 200
 
-    lookups = client.get("/api/v1/settings/lookups")
-    assert lookups.json()["enabled_features"]["composer"] is True
+    features = client.get("/api/v1/settings/lookups").json()["enabled_features"]
+    assert "composer" not in features
+    assert "explorer" not in features
+    assert features["feed"] is True
 
 
 @pytest.mark.asyncio

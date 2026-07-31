@@ -314,6 +314,14 @@ export interface AgentFrame {
 export interface AgentStartArgs {
   paneId: string;
   cwd: string;
+  /** The selected provider's `command_template`. Only its first token is used,
+   * and a token the shell can't exec (an alias like `claude-work`) falls back
+   * to `claude` — the alias's real payload travels in `env`. */
+  command?: string;
+  /** The selected provider's `default_env` — notably `CLAUDE_CONFIG_DIR`,
+   * without which the child authenticates against the default `~/.claude`
+   * config and every turn fails with a 401. */
+  env?: Record<string, string>;
   model?: string;
   agent?: string;
   permissionMode?: string;
@@ -360,6 +368,42 @@ export async function agentInterrupt(paneId: string): Promise<void> {
  * Idempotent — an unknown pane resolves without error. */
 export async function agentStop(paneId: string): Promise<void> {
   await invoke<void>("agent_stop", { args: { paneId } });
+}
+
+/**
+ * Switch the model of a session that is already running — what `/model` does
+ * in the TUI. The conversation, the session id and the pane survive; the next
+ * assistant message simply carries the new model. Rejects when the pane has no
+ * live session, so a caller that changed the model of a dead pane should fall
+ * back to starting it with the new model instead.
+ */
+export async function agentSetModel(
+  paneId: string,
+  model: string,
+): Promise<void> {
+  await invoke<void>("agent_set_model", { args: { paneId, model } });
+}
+
+/**
+ * Switch the permission mode of a session that is already running — what
+ * Shift+Tab does in the TUI, which a `--print` child has no way to receive.
+ * The conversation, the session id and the pane all survive.
+ *
+ * Resolving means "the request reached the child's stdin", not "the mode
+ * changed": the CLI answers asynchronously with a `control_response` that
+ * arrives as a `"control"` frame, and it can still refuse a mode this side
+ * considers valid (`bypassPermissions` unless the session was spawned with
+ * `--dangerously-skip-permissions`). Read the applied mode from
+ * `ConversationState.permissionMode` (`lib/agent-conversation.ts`), which
+ * follows that response.
+ *
+ * Rejects synchronously on an unknown mode or a pane with no live session.
+ */
+export async function agentSetPermissionMode(
+  paneId: string,
+  mode: string,
+): Promise<void> {
+  await invoke<void>("agent_set_permission_mode", { args: { paneId, mode } });
 }
 
 /** Answer a `can_use_tool` permission request over the same stdin the

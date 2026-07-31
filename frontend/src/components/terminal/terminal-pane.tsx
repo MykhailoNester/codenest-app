@@ -207,6 +207,7 @@ export function TerminalPane({
   const setLeafCwd = useTerminalStore((s) => s.setLeafCwd);
   const maximizedLeafId = useTerminalStore((s) => s.maximizedLeafId);
   const toggleMaximize = useTerminalStore((s) => s.toggleMaximize);
+  const splitPane = useTerminalStore((s) => s.splitPane);
   const storeMarkLeafExited = useTerminalStore((s) => s.markLeafExited);
 
   // -- workspace-navigator drop target (in-window HTML5 drag, not the
@@ -821,6 +822,11 @@ export function TerminalPane({
     >
       {showHeader ? (
         <div className={styles.header}>
+          {/* Kind badge (prototype `.phead .kind.shell`, CSS line 188). Now
+              that an agent pane is the default surface, a shell pane has to say
+              what it is — the agent pane has carried its own badge since it
+              shipped, and the pair only reads as deliberate when both do. */}
+          <span className={styles.kind}>Shell</span>
           {editing ? (
             <input
               autoFocus
@@ -901,6 +907,28 @@ export function TerminalPane({
         onMouseDown={onTerminalClick}
         onContextMenu={handleContextMenu}
       />
+
+      {/* Mode footer (prototype `.collapsed.m-shell`, CSS line 364): a shell
+          pane's counterpart to the agent pane's composer strip, so the two
+          surfaces are visibly the same kind of thing with different contents.
+          The badge states what this pane does with your keystrokes — passes
+          them through to its own process — and the action mirrors the
+          composer's own "open shell beside" in the other direction. The
+          prototype's `⌘2` pane-index chip is deliberately not reproduced: pane
+          indices are not a binding this app has (⌘1-9 switch tabs), and a chip
+          that names a shortcut which does nothing is worse than no chip. */}
+      <div className={styles.modeFooter}>
+        <span className={styles.modeBadge}>○ Passthrough</span>
+        <span className={styles.modeWhy}>same cwd, own process</span>
+        <button
+          type="button"
+          className={styles.modeSwap}
+          onClick={() => void splitPane(terminalId, "h", { kind: "agent" })}
+          title="Start an agent pane beside this shell (⌘⇧A)"
+        >
+          ⌘⇧A agent beside
+        </button>
+      </div>
 
       {/* Context menu — gated on `active` (not cleared in an effect: doing so
           would be a `react-hooks/set-state-in-effect` lint error, and the

@@ -18,12 +18,10 @@ export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
   parallel: true,
   preview: true,
   budgets: true,
-  composer: false,
   schedules: true,
   snippets: false,
   gallery: false,
   feed: false,
-  explorer: false,
   mcp: false,
   integrations: false,
   plugins: false,
@@ -32,18 +30,16 @@ export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
 
 /**
  * Cache key used to persist the resolved `enabled_features` map across cold
- * relaunches so the sidebar (and, for `composer`, the pane tree) is correct
- * on the very first paint before the sidecar has responded. Declared here
- * rather than in `api.ts` (which used to own it) so a non-react-query
- * consumer — `lib/composer-feature.ts` — can read it without importing the
+ * relaunches so the sidebar is correct on the very first paint before the
+ * sidecar has responded. Declared here rather than in `api.ts` (which used to
+ * own it) so a non-react-query consumer can read it without importing the
  * query layer. This module has no imports and must keep it that way.
  */
 export const FEATURE_CACHE_KEY = "enabled_features_cache";
 
 /**
  * Dispatched on `window` after the enabled-features cache is refreshed, so
- * non-react-query consumers (`lib/composer-feature.ts`) can re-read it
- * without a QueryClient.
+ * non-react-query consumers can re-read it without a QueryClient.
  */
 export const FEATURE_CACHE_EVENT = "codenest:enabled-features";
 //
@@ -57,12 +53,11 @@ export const FEATURE_CACHE_EVENT = "codenest:enabled-features";
 // feature and are NEVER disableable (command, settings, dashboard, projects,
 // team, docs).
 //
-// `composer` is intentionally absent from this map: it gates pane chrome
-// (the native agent pane + composer inside the Terminal page), not a nav
-// slug — an empty array here would just be inert dead config. It still gets
-// a working Settings toggle via KNOWN_FEATURES_ORDERED + FEATURE_META, which
-// is the actual reason that mirror exists. Do not "fix" this by adding an
-// empty `composer: []` entry.
+// The Terminal page's own two surfaces — the native agent pane + composer and
+// the workspace navigator beside it — used to live here as the `composer` and
+// `explorer` slugs. Both are now unconditional (`_RETIRED_FEATURES` in
+// `settings_service.py`), so neither appears in this map, in FEATURE_DEFAULTS,
+// or in KNOWN_FEATURES_ORDERED. Do not re-add them as gates.
 //
 // Feature → nav slug taxonomy:
 //   work          → Work board kanban (slugs: tasks, inbox).
@@ -100,9 +95,7 @@ export const KNOWN_FEATURES_ORDERED: readonly string[] = [
   "parallel",
   "preview",
   "feed",
-  "explorer",
   "budgets",
-  "composer",
   "sync",
   "snippets",
   "gallery",
@@ -179,8 +172,16 @@ export const NAV_ITEMS = [
     group: "agents",
   },
   {
+    // "Sessions", not "Terminal": the default surface on this page is a native
+    // agent conversation, and a shell is one of the two pane kinds it can hold.
+    // ("Agents" was not available — the `team` item above owns that label.)
+    //
+    // The `slug` and `path` stay `terminal` on purpose: the slug is the key
+    // persisted in settings and referenced by KNOWN_NAV_SLUGS, and the path is
+    // baked into deep links, the popout window's hash route and localStorage
+    // keys. Renaming those would be a migration; renaming the label is not.
     slug: "terminal",
-    label: "Terminal",
+    label: "Sessions",
     icon: "terminal",
     path: "/terminal",
     group: "agents",

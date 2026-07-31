@@ -139,31 +139,42 @@
 }
 
 /* Inline start-failure notice + Retry (never throws — see mod.rs's
-   documented error strings, rendered verbatim). */
+   documented error strings, rendered verbatim). A status strip above the
+   still-mounted composer, not a replacement for it. */
 .startError {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
+  align-items: center;
   gap: 8px;
-  padding: 16px;
+  padding: 8px 10px;
+  background: var(--err-soft);
+  border-top: 1px solid rgba(239, 68, 68, 0.3);
   color: var(--err);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
 }
 
-/* <AgentPaneDisabled/> — feature off but the leaf still exists and rehydrates. */
-.disabled {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 16px;
-  color: var(--fg-3);
+/* A workspace-navigator (or Finder) drag held over the pane. Same two rules
+   terminal-pane.module.css's `.paneDrop` uses, so a shell pane and an agent
+   pane highlight identically — the drop just lands as context pills instead of
+   bracketed-paste bytes (prototype `.pane.drop`, CSS line 181). */
+.paneDrop {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
+}
+
+.paneDropHint {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 5px 12px;
+  border: 1.5px dashed var(--accent);
+  border-radius: var(--r-3);
+  background: rgba(9, 14, 26, 0.93);
+  color: var(--accent);
   font-family: var(--font-mono);
-  font-size: 12px;
-  text-align: center;
+  font-size: 11px;
+  pointer-events: none;
 }

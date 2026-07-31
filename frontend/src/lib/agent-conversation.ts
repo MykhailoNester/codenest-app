@@ -105,12 +105,49 @@ export interface ConversationState {
   thinkingTokens: number;
   sessionId: string | null;
   model: string | null;
+  /**
+   * The permission mode the *session* is running, as reported by the CLI —
+   * from the `init` frame's `permissionMode`, then from the `control_response`
+   * to each `set_permission_mode` request. Authoritative over anything the UI
+   * asked for, because the CLI normalises (`manual` is applied as `default`)
+   * and can refuse. `null` until `init` arrives.
+   */
+  permissionMode: string | null;
+  /**
+   * Why the last mode switch did not take, verbatim from the CLI's error
+   * `control_response`; `null` once one succeeds. The reachable case is a mode
+   * gated off in this session — `bypassPermissions` without
+   * `--dangerously-skip-permissions` at spawn, or `auto` where the CLI gates
+   * it — since an unrecognised mode is rejected synchronously in Rust.
+   */
+  permissionModeError: string | null;
   /** FIFO — `permissions[0]` is the one rendered as a dialog. */
   permissions: PermissionRequest[];
   lastResult: {
     costUsd: number | null;
     durationMs: number | null;
     isError: boolean;
+  } | null;
+  /**
+   * When the CLI's `init` frame arrived, i.e. when this session became usable.
+   * Deliberately not "when the pane mounted": the status strip's elapsed cell
+   * must count the session's life, and the gap between spawn and `init` belongs
+   * to neither. `null` until the session initialises.
+   */
+  startedAt: number | null;
+  /**
+   * Token accounting from the newest `result` frame — the only frame that
+   * reports it. `contextTokens` is what the turn actually sent (fresh input plus
+   * both cache halves, matching how the CLI itself counts context);
+   * `contextWindow` comes from `modelUsage[<model>].contextWindow` and is `null`
+   * when the frame carries no entry for the running model, in which case the
+   * strip shows tokens without a percentage rather than inventing a denominator.
+   * `null` overall until the first turn completes.
+   */
+  usage: {
+    contextTokens: number;
+    contextWindow: number | null;
+    outputTokens: number | null;
   } | null;
   exitCode: number | null;
 }
@@ -125,8 +162,12 @@ export function emptyConversation(): ConversationState {
     thinkingTokens: 0,
     sessionId: null,
     model: null,
+    permissionMode: null,
+    permissionModeError: null,
     permissions: [],
     lastResult: null,
+    startedAt: null,
+    usage: null,
     exitCode: null,
   };
 }
@@ -459,14 +500,28 @@ export function appendUserTurn(
 // Per-kind frame application
 // ---------------------------------------------------------------------------
 
-function applyInit(state: ConversationState, frame: AgentFrame): ConversationState {
+function applyInit(
+  state: ConversationState,
+  frame: AgentFrame,
+  now: number,
+): ConversationState {
   const rec = asRecord(frame.raw);
   const model = asString(rec?.["model"]);
+  // `init` is the only frame that states the mode the session actually booted
+  // with, which is the CLI's own configured default whenever the spawn passed
+  // no `--permission-mode` flag — so the composer can show the truth instead
+  // of guessing at a default it does not own.
+  const permissionMode = asString(rec?.["permissionMode"]);
   return {
     ...state,
     sessionId: frame.session_id,
     model: model ?? state.model,
+    permissionMode: permissionMode ?? state.permissionMode,
+    permissionModeError: null,
     status: "idle",
+    // A restart re-inits the same pane, so the clock restarts with the new
+    // session rather than carrying the dead one's start time forward.
+    startedAt: now,
   };
 }
 
@@ -573,6 +628,49 @@ function applyResult(state: ConversationState, raw: unknown): ConversationState 
       durationMs: asNumber(rec?.["duration_ms"]) ?? null,
       isError: asBool(rec?.["is_error"]) ?? false,
     },
+    usage: readResultUsage(rec, state.model) ?? state.usage,
+  };
+}
+
+/**
+ * Token accounting out of a `result` frame, or `undefined` when the frame
+ * carries none (in which case the caller keeps the previous figures rather than
+ * blanking the strip mid-session).
+ *
+ * Shape verified against CLI 2.1.220:
+ * `usage: {input_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+ * output_tokens}` and `modelUsage: {"<model>": {contextWindow, …}}`.
+ */
+function readResultUsage(
+  rec: Record<string, unknown> | undefined,
+  model: string | null,
+): ConversationState["usage"] | undefined {
+  const usage = asRecord(rec?.["usage"]);
+  if (!usage) return undefined;
+  const input = asNumber(usage["input_tokens"]);
+  const cacheRead = asNumber(usage["cache_read_input_tokens"]);
+  const cacheCreate = asNumber(usage["cache_creation_input_tokens"]);
+  if (input === undefined && cacheRead === undefined && cacheCreate === undefined) {
+    return undefined;
+  }
+  const contextTokens = (input ?? 0) + (cacheRead ?? 0) + (cacheCreate ?? 0);
+
+  // Prefer the entry for the model actually running; fall back to the sole
+  // entry when there is exactly one, and to no window at all otherwise — a
+  // multi-model turn has no single context window to report.
+  const modelUsage = asRecord(rec?.["modelUsage"]);
+  let window: number | null = null;
+  if (modelUsage) {
+    const named = model !== null ? asRecord(modelUsage[model]) : undefined;
+    const entries = Object.values(modelUsage);
+    const only = entries.length === 1 ? asRecord(entries[0]) : undefined;
+    window = asNumber((named ?? only)?.["contextWindow"]) ?? null;
+  }
+
+  return {
+    contextTokens,
+    contextWindow: window,
+    outputTokens: asNumber(usage["output_tokens"]) ?? null,
   };
 }
 
@@ -593,11 +691,22 @@ function applyPermission(state: ConversationState, raw: unknown): ConversationSt
 
 function applySystem(state: ConversationState, raw: unknown): ConversationState {
   const rec = asRecord(raw);
-  if (
-    asString(rec?.["subtype"]) === "status" &&
-    asString(rec?.["status"]) === "requesting"
-  ) {
+  const subtype = asString(rec?.["subtype"]);
+  if (subtype === "status" && asString(rec?.["status"]) === "requesting") {
     return { ...state, status: "running" };
+  }
+  // `{"type":"system","subtype":"thinking_tokens","estimated_tokens":N}` — the
+  // CLI's own running estimate, emitted as a system frame rather than only as a
+  // `thinking_delta` (both shapes captured from 2.1.220). Without this branch
+  // the status strip's thinking cell stays dark through an entire extended-
+  // thinking turn, since the delta form only appears in some streams.
+  if (subtype === "thinking_tokens") {
+    const tokens = asNumber(rec?.["estimated_tokens"]);
+    return {
+      ...state,
+      thinking: true,
+      thinkingTokens: tokens ?? state.thinkingTokens,
+    };
   }
   return state;
 }
@@ -630,6 +739,38 @@ function applyExit(state: ConversationState, raw: unknown): ConversationState {
  * tests are deterministic (Design decision 10 — every clock in this task is
  * frontend-only; nothing here touches SQLite or a Python datetime).
  */
+/**
+ * Fold a `control_response` into the state. One `control` frame kind carries
+ * the answer to every control request the app sends — `interrupt`, `set_model`,
+ * `set_permission_mode` — and the responses are not correlated back to their
+ * request here, so this reads only fields that identify themselves:
+ *
+ * * `response.response.mode` — a `set_permission_mode` success. The value is
+ *   the *applied* mode, which differs from the requested one for the `manual`
+ *   alias (applied as `default`), so it is what the UI must display.
+ * * `response.error` mentioning the permission mode — a refusal. Matching on
+ *   the CLI's own message ("Cannot set permission mode…" / "Cannot set
+ *   permission mode to bypassPermissions because…", both verified against CLI
+ *   2.1.220) is what keeps a `set_model` failure from being blamed on the mode
+ *   switcher. Any other error stays a `lastControlNote` breadcrumb.
+ */
+function applyControl(
+  state: ConversationState,
+  raw: unknown,
+): ConversationState {
+  const response = asRecord(asRecord(raw)?.["response"]);
+  if (!response) return state;
+  const applied = asString(asRecord(response["response"])?.["mode"]);
+  if (applied !== undefined) {
+    return { ...state, permissionMode: applied, permissionModeError: null };
+  }
+  const error = asString(response["error"]);
+  if (error !== undefined && error.toLowerCase().includes("permission mode")) {
+    return { ...state, permissionModeError: error };
+  }
+  return state;
+}
+
 export function applyFrame(
   state: ConversationState,
   frame: AgentFrame,
@@ -637,7 +778,7 @@ export function applyFrame(
 ): ConversationState {
   switch (frame.kind) {
     case "init":
-      return applyInit(state, frame);
+      return applyInit(state, frame, now);
     case "delta":
       return applyDelta(state, frame.raw);
     case "assistant":
@@ -659,6 +800,7 @@ export function applyFrame(
     case "exit":
       return applyExit(state, frame.raw);
     case "control":
+      return applyControl(state, frame.raw);
     case "unknown":
       return state;
     default:

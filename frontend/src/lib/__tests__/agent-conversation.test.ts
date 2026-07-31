@@ -277,6 +277,126 @@ describe("agent-conversation reducer", () => {
     expect(state.permissions.map((p) => p.requestId)).toEqual(["req_1", "req_2"]);
   });
 
+  // The four fixtures below are the literal lines CLI 2.1.220 answered when
+  // each `set_permission_mode` request was round-tripped through a child
+  // spawned with `build_agent_argv`'s flags.
+
+  it("init reports the mode the session booted with", () => {
+    const state = applyFrame(
+      emptyConversation(),
+      frame("init", {
+        type: "system",
+        subtype: "init",
+        cwd: "/tmp",
+        session_id: "s1",
+        tools: [],
+        model: "claude-opus-5",
+        permissionMode: "dontAsk",
+        slash_commands: [],
+      }),
+      0,
+    );
+    expect(state.permissionMode).toBe("dontAsk");
+  });
+
+  it("a set_permission_mode success adopts the mode the CLI applied", () => {
+    const state = applyFrame(
+      emptyConversation(),
+      frame("control", {
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: "codenest-0",
+          response: { mode: "acceptEdits" },
+        },
+      }),
+      0,
+    );
+    expect(state.permissionMode).toBe("acceptEdits");
+    expect(state.permissionModeError).toBeNull();
+  });
+
+  it("requesting `manual` adopts the `default` the CLI aliases it to", () => {
+    // Not cosmetic: the composer's select has one option for the pair, so
+    // adopting the echo verbatim is what keeps it from showing "no selection".
+    const state = applyFrame(
+      emptyConversation(),
+      frame("control", {
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: "codenest-1",
+          response: { mode: "default" },
+        },
+      }),
+      0,
+    );
+    expect(state.permissionMode).toBe("default");
+  });
+
+  it("a refused mode is recorded verbatim and does not move the applied mode", () => {
+    let state = applyFrame(
+      emptyConversation(),
+      frame("control", {
+        type: "control_response",
+        response: { subtype: "success", request_id: "c0", response: { mode: "plan" } },
+      }),
+      0,
+    );
+    state = applyFrame(
+      state,
+      frame("control", {
+        type: "control_response",
+        response: {
+          subtype: "error",
+          request_id: "codenest-2",
+          error:
+            "Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions",
+        },
+      }),
+      0,
+    );
+    expect(state.permissionMode).toBe("plan");
+    expect(state.permissionModeError).toContain("bypassPermissions");
+  });
+
+  it("a control error that is not about the mode is left to the breadcrumb", () => {
+    // One frame kind answers interrupt, set_model and set_permission_mode, and
+    // the responses are not correlated back to their request — so a set_model
+    // failure must not be blamed on the mode switcher.
+    const state = applyFrame(
+      emptyConversation(),
+      frame("control", {
+        type: "control_response",
+        response: {
+          subtype: "error",
+          request_id: "codenest-3",
+          error: "set_model: model must be a string",
+        },
+      }),
+      0,
+    );
+    expect(state.permissionModeError).toBeNull();
+  });
+
+  it("a fresh init clears a previous session's refusal", () => {
+    let state = applyFrame(
+      emptyConversation(),
+      frame("control", {
+        type: "control_response",
+        response: { subtype: "error", request_id: "c0", error: "Cannot set permission mode: …" },
+      }),
+      0,
+    );
+    state = applyFrame(
+      state,
+      frame("init", { type: "system", subtype: "init", permissionMode: "default" }),
+      0,
+    );
+    expect(state.permissionModeError).toBeNull();
+    expect(state.permissionMode).toBe("default");
+  });
+
   it("result sets status idle and lastResult, surfacing is_error rather than swallowing it", () => {
     const state = applyFrame(
       emptyConversation(),
@@ -291,6 +411,92 @@ describe("agent-conversation reducer", () => {
     );
     expect(state.status).toBe("idle");
     expect(state.lastResult).toEqual({ costUsd: 0.01, durationMs: 2300, isError: true });
+  });
+
+  it("result records usage and the context window the status strip needs", () => {
+    // Field names and nesting copied from a real CLI 2.1.220 `result` line.
+    const state = applyFrame(
+      { ...emptyConversation(), model: "claude-sonnet-5" },
+      frame("result", {
+        subtype: "success",
+        is_error: false,
+        duration_ms: 2162,
+        total_cost_usd: 0.0171962,
+        usage: {
+          input_tokens: 10,
+          cache_creation_input_tokens: 7404,
+          cache_read_input_tokens: 19082,
+          output_tokens: 94,
+        },
+        modelUsage: {
+          "claude-sonnet-5": { contextWindow: 1000000, maxOutputTokens: 64000 },
+        },
+      }),
+      0,
+    );
+    // Context is fresh input plus both cache halves — how the CLI counts it.
+    expect(state.usage).toEqual({
+      contextTokens: 10 + 7404 + 19082,
+      contextWindow: 1000000,
+      outputTokens: 94,
+    });
+  });
+
+  it("result with usage but no matching modelUsage entry reports tokens with no window", () => {
+    // The strip must then show tokens and omit the percentage rather than
+    // inventing a denominator.
+    const state = applyFrame(
+      { ...emptyConversation(), model: "claude-opus-5" },
+      frame("result", {
+        usage: { input_tokens: 5, cache_read_input_tokens: 100 },
+        modelUsage: {
+          "claude-sonnet-5": { contextWindow: 1000000 },
+          "claude-haiku-4-5": { contextWindow: 200000 },
+        },
+      }),
+      0,
+    );
+    expect(state.usage).toEqual({
+      contextTokens: 105,
+      contextWindow: null,
+      outputTokens: null,
+    });
+  });
+
+  it("a result frame with no usage keeps the previous figures", () => {
+    const withUsage = applyFrame(
+      { ...emptyConversation(), model: "m" },
+      frame("result", {
+        usage: { input_tokens: 7 },
+        modelUsage: { m: { contextWindow: 1000 } },
+      }),
+      0,
+    );
+    const after = applyFrame(withUsage, frame("result", { is_error: false }), 0);
+    expect(after.usage).toEqual(withUsage.usage);
+  });
+
+  it("init stamps startedAt so elapsed counts the session, not the mount", () => {
+    const state = applyFrame(emptyConversation(), frame("init", { model: "m" }), 1234);
+    expect(state.startedAt).toBe(1234);
+    // A restart re-inits the same pane and restarts the clock.
+    const restarted = applyFrame(state, frame("init", { model: "m" }), 9999);
+    expect(restarted.startedAt).toBe(9999);
+  });
+
+  it("a thinking_tokens system frame sets thinking and its token estimate", () => {
+    // Captured shape: {"type":"system","subtype":"thinking_tokens","estimated_tokens":112}
+    const state = applyFrame(
+      emptyConversation(),
+      frame("system", { subtype: "thinking_tokens", estimated_tokens: 112 }),
+      0,
+    );
+    expect(state.thinking).toBe(true);
+    expect(state.thinkingTokens).toBe(112);
+
+    // A result frame ends the turn and clears it.
+    const done = applyFrame(state, frame("result", { is_error: false }), 0);
+    expect(done.thinking).toBe(false);
   });
 
   it("system status requesting sets running; other subtypes are inert", () => {

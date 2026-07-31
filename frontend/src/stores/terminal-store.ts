@@ -7,7 +7,10 @@ import {
   getWorkspacePath,
   type PtyExitedPayload,
 } from "../lib/ipc";
-import { fetchSidecar } from "../lib/api";
+import {
+  recordAgentLaunch,
+  recordAgentExited,
+} from "../lib/agent-run-telemetry";
 import {
   clampSplitRatios,
   closeLeaf,
@@ -18,6 +21,7 @@ import {
   paneKind,
   replaceLeafId,
   splitLeaf,
+  updateLeafAgentConfig,
   updateLeafCwd,
   updateLeafTitle,
   updateSplitRatio,
@@ -90,7 +94,13 @@ export interface TerminalStore {
    */
   maximizedLeafId: string | null;
 
-  addTab: () => Promise<void>;
+  /**
+   * Add a tab. `opts.kind` defaults to `"agent"` — the composer is the default
+   * session surface, so ⌘T and the tab bar's `+` open a native agent pane with
+   * no PTY behind it. `kind: "shell"` is the explicit opt-in (⌥⌘T, the tab
+   * bar's shell button) and is the only path that allocates a PTY.
+   */
+  addTab: (opts?: { kind?: PaneKind }) => Promise<void>;
   /**
    * Mark the store as hydrated without seeding any default tabs.
    * Called by `TerminalsLayout` when `skipHydration` is true (i.e., a
@@ -130,6 +140,32 @@ export interface TerminalStore {
    * The value is used by the pane header and by `splitPane` to inherit cwd.
    */
   setLeafCwd: (terminalId: string, cwd: string) => void;
+  /**
+   * Record the provider/model/permission mode an agent leaf runs with, so a
+   * restart (and the next relaunch) reuses it. Searches every tab, not just
+   * the active one —
+   * the composer's selectors are reachable in a hidden tab's pane too.
+   */
+  setLeafAgentConfig: (
+    terminalId: string,
+    config: {
+      providerId?: number | null;
+      model?: string | null;
+      permissionMode?: string | null;
+    },
+  ) => void;
+  /**
+   * Whether `terminalId` still names a leaf in any tab.
+   *
+   * `<AgentPane/>` asks this from its unmount cleanup to tell the two cases
+   * apart that React cannot: a *teardown* (pane closed, tab closed, window
+   * gone — the leaf is gone from the store, so the session must be stopped)
+   * versus a *remount* (a sibling pane closed, so the split collapsed and the
+   * subtree was reconciled at a new position — the leaf is still there, so the
+   * session must survive). Before this existed, closing a shell pane beside an
+   * agent pane killed the agent session and left "Session ended" behind.
+   */
+  leafExists: (terminalId: string) => boolean;
   hydrateFromStorage: () => Promise<void>;
   persistToStorage: () => void;
   /**
@@ -249,12 +285,28 @@ function defaultLeafTitle(): string {
   return "zsh";
 }
 
+/** Matches the pane-header title `splitPane` gives an agent sibling. */
+function defaultAgentTitle(): string {
+  return "claude";
+}
+
 function findActiveTab(tabs: Tab[], activeTabId: string): Tab | undefined {
   return tabs.find((t) => t.id === activeTabId);
 }
 
-function nextTabTitle(tabs: Tab[]): string {
-  return `Terminal ${tabs.length + 1}`;
+/**
+ * Tab strip labels are numbered per kind, so an "Agent 1" and a "Shell 1" can
+ * coexist and the strip says what each tab actually is. Counting the tabs whose
+ * first leaf is of that kind (rather than `tabs.length`) keeps the numbering
+ * stable when the two kinds are interleaved.
+ */
+function nextTabTitle(tabs: Tab[], kind: PaneKind): string {
+  const label = kind === "agent" ? "Agent" : "Shell";
+  const sameKind = tabs.filter((t) => {
+    const first = collectLeaves(t.layout)[0];
+    return first !== undefined && (paneKind(first) === "agent") === (kind === "agent");
+  }).length;
+  return `${label} ${sameKind + 1}`;
 }
 
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
@@ -332,27 +384,41 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     return true;
   },
 
-  addTab: async () => {
+  addTab: async (opts) => {
     // Resolve the workspace cwd for nav-bar tab creation (Phase 4).
     // Falls back to shell default (no cwd) if the IPC call fails.
     const cwd = await resolveWorkspaceCwd();
-    const handle = await openTerminal(cwd !== undefined ? { cwd } : {});
-    const leaf: PaneLeaf = {
-      type: "leaf",
-      terminalId: handle.id,
-      title: defaultLeafTitle(),
-      ...(cwd !== undefined ? { cwd } : {}),
-    };
+    const kind: PaneKind = opts?.kind ?? "agent";
+
+    // An agent tab allocates no PTY — `<AgentPane/>` starts the duplex
+    // `claude` session on mount — so this is the one branch that can add a tab
+    // without awaiting the shell.
+    const leaf: PaneLeaf =
+      kind === "agent"
+        ? {
+            type: "leaf",
+            terminalId: genId(),
+            title: defaultAgentTitle(),
+            kind: "agent",
+            ...(cwd !== undefined ? { cwd } : {}),
+          }
+        : {
+            type: "leaf",
+            terminalId: (await openTerminal(cwd !== undefined ? { cwd } : {})).id,
+            title: defaultLeafTitle(),
+            ...(cwd !== undefined ? { cwd } : {}),
+          };
+
     set((state) => {
       const tab: Tab = {
         id: genId(),
-        title: nextTabTitle(state.tabs),
+        title: nextTabTitle(state.tabs, kind),
         layout: leaf,
       };
       return {
         tabs: [...state.tabs, tab],
         activeTabId: tab.id,
-        focusedLeafId: handle.id,
+        focusedLeafId: leaf.terminalId,
       };
     });
   },
@@ -577,6 +643,18 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     }));
   },
 
+  setLeafAgentConfig: (terminalId, config) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) => ({
+        ...t,
+        layout: updateLeafAgentConfig(t.layout, terminalId, config),
+      })),
+    }));
+  },
+
+  leafExists: (terminalId) =>
+    get().tabs.some((t) => findLeaf(t.layout, terminalId) !== null),
+
   hydrateFromStorage: async () => {
     // Synchronous in-flight guard. `hydrated` is only flipped after the async
     // PTY allocation below, so two concurrent effect invocations (React
@@ -606,7 +684,13 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         return;
       }
 
-      const rebuilt: Tab[] = await Promise.all(
+      // `allSettled`, not `all`: a single leaf whose PTY cannot be allocated
+      // (its cwd was deleted, the shell binary moved, the sidecar is mid-start)
+      // used to reject the whole batch, fall through to the outer catch, and
+      // re-seed the store with ONE fresh tab — silently discarding every other
+      // restored tab. Now a failed tab is dropped on its own and the rest of
+      // the strip survives.
+      const settled = await Promise.allSettled(
         parsed.tabs.map(async (tab) => {
           // Clamp every Split ratio to [0.05, 0.95] before rebuilding PTYs.
           // react-resizable-panels enforces minSize for live drags but not for
@@ -639,6 +723,23 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
           return { id: tab.id, title: tab.title, layout };
         }),
       );
+      const rebuilt: Tab[] = settled
+        .filter(
+          (r): r is PromiseFulfilledResult<Tab> => r.status === "fulfilled",
+        )
+        .map((r) => r.value);
+      if (rebuilt.length < parsed.tabs.length) {
+        console.warn(
+          `[terminal-store] dropped ${parsed.tabs.length - rebuilt.length} tab(s) whose panes could not be restored`,
+        );
+      }
+      if (rebuilt.length === 0) {
+        // Every restored tab failed — fall back to one fresh tab rather than
+        // leaving the page empty.
+        await get().addTab().catch(() => undefined);
+        set({ hydrated: true });
+        return;
+      }
       const activeTabId = rebuilt.some((t) => t.id === parsed.activeTabId)
         ? parsed.activeTabId
         : rebuilt[0]!.id;
@@ -795,39 +896,36 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         }
         // fanout === "none" → fanoutRole stays undefined
 
-        // Post launch telemetry — fire-and-forget; never block the launch.
-        // B1: include pane_id (PTY handle id) and session_id (dashboard-minted UUID)
-        // so the sidecar can persist an agent_runs row linked to this pane.
-        // Profile name is included (migration 051) so the AGENTS panel can filter by profile.
-        void fetchSidecar("/api/v1/agents/events/launch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            provider: cell?.providerId ?? spec.providerId,
-            project_id: cell?.projectId ?? spec.projectId,
-            pane_id: handle.id,
-            session_id: paneSessionId,
-            target: spec.target,
-            rows: spec.rows,
-            cols: spec.cols,
-            leaf_index: leafIndex,
-            model: spec.model ?? null,
-            // Profile name for agent_runs.profile column
-            ...(spec.profileName ? { profile: spec.profileName } : {}),
-            // D6: source attribution fields (only when a source is present)
-            ...(spec.source !== undefined
-              ? {
-                  source_kind: spec.source.kind,
-                  source_id: spec.source.id,
-                  prompt_preview:
-                    spec.prompt && spec.prompt.length > 0
-                      ? spec.prompt.slice(0, 120)
-                      : null,
-                  fanout_role: fanoutRole ?? null,
-                }
-              : {}),
-          }),
-        }).catch(() => undefined);
+        // Record the run so the AGENTS panel lists this pane with working
+        // Focus/Stop. B1: pane_id is the PTY handle and session_id the
+        // dashboard-minted UUID injected as `--session-id`, which is what links
+        // Claude's hooks to this row. Profile name (migration 051) is what the
+        // panel filters by. Fire-and-forget inside `recordAgentLaunch` — this
+        // must never delay a launch.
+        recordAgentLaunch({
+          provider: cell?.providerId ?? spec.providerId,
+          project_id: cell?.projectId ?? spec.projectId,
+          pane_id: handle.id,
+          session_id: paneSessionId,
+          ...(spec.target !== undefined ? { target: spec.target } : {}),
+          ...(spec.rows !== undefined ? { rows: spec.rows } : {}),
+          ...(spec.cols !== undefined ? { cols: spec.cols } : {}),
+          leaf_index: leafIndex,
+          model: spec.model ?? null,
+          ...(spec.profileName ? { profile: spec.profileName } : {}),
+          // D6: source attribution fields (only when a source is present)
+          ...(spec.source !== undefined
+            ? {
+                source_kind: spec.source.kind,
+                source_id: spec.source.id,
+                prompt_preview:
+                  spec.prompt && spec.prompt.length > 0
+                    ? spec.prompt.slice(0, 120)
+                    : null,
+                fanout_role: fanoutRole ?? null,
+              }
+            : {}),
+        });
         return {
           placeholderId: placeholder.terminalId,
           realId: handle.id,
@@ -1031,6 +1129,8 @@ function stripInitCommands(node: LayoutNode): LayoutNode {
       ...(node.cwd !== undefined ? { cwd: node.cwd } : {}),
       ...(node.profileId !== undefined ? { profileId: node.profileId } : {}),
       ...(node.kind !== undefined ? { kind: node.kind } : {}),
+      ...(node.providerId !== undefined ? { providerId: node.providerId } : {}),
+      ...(node.model !== undefined ? { model: node.model } : {}),
       ...(node.empty !== undefined ? { empty: node.empty } : {}),
       ...(node.manualTitle !== undefined
         ? { manualTitle: node.manualTitle }
@@ -1105,12 +1205,8 @@ void listen<PtyExitedPayload>("pty-exited", (raw) => {
   // Mark the leaf exited in the terminal layout (existing behaviour).
   useTerminalStore.getState().markLeafExited(paneId);
 
-  // Notify the sidecar — fire-and-forget; never block UI.
-  void fetchSidecar("/api/v1/agents/runs/exited", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pane_id: paneId, exit_code: exit_code ?? null }),
-  }).catch(() => undefined);
+  // Notify the sidecar so the run row transitions to ended.
+  recordAgentExited(paneId, exit_code ?? null);
 });
 
 export const TERMINAL_STORAGE_KEY = STORAGE_KEY;

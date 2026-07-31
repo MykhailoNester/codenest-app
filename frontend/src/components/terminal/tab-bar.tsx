@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { ReactElement, MouseEvent, KeyboardEvent } from "react";
 import { useTerminalStore } from "../../stores/terminal-store";
-import { collectLeaves } from "../../lib/layout-tree";
+import { collectLeaves, paneKind } from "../../lib/layout-tree";
+import { Icon } from "../icon";
 import styles from "./tab-bar.module.css";
 import { ShortcutsHint } from "./shortcuts-hint";
 
@@ -73,9 +74,12 @@ export function TabBar({ onCloseTab }: TabBarProps): ReactElement {
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
         const isEditing = editing?.tabId === tab.id;
-        const hasExited = collectLeaves(tab.layout).some(
-          (l) => l.exited === true,
-        );
+        const leaves = collectLeaves(tab.layout);
+        const hasExited = leaves.some((l) => l.exited === true);
+        // A tab holds an agent pane, a shell pane, or a split of both. The dot
+        // reports what it *leads* with (prototype `.tab .kinddot`, line 170) so
+        // the strip is scannable now that both kinds are routine.
+        const leadKind = leaves[0] !== undefined ? paneKind(leaves[0]) : "shell";
         return (
           <button
             key={tab.id}
@@ -90,6 +94,12 @@ export function TabBar({ onCloseTab }: TabBarProps): ReactElement {
             onClick={() => setActiveTab(tab.id)}
             onDoubleClick={() => beginEdit(tab.id, tab.title)}
           >
+            <span
+              className={`${styles.kindDot} ${
+                leadKind === "agent" ? styles.kindDotAgent : styles.kindDotShell
+              }`}
+              aria-hidden="true"
+            />
             {isEditing ? (
               <input
                 className={styles.titleInput}
@@ -116,13 +126,26 @@ export function TabBar({ onCloseTab }: TabBarProps): ReactElement {
           </button>
         );
       })}
+      {/* `+` opens the default surface — an agent pane. The shell button beside
+          it is the explicit opt-in, so a PTY stays one click away without being
+          what a new tab gives you. */}
       <button
         type="button"
         className={styles.add}
         onClick={() => void addTab()}
-        aria-label="New tab"
+        aria-label="New agent tab"
+        title="New agent tab (⌘T)"
       >
         +
+      </button>
+      <button
+        type="button"
+        className={styles.addShell}
+        onClick={() => void addTab({ kind: "shell" })}
+        aria-label="New shell tab"
+        title="New shell tab (⌥⌘T)"
+      >
+        <Icon name="terminal" size={12} stroke={1.7} />
       </button>
       <ShortcutsHint />
     </div>

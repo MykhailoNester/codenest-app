@@ -32,6 +32,12 @@ import {
 } from "../lib/notif-prefs";
 import { Shell } from "../components/layout/shell";
 import {
+  useTerminalStore,
+  TERMINAL_STORAGE_KEY,
+} from "../stores/terminal-store";
+import { collectLeaves, paneKind } from "../lib/layout-tree";
+import { agentStop, closeTerminal } from "../lib/ipc";
+import {
   SettingsNav,
   type SettingsSectionId,
 } from "../components/settings/settings-nav";
@@ -667,6 +673,39 @@ function GeneralTab(): ReactElement {
 
 // ─── Danger Zone ─────────────────────────────────────────────────────────────
 
+/**
+ * Stop every terminal child and forget the persisted tab layout, so a factory
+ * reset leaves nothing running against the database and workspace it wipes.
+ *
+ * Both calls are idempotent for an unknown id, and every failure is swallowed:
+ * a pane that cannot be torn down must not block the reset the user asked for.
+ */
+async function teardownSessionsForReset(): Promise<void> {
+  try {
+    const leaves = useTerminalStore
+      .getState()
+      .tabs.flatMap((tab) => collectLeaves(tab.layout));
+    await Promise.allSettled(
+      leaves.map((leaf) =>
+        paneKind(leaf) === "agent"
+          ? agentStop(leaf.terminalId)
+          : closeTerminal(leaf.terminalId),
+      ),
+    );
+    useTerminalStore.setState({
+      tabs: [],
+      activeTabId: "",
+      focusedLeafId: null,
+      maximizedLeafId: null,
+    });
+    // After the store write above, so the persistence subscriber cannot
+    // re-write the key we just cleared.
+    localStorage.removeItem(TERMINAL_STORAGE_KEY);
+  } catch {
+    /* non-fatal — the reset itself is what matters */
+  }
+}
+
 function DangerZone(): ReactElement {
   const navigate = useNavigate();
   const reset = useFactoryReset();
@@ -680,6 +719,15 @@ function DangerZone(): ReactElement {
     }
     setError(null);
     try {
+      // Tear down live sessions and persisted tabs *before* wiping the
+      // database. Both outlive a reset otherwise: an agent session is only
+      // stopped when its leaf leaves the store (that is what keeps it alive
+      // across a sibling-close remount, see `agent-pane.tsx`), and no pane is
+      // even mounted here — we are on the Settings page — so nothing would run
+      // that cleanup. The result would be `claude` children and a restored tab
+      // strip still pointing at the workspace the reset just recreated.
+      await teardownSessionsForReset();
+
       await reset.mutateAsync();
       // Navigate to onboarding — the gate will redirect here anyway once the
       // query cache is cleared, but doing it explicitly avoids a flash.

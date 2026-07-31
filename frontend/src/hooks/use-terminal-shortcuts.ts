@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useTerminalStore, type TerminalStore } from "../stores/terminal-store";
 import { sendTerminalInput } from "../lib/ipc";
 import { findLeaf, paneKind, type PaneLeaf } from "../lib/layout-tree";
-import { readComposerFeature } from "../lib/composer-feature";
 
 /** The leaf `store.focusedLeafId` names, within the active tab's layout. */
 function findFocusedLeaf(store: TerminalStore): PaneLeaf | null {
@@ -51,19 +50,22 @@ export function useTerminalShortcuts(): void {
       }
 
       if (!e.metaKey) return;
-      const key = e.key.toLowerCase();
+      // Letter shortcuts match on `e.code` (the physical key) with `e.key` as
+      // the fallback, because macOS rewrites `e.key` when Option is held: ⌥⌘T
+      // arrives as `key: "†"`, so a `key`-only comparison would make every
+      // Option-modified binding — the new-shell-tab one below — unreachable.
+      // `e.code` is also layout-independent, which a `key` comparison is not.
+      const isLetter = (letter: string): boolean =>
+        e.code === `Key${letter.toUpperCase()}` || e.key.toLowerCase() === letter;
 
       // ⌘⇧T (shell sibling from an agent pane) / ⌘⇧A (agent sibling from a
-      // shell pane) — both dark unless `composer` is on. Placed here, above
-      // the text-field bail below, because both require Shift plus a letter
-      // (so neither can shadow native text editing) and the composer's own
-      // `<textarea>` must still receive them while focused. Each falls
-      // through to the branches further down when its own guard fails: ⌘⇧T
-      // still reaches the plain `key === "t"` branch (opens a new tab)
-      // everywhere it does today (`readComposerFeature` — no React, no
-      // provider — is safe to call on every keystroke).
-      const composerOn = readComposerFeature();
-      if (composerOn && e.shiftKey && key === "t" && store.focusedLeafId) {
+      // shell pane). Placed here, above the text-field bail below, because
+      // both require Shift plus a letter (so neither can shadow native text
+      // editing) and the composer's own `<textarea>` must still receive them
+      // while focused. Each falls through to the branches further down when
+      // its own guard fails: ⌘⇧T still reaches the plain `key === "t"` branch
+      // (opens a new tab) everywhere it does today.
+      if (e.shiftKey && isLetter("t") && store.focusedLeafId) {
         const leaf = findFocusedLeaf(store);
         if (leaf && paneKind(leaf) === "agent") {
           e.preventDefault();
@@ -72,7 +74,7 @@ export function useTerminalShortcuts(): void {
           return;
         }
       }
-      if (composerOn && e.shiftKey && key === "a" && store.focusedLeafId) {
+      if (e.shiftKey && isLetter("a") && store.focusedLeafId) {
         const leaf = findFocusedLeaf(store);
         if (leaf && paneKind(leaf) !== "agent") {
           e.preventDefault();
@@ -132,26 +134,26 @@ export function useTerminalShortcuts(): void {
       }
 
       // Cmd+Shift+E — toggle maximize on the focused pane (legacy shortcut kept).
-      if (key === "e" && e.shiftKey) {
+      if (isLetter("e") && e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         if (store.focusedLeafId) store.toggleMaximize(store.focusedLeafId);
         return;
       }
 
-      if (key === "d" && !e.shiftKey) {
+      if (isLetter("d") && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         if (store.focusedLeafId) void store.splitPane(store.focusedLeafId, "h");
         return;
       }
-      if (key === "d" && e.shiftKey) {
+      if (isLetter("d") && e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         if (store.focusedLeafId) void store.splitPane(store.focusedLeafId, "v");
         return;
       }
-      if (key === "w") {
+      if (isLetter("w")) {
         e.preventDefault();
         e.stopPropagation();
         // Close the focused pane only. The store cascades to closing the
@@ -160,10 +162,12 @@ export function useTerminalShortcuts(): void {
         if (store.focusedLeafId) void store.closePane(store.focusedLeafId);
         return;
       }
-      if (key === "t") {
+      // ⌘T — new agent tab (the default session surface).
+      // ⌥⌘T — new shell tab, the explicit opt-in for a PTY.
+      if (isLetter("t")) {
         e.preventDefault();
         e.stopPropagation();
-        void store.addTab();
+        void store.addTab(e.altKey ? { kind: "shell" } : undefined);
         return;
       }
       if (/^[1-9]$/.test(e.key)) {

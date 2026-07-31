@@ -1288,7 +1288,7 @@ export function LaunchModal({
                   onChange={(e: ChangeEvent<HTMLInputElement>) =>
                     setExtraArgs(e.target.value)
                   }
-                  placeholder="e.g. --model claude-opus-4-5"
+                  placeholder="e.g. --model claude-opus-5"
                   style={inputStyle}
                 />
               </label>
