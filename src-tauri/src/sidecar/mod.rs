@@ -85,11 +85,21 @@ impl SidecarManager {
                 .ok();
 
             let mut crash_respawns: u32 = 0;
+            // C1 (plans/one-workspace-scaling.md): attribute the first-launch
+            // wait. Every phase measured on the sidecar side is sub-second
+            // (import 0.12 s, migrations 0.017 s, bootstrap 0.024 s,
+            // spawn->health 0.38 s in dev, archive extraction 0.19 s), so the
+            // seconds a fresh install spends here belong to something these
+            // marks will name -- first execution of the freshly extracted
+            // binary being the leading suspect. Without them the cost is
+            // "somewhere in startup", which is not something to optimise
+            // against.
+            let t_thread_start = Instant::now();
 
             // Single spawn for the happy path. We only loop to RESPAWN on a
             // genuine early process exit (real crash / orphan-lock), never on a
             // slow-but-alive boot.
-            let final_pid: u32 = 'lifecycle: loop {
+            let (final_pid, t_spawned, t_first_connect): (u32, Instant, Option<Instant>) = 'lifecycle: loop {
                 let child = match spawn_sidecar(&app_data_dir, &bundle_resources_dir) {
                     Ok(c) => c,
                     Err(e) => {
@@ -100,6 +110,8 @@ impl SidecarManager {
                 };
 
                 let pid = child.id();
+                let t_spawned = Instant::now();
+                let mut t_first_connect: Option<Instant> = None;
                 *child_arc.lock().unwrap() = Some(child);
 
                 // Poll the REAL /health endpoint until ready, the child exits
@@ -132,8 +144,16 @@ impl SidecarManager {
                         return;
                     }
 
+                    // Split "the process is up" from "it is ready": uvicorn
+                    // binds only after lifespan startup finishes (see
+                    // `health_ok`), so a connection accepted is the child's own
+                    // boot cost, which is the span the 5 s question is about.
+                    if t_first_connect.is_none() && port_in_use() {
+                        t_first_connect = Some(Instant::now());
+                    }
+
                     if health_client.as_ref().is_some_and(health_ok) {
-                        break 'lifecycle pid;
+                        break 'lifecycle (pid, t_spawned, t_first_connect);
                     }
 
                     if Instant::now() >= deadline {
@@ -153,6 +173,11 @@ impl SidecarManager {
                     std::thread::sleep(POLL_INTERVAL);
                 }
             };
+
+            log::info!(
+                "[sidecar] startup {}",
+                format_startup_marks(t_thread_start, t_spawned, t_first_connect, Instant::now())
+            );
 
             *running_arc.lock().unwrap() = true;
             let _ = app.emit(
@@ -521,6 +546,40 @@ fn reclaim_stale_port(port: u16) {
     }
 }
 
+/// One line attributing the startup wait, for C1.
+///
+/// Three spans, because they fail for different reasons and are fixed in
+/// different places:
+///
+/// * `pre` — this thread's own work before the spawn: stale-port reclamation
+///   and, in a packaged build, extracting the sidecar archive.
+/// * `boot` — spawn until the port accepts a connection. uvicorn binds only
+///   after lifespan startup completes, so this is the child actually coming up:
+///   interpreter start, imports, migrations. On a fresh install this is where
+///   first-execution verification of a newly extracted, unnotarised binary
+///   would land.
+/// * `ready` — first connection until `/health` answers 2xx.
+///
+/// `?` means the mark was never reached, which is itself the finding.
+fn format_startup_marks(
+    thread_start: Instant,
+    spawned: Instant,
+    first_connect: Option<Instant>,
+    healthy: Instant,
+) -> String {
+    let ms = |d: Duration| d.as_millis();
+    let boot = first_connect.map(|t| ms(t - spawned));
+    let ready = first_connect.map(|t| ms(healthy - t));
+    let show = |v: Option<u128>| v.map_or_else(|| "?".to_string(), |n| format!("{n}ms"));
+    format!(
+        "pre={}ms boot={} ready={} total={}ms",
+        ms(spawned - thread_start),
+        show(boot),
+        show(ready),
+        ms(healthy - thread_start)
+    )
+}
+
 /// Return true iff the sidecar answers HTTP GET /health with a 2xx status.
 ///
 /// This is the readiness probe. A bare open socket is not enough: uvicorn
@@ -546,4 +605,39 @@ fn port_in_use() -> bool {
         Duration::from_millis(50),
     )
     .is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The marks exist to be read by a human comparing a fresh install against a
+    /// warm one, so the split has to survive a refactor of the loop that feeds it.
+    #[test]
+    fn startup_marks_attribute_each_span() {
+        let start = Instant::now();
+        let spawned = start + Duration::from_millis(200);
+        let connected = spawned + Duration::from_millis(4500);
+        let healthy = connected + Duration::from_millis(300);
+
+        assert_eq!(
+            format_startup_marks(start, spawned, Some(connected), healthy),
+            "pre=200ms boot=4500ms ready=300ms total=5000ms"
+        );
+    }
+
+    /// A sidecar that answered `/health` before any poll observed an open port
+    /// (a very fast boot) must still report, with the unreached mark visible
+    /// rather than silently folded into another span.
+    #[test]
+    fn startup_marks_show_an_unreached_mark() {
+        let start = Instant::now();
+        let spawned = start + Duration::from_millis(50);
+        let healthy = spawned + Duration::from_millis(120);
+
+        assert_eq!(
+            format_startup_marks(start, spawned, None, healthy),
+            "pre=50ms boot=? ready=? total=170ms"
+        );
+    }
 }
