@@ -127,6 +127,14 @@ function seedCatalog(): void {
   useAgentCatalogStore.setState({
     loaded: true,
     loading: false,
+    // Freeze the two async loaders. The seeded catalog is meant to be the whole
+    // truth for a test, and leaving the real ones in place let a load kicked off
+    // by one render settle during a later assertion and re-set `providers` —
+    // which empties the model dropdown, so a `fireEvent.change` landing just
+    // after it read back "" instead of the model. That was the model-switch
+    // test failing on roughly one full-suite run in three.
+    load: async () => undefined,
+    loadWithRetry: async () => undefined,
     lastUsed: { providerId: null, model: null },
     providers: [
       {
@@ -451,6 +459,15 @@ describe("agent pane render", () => {
     await waitFor(() => expect(agentStartMock).toHaveBeenCalledTimes(1));
 
     const select = await screen.findByLabelText("Agent model");
+    // Wait for the *option*, not just the select. The option list is fed by the
+    // catalog store, so `findByLabelText` can resolve a render earlier — and
+    // jsdom silently assigns "" when the requested value has no option yet,
+    // which made this assertion fail on roughly one full-suite run in three.
+    await waitFor(() =>
+      expect(
+        select.querySelector('option[value="claude-sonnet-5"]'),
+      ).not.toBeNull(),
+    );
     await act(async () => {
       fireEvent.change(select, { target: { value: "claude-sonnet-5" } });
     });
