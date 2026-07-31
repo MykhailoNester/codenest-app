@@ -12,7 +12,9 @@ mod workspace;
 use commands::browser::{
     preview_close, preview_navigate, preview_open, preview_set_bounds, preview_show,
 };
-use commands::docs::{open_in_editor, open_path, read_file_text, reveal_in_finder};
+use commands::docs::{
+    open_external_url, open_in_editor, open_path, read_file_text, reveal_in_finder,
+};
 use commands::fs_nav::{fs_build_file_index, fs_list_dir};
 use commands::git::{get_git_pane_status, get_recent_commits, git_status_for_roots};
 use commands::hooks::run_hook_probe;
@@ -575,6 +577,7 @@ pub fn run() {
             emit_focus_pane_to_terminals,
             emit_stop_agent_pane_to_terminals,
             open_path,
+            open_external_url,
             reveal_in_finder,
             open_in_editor,
             read_file_text,

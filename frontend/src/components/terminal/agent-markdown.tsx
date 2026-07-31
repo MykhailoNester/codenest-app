@@ -15,15 +15,18 @@
  *   output, frequently quoting a page the model just fetched, and the pane is
  *   inside the app's own webview.
  * * **Links do not navigate.** An `<a href>` click in a Tauri webview would
- *   replace the app with the page. Every link goes to `open_path` instead,
- *   which hands external URLs to the system opener (`commands/docs.rs:41-49`) —
- *   i.e. the user's browser, leaving the session untouched.
+ *   replace the app with the page. Every link goes to `open_external_url`
+ *   instead, which hands it to the OS default handler — the user's browser —
+ *   leaving the session untouched. Deliberately the URL entry point and not
+ *   `open_path`: the latter is filesystem-shaped, and routing a link through it
+ *   is what stopped these links opening at all.
  */
 
 import type { ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { openPath } from "../../lib/ipc";
+import { openExternalUrl } from "../../lib/ipc";
+import { toast } from "sonner";
 import styles from "./agent-markdown.module.css";
 
 export function AgentMarkdown({ text }: { text: string }): ReactElement {
@@ -37,12 +40,19 @@ export function AgentMarkdown({ text }: { text: string }): ReactElement {
               href={href ?? "#"}
               title={href ?? undefined}
               onClick={(e) => {
+                // Also covers ⌘-click: with the default prevented there is no
+                // browser-level "open in new tab" to fall back on, so the
+                // modifier must not change what happens.
                 e.preventDefault();
                 if (href === undefined || href === "") return;
-                // Fire-and-forget: a link the opener refuses (or a build with
-                // no Tauri backend, i.e. the test environment) must not throw
-                // an unhandled rejection into the pane.
-                void openPath(href).catch(() => undefined);
+                void openExternalUrl(href).catch((err: unknown) => {
+                  // Reported, never swallowed. A silently dropped rejection is
+                  // exactly why a link that opened nothing looked like a dead
+                  // element rather than a refused call.
+                  toast.error(
+                    `Could not open ${href}: ${err instanceof Error ? err.message : String(err)}`,
+                  );
+                });
               }}
             >
               {children}
@@ -73,7 +83,11 @@ export function AgentMarkdown({ text }: { text: string }): ReactElement {
                 onClick={(e) => {
                   e.preventDefault();
                   if (href === "") return;
-                  void openPath(href).catch(() => undefined);
+                  void openExternalUrl(href).catch((err: unknown) => {
+                    toast.error(
+                      `Could not open ${href}: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                  });
                 }}
               >
                 🖼 {alt !== undefined && alt !== "" ? alt : "image"}

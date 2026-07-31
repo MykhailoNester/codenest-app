@@ -530,6 +530,19 @@ export async function openPath(path: string): Promise<void> {
   return invoke<void>("open_path", { path } satisfies OpenPathArgs);
 }
 
+/**
+ * Hand a web or mail URL to the OS default handler — the user's browser.
+ *
+ * Distinct from {@link openPath}: that one is filesystem-shaped, and the opener
+ * plugin draws the same line. A markdown link in an agent reply is not a path,
+ * and routing it through the path door is what stopped these links from opening
+ * at all. Rejects rather than resolving on a refused scheme, so a caller can
+ * report it instead of the click appearing to do nothing.
+ */
+export async function openExternalUrl(url: string): Promise<void> {
+  return invoke<void>("open_external_url", { url });
+}
+
 export async function revealInFinder(path: string): Promise<void> {
   return invoke<void>("reveal_in_finder", {
     path,

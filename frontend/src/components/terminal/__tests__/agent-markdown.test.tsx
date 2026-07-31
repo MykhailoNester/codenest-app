@@ -17,15 +17,20 @@ import {
   type ConversationState,
 } from "../../../lib/agent-conversation";
 
-const { openPathMock } = vi.hoisted(() => ({ openPathMock: vi.fn() }));
-
-vi.mock("../../../lib/ipc", () => ({
-  openPath: (path: string) => openPathMock(path),
+const { openExternalUrlMock, toastErrorMock } = vi.hoisted(() => ({
+  openExternalUrlMock: vi.fn(),
+  toastErrorMock: vi.fn(),
 }));
 
+vi.mock("../../../lib/ipc", () => ({
+  openExternalUrl: (url: string) => openExternalUrlMock(url),
+}));
+
+vi.mock("sonner", () => ({ toast: { error: (m: string) => toastErrorMock(m) } }));
+
 beforeEach(() => {
-  openPathMock.mockReset();
-  openPathMock.mockResolvedValue(undefined);
+  openExternalUrlMock.mockReset().mockResolvedValue(undefined);
+  toastErrorMock.mockReset();
 });
 
 afterEach(() => {
@@ -102,7 +107,7 @@ describe("AgentMarkdown", () => {
     expect(link.tagName).toBe("A");
     const clicked = fireEvent.click(link);
 
-    expect(openPathMock).toHaveBeenCalledWith("https://wttr.in/Lviv");
+    expect(openExternalUrlMock).toHaveBeenCalledWith("https://wttr.in/Lviv");
     // `false` from fireEvent means the default action was prevented — the pane
     // must not be replaced by the fetched page.
     expect(clicked).toBe(false);
@@ -131,7 +136,7 @@ describe("AgentMarkdown", () => {
     expect(link.tagName).toBe("A");
 
     fireEvent.click(link);
-    expect(openPathMock).toHaveBeenCalledWith(
+    expect(openExternalUrlMock).toHaveBeenCalledWith(
       "https://tracker.example/pixel.gif",
     );
   });
@@ -184,5 +189,27 @@ describe("conversation text blocks", () => {
     expect(screen.getByText(typed)).toBeTruthy();
     expect(document.querySelector("strong")).toBeNull();
     expect(document.querySelector("table")).toBeNull();
+  });
+});
+
+describe("link failures are visible", () => {
+  it("reports a refused open instead of leaving the click looking dead", async () => {
+    // A swallowed rejection is why a link that opened nothing read as a dead
+    // element rather than a refused call.
+    openExternalUrlMock.mockRejectedValue(new Error("refusing to open"));
+    render(<AgentMarkdown text="[site](https://example.com)" />);
+
+    fireEvent.click(screen.getByText("site"));
+    await vi.waitFor(() => expect(toastErrorMock).toHaveBeenCalledTimes(1));
+
+    expect(String(toastErrorMock.mock.calls[0]?.[0])).toContain("refusing to open");
+  });
+
+  it("opens on \u2318-click too, since the default is prevented either way", () => {
+    render(<AgentMarkdown text="[site](https://example.com)" />);
+
+    fireEvent.click(screen.getByText("site"), { metaKey: true });
+
+    expect(openExternalUrlMock).toHaveBeenCalledWith("https://example.com");
   });
 });

@@ -48,6 +48,47 @@ pub fn open_path(path: String, app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Hand a web or mail URL to the OS default handler — the user's browser.
+///
+/// Separate from [`open_path`] because the opener plugin draws the same
+/// distinction, and conflating them is fragile: `open_path` is the
+/// filesystem-shaped entry point (its free-function form stats the argument and
+/// fails outright when it does not exist), while `open_url` is the one that
+/// exists for this. A markdown link in an agent reply has nothing to do with the
+/// filesystem, so it goes through the URL door.
+///
+/// A schemeless target is treated as `https://`. A markdown link written as
+/// `[wttr.in/Lviv](wttr.in/Lviv)` is a web link by intent, and sending it to a
+/// path opener could only ever fail.
+///
+/// Anything that is not http/https/mailto after that is refused rather than
+/// guessed at: this input comes from model output, and `file://` or a custom
+/// scheme reaching the OS handler is not something a rendered reply should be
+/// able to do.
+#[tauri::command]
+pub fn open_external_url(url: String, app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let target = normalize_external_url(&url)?;
+    app.opener()
+        .open_url(&target, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+fn normalize_external_url(url: &str) -> Result<String, String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("empty url".to_string());
+    }
+    if is_external_url(trimmed) {
+        return Ok(trimmed.to_string());
+    }
+    // No scheme at all → assume https. A scheme we do not allow is refused.
+    if trimmed.contains("://") || trimmed.split_once(':').is_some_and(|(s, _)| !s.contains('/')) {
+        return Err(format!("refusing to open non-web url: {trimmed}"));
+    }
+    Ok(format!("https://{trimmed}"))
+}
+
 #[tauri::command]
 pub fn reveal_in_finder(path: String) -> Result<(), String> {
     require_home_scope(&path)?;
@@ -192,5 +233,56 @@ mod tests {
         let result = read_file_text(path, 1_048_576);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("binary file type"));
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::normalize_external_url;
+
+    #[test]
+    fn web_and_mail_urls_pass_through_unchanged() {
+        for url in [
+            "https://wttr.in/Lviv",
+            "http://localhost:3000/x",
+            "mailto:someone@example.com",
+        ] {
+            assert_eq!(normalize_external_url(url).unwrap(), url);
+        }
+    }
+
+    #[test]
+    fn a_schemeless_link_is_assumed_to_be_https() {
+        // `[wttr.in/Lviv](wttr.in/Lviv)` is a web link by intent; a path opener
+        // could only ever fail on it.
+        assert_eq!(
+            normalize_external_url("wttr.in/Lviv").unwrap(),
+            "https://wttr.in/Lviv"
+        );
+    }
+
+    #[test]
+    fn surrounding_whitespace_is_trimmed() {
+        assert_eq!(
+            normalize_external_url("  https://example.com  ").unwrap(),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn other_schemes_are_refused_rather_than_guessed_at() {
+        // This input is model output. A `file://` or custom scheme reaching the
+        // OS handler is not something a rendered reply should be able to do.
+        for url in ["file:///etc/passwd", "javascript:alert(1)", "ftp://x/y"] {
+            assert!(
+                normalize_external_url(url).is_err(),
+                "{url} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_url_is_an_error_not_a_bare_https() {
+        assert!(normalize_external_url("   ").is_err());
     }
 }
