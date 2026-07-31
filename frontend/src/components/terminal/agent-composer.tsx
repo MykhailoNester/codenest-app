@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useEscapeKey } from "../../hooks/use-escape-key";
 import type { DragEvent, KeyboardEvent, ReactElement } from "react";
 import { useLibraryItems, useTasks, type Task, type LibraryItem } from "../../lib/api";
 import {
@@ -116,6 +117,28 @@ function renderMentionOverlay(text: string): ReactElement {
   );
 }
 
+/**
+ * Statuses a task can be attached from, most actionable first.
+ *
+ * The picker used to ask the API for `status: "in-progress"` alone, which is why
+ * a workspace with real work in it still showed "No tasks": a task is `todo`
+ * until you start it, and attaching one as context is usually how you start it.
+ * `done` is left out — the list exists to point the agent at work that remains.
+ */
+const PICKABLE_TASK_STATUSES = [
+  "in-progress",
+  "blocked",
+  "todo",
+  "backlog",
+] as const;
+
+function taskRank(status: string): number {
+  const i = PICKABLE_TASK_STATUSES.indexOf(
+    status as (typeof PICKABLE_TASK_STATUSES)[number],
+  );
+  return i === -1 ? PICKABLE_TASK_STATUSES.length : i;
+}
+
 function ContextPicker({
   onPick,
   onClose,
@@ -124,15 +147,62 @@ function ContextPicker({
   onClose: () => void;
 }): ReactElement {
   const { data: library } = useLibraryItems();
-  const { data: tasks } = useTasks({ status: "in-progress" });
-  const templates: LibraryItem[] = library?.items ?? [];
-  const inProgressTasks: Task[] = tasks ?? [];
+  // No status filter: the sort below orders what came back, so one request
+  // serves every status the picker offers.
+  const { data: tasks } = useTasks();
+  const [query, setQuery] = useState("");
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss on a click anywhere else — the same `mousedown` + Escape pairing the
+  // app's other popovers use (`notification-bell.tsx:65-81`). The trigger button
+  // stops its own `mousedown` from reaching this listener, so clicking it while
+  // open closes via its toggle instead of closing here and immediately
+  // reopening.
+  useEffect(() => {
+    const handler = (e: MouseEvent): void => {
+      if (!panelRef.current?.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+  useEscapeKey(onClose);
+
+  const needle = query.trim().toLowerCase();
+  const templates: LibraryItem[] = (library?.items ?? []).filter(
+    (item) =>
+      needle === "" ||
+      item.title.toLowerCase().includes(needle) ||
+      item.slug.toLowerCase().includes(needle),
+  );
+  const pickableTasks: Task[] = (tasks ?? [])
+    .filter((t) => taskRank(t.status) < PICKABLE_TASK_STATUSES.length)
+    .filter(
+      (t) =>
+        needle === "" ||
+        t.title.toLowerCase().includes(needle) ||
+        // A ticket is as often known by its number as its title.
+        `#${t.id}`.includes(needle) ||
+        String(t.id) === needle,
+    )
+    .sort((a, b) => taskRank(a.status) - taskRank(b.status) || b.id - a.id);
 
   return (
-    <div className={styles.pickerPanel} role="listbox">
+    <div className={styles.pickerPanel} role="listbox" ref={panelRef}>
+      <div className={styles.pickerSearch}>
+        <input
+          className={styles.pickerInput}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter templates and tasks…"
+          aria-label="Filter context"
+          autoFocus
+        />
+      </div>
       <div className={styles.pickerHeader}>Templates</div>
       {templates.length === 0 ? (
-        <div className={styles.pickerEmpty}>No templates yet</div>
+        <div className={styles.pickerEmpty}>
+          {needle === "" ? "No templates yet" : "No matching templates"}
+        </div>
       ) : (
         templates.map((item) => (
           <button
@@ -149,10 +219,12 @@ function ContextPicker({
         ))
       )}
       <div className={styles.pickerHeader}>Tasks</div>
-      {inProgressTasks.length === 0 ? (
-        <div className={styles.pickerEmpty}>No tasks</div>
+      {pickableTasks.length === 0 ? (
+        <div className={styles.pickerEmpty}>
+          {needle === "" ? "No open tasks" : "No matching tasks"}
+        </div>
       ) : (
-        inProgressTasks.map((task) => (
+        pickableTasks.map((task) => (
           <button
             key={task.id}
             type="button"
@@ -167,8 +239,11 @@ function ContextPicker({
               });
               onClose();
             }}
+            title={`#${task.id} · ${task.status}`}
           >
-            #{task.id} {task.title}
+            <span className={styles.pickerRowId}>#{task.id}</span>
+            <span className={styles.pickerRowTitle}>{task.title}</span>
+            <span className={styles.pickerRowMeta}>{task.status}</span>
           </button>
         ))
       )}
@@ -593,6 +668,10 @@ export function AgentComposer({
         <button
           type="button"
           className={`${styles.pill} ${styles.pillAdd}`}
+          // Keeps this press away from the picker's outside-click listener, so
+          // clicking the trigger while open closes it once rather than closing
+          // and reopening in the same gesture.
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={() => setPickerOpen((v) => !v)}
         >
           + context

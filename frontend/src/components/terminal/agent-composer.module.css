@@ -393,8 +393,10 @@
   position: absolute;
   left: 8px;
   bottom: calc(100% + 6px);
-  width: 260px;
-  max-height: 220px;
+  width: 320px;
+  /* Taller than the old 220px because the search row costs a line and the list
+     now holds every open task, not only the in-progress ones. */
+  max-height: 320px;
   overflow-y: auto;
   background: var(--bg-3);
   border: 1px solid var(--line-2);
@@ -403,6 +405,36 @@
   font-family: var(--font-mono);
   font-size: 10.5px;
   z-index: 10;
+}
+
+/* Sticky so the filter stays reachable while scrolling a long backlog. */
+.pickerSearch {
+  position: sticky;
+  top: 0;
+  padding: 6px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--line-1);
+  z-index: 1;
+}
+
+.pickerInput {
+  width: 100%;
+  padding: 4px 7px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  color: var(--fg-1);
+  font-family: inherit;
+  font-size: 10.5px;
+  outline: none;
+}
+
+.pickerInput:focus {
+  border-color: var(--accent);
+}
+
+.pickerInput::placeholder {
+  color: var(--fg-4);
 }
 
 .pickerHeader {
@@ -418,6 +450,7 @@
 .pickerRow {
   display: flex;
   gap: 8px;
+  align-items: baseline;
   padding: 5px 9px;
   color: var(--fg-2);
   line-height: 1.5;
@@ -427,6 +460,28 @@
   background: transparent;
   border: 0;
   font: inherit;
+}
+
+/* Task rows are three columns: id, title, status. The title is the only part
+   allowed to consume slack, and it truncates rather than wrapping so every row
+   stays one line and the list stays scannable. */
+.pickerRowId {
+  color: var(--fg-4);
+  flex: 0 0 auto;
+}
+
+.pickerRowTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pickerRowMeta {
+  flex: 0 0 auto;
+  color: var(--fg-4);
+  font-size: 9px;
 }
 
 .pickerRow:hover {
