@@ -8,9 +8,10 @@
  *   - Status pill (running/ended + session status when enriched)
  *   - Model
  *   - Prompt preview
- *   - [Focus] (navigate to the pane/tab) + [Stop] (close_terminal) for owned
- *     panes; nothing interactive for ended or observe-only rows
- *     (hook-driven, row_kind='observe').
+ *   - [Focus] (navigate to the pane/tab) + [Stop] (kills the pane's child,
+ *     whichever kind it is — see `handleStop`) for owned panes; nothing
+ *     interactive for ended or observe-only rows (hook-driven,
+ *     row_kind='observe').
  *
  * Clicking anywhere on the row (outside action buttons) fires ``onDrillIn``
  * with the session_id so the parent can open the Replay panel.
@@ -18,7 +19,11 @@
 
 import { memo, type ReactElement } from "react";
 import type { AgentRun } from "../../lib/api";
-import { closeTerminal, emitStopAgentPaneToTerminals } from "../../lib/ipc";
+import {
+  agentStop,
+  closeTerminal,
+  emitStopAgentPaneToTerminals,
+} from "../../lib/ipc";
 import { useTerminalStore } from "../../stores/terminal-store";
 import { formatElapsed } from "../../lib/format-helpers";
 import { agentStatusClass } from "./status-utils";
@@ -85,11 +90,20 @@ function AgentRunRowInner({
     if (!run.pane_id) return;
     const paneId = run.pane_id;
 
-    // Step 1: Kill the PTY.
-    // The global pty-exited listener in terminal-store.ts picks this up and:
-    //   (a) calls markLeafExited in whichever store owns the pane
-    //   (b) posts /api/v1/agents/runs/exited so the DB row transitions to ended
+    // Step 1: Kill the child. A run row does not record *which kind* of pane it
+    // came from, and the two kinds are killed by different commands: a provider
+    // pane is a PTY (`close_terminal`), an agent pane is a duplex `claude`
+    // child with no PTY at all (`agent_stop`). Both are idempotent for an id
+    // they do not know — `PtyManager::close_terminal` (`pty/mod.rs:305-316`)
+    // and `AgentManager::stop` both return Ok — and the two id namespaces never
+    // overlap, so issuing both is what makes one Stop button correct for both
+    // kinds without a schema column to branch on.
+    //
+    // Each command's own exit path reports the run as ended: `pty-exited` for
+    // the PTY (the listener in `terminal-store.ts`), the session's `exit` frame
+    // for the agent pane (`agent-pane.tsx`). Neither needs prompting here.
     void closeTerminal(paneId).catch(() => undefined);
+    void agentStop(paneId).catch(() => undefined);
 
     if (run.target === "popout") {
       // Step 2a (popout): emit stop-agent-pane to the terminals window.

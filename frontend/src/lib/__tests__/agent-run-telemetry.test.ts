@@ -1,0 +1,120 @@
+// The `agent_runs` write contract, plus the window check that decides a run's
+// `target`. Both are small, and both are load-bearing: a pane that posts nothing
+// is invisible on the Command Center, and a pane that posts the wrong target
+// gets a Focus button that looks in the wrong window.
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  recordAgentLaunch,
+  recordAgentExited,
+} from "../agent-run-telemetry";
+import {
+  currentPaneTarget,
+  isTerminalsWindow,
+  isScreenshotRingWindow,
+  TERMINALS_WINDOW_HASH,
+} from "../window-target";
+
+const { fetchSidecarMock } = vi.hoisted(() => ({ fetchSidecarMock: vi.fn() }));
+
+vi.mock("../api", () => ({
+  fetchSidecar: (path: string, init?: RequestInit) =>
+    fetchSidecarMock(path, init),
+}));
+
+function bodyOf(call: unknown[] | undefined): Record<string, unknown> {
+  const init = call?.[1] as RequestInit | undefined;
+  return JSON.parse(String(init?.body)) as Record<string, unknown>;
+}
+
+beforeEach(() => {
+  fetchSidecarMock.mockReset().mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  window.location.hash = "";
+});
+
+describe("recordAgentLaunch", () => {
+  it("posts the launch payload to the run-recording endpoint", () => {
+    recordAgentLaunch({
+      pane_id: "leaf-1",
+      session_id: "sess-1",
+      provider: 1,
+      cwd: "/w/acme",
+      model: "claude-opus-5",
+      target: "popout",
+    });
+
+    const call = fetchSidecarMock.mock.calls[0];
+    expect(call?.[0]).toBe("/api/v1/agents/events/launch");
+    expect((call?.[1] as RequestInit).method).toBe("POST");
+    expect(bodyOf(call)).toEqual({
+      pane_id: "leaf-1",
+      session_id: "sess-1",
+      provider: 1,
+      cwd: "/w/acme",
+      model: "claude-opus-5",
+      target: "popout",
+    });
+  });
+
+  it("swallows a sidecar failure rather than surfacing it to the launch", () => {
+    // Telemetry must never turn a working session into a visible error, and the
+    // sidecar can still be starting when the first pane mounts.
+    fetchSidecarMock.mockRejectedValue(new Error("sidecar down"));
+
+    expect(() => recordAgentLaunch({ pane_id: "leaf-1" })).not.toThrow();
+  });
+});
+
+describe("recordAgentExited", () => {
+  it("posts the pane and exit code to the liveness endpoint", () => {
+    recordAgentExited("leaf-1", 0);
+
+    const call = fetchSidecarMock.mock.calls[0];
+    expect(call?.[0]).toBe("/api/v1/agents/runs/exited");
+    expect(bodyOf(call)).toEqual({ pane_id: "leaf-1", exit_code: 0 });
+  });
+
+  it("sends a null exit code when none is known", () => {
+    // The teardown path has no exit code — it reports *that* the run ended.
+    recordAgentExited("leaf-1", null);
+
+    expect(bodyOf(fetchSidecarMock.mock.calls[0])).toEqual({
+      pane_id: "leaf-1",
+      exit_code: null,
+    });
+  });
+
+  it("swallows a sidecar failure", () => {
+    fetchSidecarMock.mockRejectedValue(new Error("sidecar down"));
+
+    expect(() => recordAgentExited("leaf-1", 1)).not.toThrow();
+  });
+});
+
+describe("window-target", () => {
+  it("reads the detached terminals window off the hash", () => {
+    window.location.hash = TERMINALS_WINDOW_HASH;
+
+    expect(isTerminalsWindow()).toBe(true);
+    expect(isScreenshotRingWindow()).toBe(false);
+    expect(currentPaneTarget()).toBe("popout");
+  });
+
+  it("treats the main window as embedded", () => {
+    window.location.hash = "";
+
+    expect(isTerminalsWindow()).toBe(false);
+    expect(currentPaneTarget()).toBe("embedded");
+  });
+
+  it("does not mistake another routed window for the terminals one", () => {
+    window.location.hash = "#/window/screenshot-ring";
+
+    expect(isTerminalsWindow()).toBe(false);
+    expect(isScreenshotRingWindow()).toBe(true);
+    expect(currentPaneTarget()).toBe("embedded");
+  });
+});

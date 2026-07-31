@@ -17,7 +17,12 @@ import uuid
 
 import aiosqlite
 import pytest
+import pytest_asyncio
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+import app.database as db_module
+from app.routers import agents as agents_router
 from app.services import agent_runs_service
 
 # ---------------------------------------------------------------------------
@@ -775,3 +780,187 @@ async def test_list_runs_observe_rows_have_null_target(
     obs_rows = [r for r in runs if r["row_kind"] == "observe"]
     assert len(obs_rows) >= 1
     assert all(r["target"] is None for r in obs_rows)
+
+
+# ---------------------------------------------------------------------------
+# resolve_project_id_for_cwd — agent panes report a cwd, not a project id
+# ---------------------------------------------------------------------------
+
+
+async def _insert_project(db: aiosqlite.Connection, name: str, path: str) -> int:
+    cur = await db.execute(
+        "INSERT INTO projects (name, status, path) VALUES (?, 'active', ?)",
+        (name, path),
+    )
+    await db.commit()
+    assert cur.lastrowid is not None
+    return cur.lastrowid
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_id_for_cwd_matches_exact_and_subdirectory(
+    migrated_db: aiosqlite.Connection,
+):
+    pid = await _insert_project(migrated_db, "acme", "/w/acme")
+
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "/w/acme")
+        == pid
+    )
+    # A pane opened deeper in the tree still belongs to the project.
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(
+            migrated_db, "/w/acme/frontend/src"
+        )
+        == pid
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_id_for_cwd_prefers_the_longest_path(
+    migrated_db: aiosqlite.Connection,
+):
+    """An umbrella repo's path is a prefix of every repo nested inside it.
+
+    The nested project is the right answer for a pane opened inside it — which
+    is only true if the longest match wins rather than the first one found.
+    """
+    await _insert_project(migrated_db, "umbrella", "/w/umbrella")
+    inner = await _insert_project(migrated_db, "inner", "/w/umbrella/inner")
+
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(
+            migrated_db, "/w/umbrella/inner/app"
+        )
+        == inner
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_id_for_cwd_does_not_match_a_sibling_prefix(
+    migrated_db: aiosqlite.Connection,
+):
+    """`/w/app` must not claim a pane in `/w/app-legacy` — match on separators."""
+    await _insert_project(migrated_db, "app", "/w/app")
+
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(
+            migrated_db, "/w/app-legacy"
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_id_for_cwd_handles_no_match_and_no_cwd(
+    migrated_db: aiosqlite.Connection,
+):
+    await _insert_project(migrated_db, "acme", "/w/acme")
+
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "/elsewhere")
+        is None
+    )
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, None) is None
+    )
+    assert await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_id_for_cwd_ignores_a_trailing_separator(
+    migrated_db: aiosqlite.Connection,
+):
+    pid = await _insert_project(migrated_db, "acme", "/w/acme/")
+
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "/w/acme/src")
+        == pid
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /agents/events/launch — the contract an agent pane posts against
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def launch_client(
+    migrated_db: aiosqlite.Connection,
+) -> tuple[TestClient, aiosqlite.Connection]:
+    """Mount the agents router against the shared migrated DB."""
+    original_db = db_module._db
+    db_module._db = migrated_db
+    application = FastAPI()
+    application.include_router(agents_router.router)
+    client = TestClient(application, raise_server_exceptions=True)
+    yield client, migrated_db
+    db_module._db = original_db
+
+
+@pytest.mark.asyncio
+async def test_launch_resolves_project_from_cwd(
+    launch_client: tuple[TestClient, aiosqlite.Connection],
+):
+    """An agent pane posts `cwd` because it has no project lookup of its own."""
+    client, db = launch_client
+    pid = await _insert_project(db, "acme", "/w/acme")
+
+    resp = client.post(
+        "/api/v1/agents/events/launch",
+        json={
+            "pane_id": "leaf-1",
+            "session_id": _gen_uuid(),
+            "cwd": "/w/acme/frontend",
+            "target": "popout",
+            "model": "claude-opus-5",
+        },
+    )
+    assert resp.status_code == 200
+
+    run = await agent_runs_service.get_run_by_pane(db, "leaf-1")
+    assert run is not None
+    assert run["project_id"] == pid
+    assert run["target"] == "popout"
+    assert run["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_launch_explicit_project_id_wins_over_cwd(
+    launch_client: tuple[TestClient, aiosqlite.Connection],
+):
+    client, db = launch_client
+    await _insert_project(db, "from-cwd", "/w/from-cwd")
+    explicit = await _insert_project(db, "explicit", "/w/explicit")
+
+    resp = client.post(
+        "/api/v1/agents/events/launch",
+        json={
+            "pane_id": "leaf-2",
+            "cwd": "/w/from-cwd/deep",
+            "project_id": explicit,
+        },
+    )
+    assert resp.status_code == 200
+
+    run = await agent_runs_service.get_run_by_pane(db, "leaf-2")
+    assert run is not None
+    assert run["project_id"] == explicit
+
+
+@pytest.mark.asyncio
+async def test_launch_without_cwd_or_project_still_records_the_run(
+    launch_client: tuple[TestClient, aiosqlite.Connection],
+):
+    """A pane outside every known project is still a run — just unattributed."""
+    client, db = launch_client
+
+    resp = client.post(
+        "/api/v1/agents/events/launch",
+        json={"pane_id": "leaf-3", "cwd": "/tmp/scratch"},
+    )
+    assert resp.status_code == 200
+
+    run = await agent_runs_service.get_run_by_pane(db, "leaf-3")
+    assert run is not None
+    assert run["project_id"] is None

@@ -382,6 +382,20 @@ async def api_record_launch_event(request: Request):
     if not isinstance(project_id, int):
         project_id = None
 
+    # An agent pane sends `cwd` instead of a project id (it has no project
+    # lookup of its own), so resolve one here rather than letting the row read
+    # as project "unknown". An explicit project_id always wins.
+    if project_id is None:
+        raw_cwd = payload.get("cwd")
+        if isinstance(raw_cwd, str) and raw_cwd:
+            try:
+                db = await get_db()
+                project_id = await agent_runs_service.resolve_project_id_for_cwd(
+                    db, raw_cwd
+                )
+            except Exception:
+                log.exception("project resolution from cwd failed (non-fatal)")
+
     source_id_raw = payload.get("source_id")
     source_id: int | None = (
         int(source_id_raw) if isinstance(source_id_raw, (int, float)) else None

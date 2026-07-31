@@ -79,6 +79,38 @@ async def persist_on_launch(
     return row_id
 
 
+async def resolve_project_id_for_cwd(
+    db: aiosqlite.Connection, cwd: str | None
+) -> int | None:
+    """Return the id of the project whose ``path`` contains ``cwd``, if any.
+
+    An agent pane knows the directory it was opened in, not a project id — the
+    pane tree is deliberately free of the react-query/project lookups the rest
+    of the app uses. Resolving here is what stops those runs from showing as
+    project "unknown" on the Command Center.
+
+    Longest match wins, because a pane can be opened in a subdirectory of a
+    project (and one project's path can be a prefix of another's, as an umbrella
+    repo's is of every repo nested inside it). Matching is prefix-on-separator,
+    so ``/w/app`` never claims a pane in ``/w/app-legacy``.
+    """
+    if not cwd:
+        return None
+    cur = await db.execute(
+        "SELECT id, path FROM projects WHERE path IS NOT NULL AND path != ''"
+    )
+    best_id: int | None = None
+    best_len = -1
+    for row in await cur.fetchall():
+        path = str(row["path"]).rstrip("/")
+        if not path:
+            continue
+        matches = cwd == path or cwd.startswith(f"{path}/")
+        if matches and len(path) > best_len:
+            best_id, best_len = row["id"], len(path)
+    return best_id
+
+
 async def mark_ended_by_pane(
     db: aiosqlite.Connection,
     pane_id: str,

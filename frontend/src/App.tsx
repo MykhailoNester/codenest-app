@@ -70,6 +70,10 @@ import { SyncPage } from "./pages/sync";
 import { NotificationsPage } from "./pages/notifications";
 import { OnboardingPage } from "./pages/onboarding";
 import { WorkspaceSettingsPage } from "./pages/settings/workspace-settings";
+import {
+  isTerminalsWindow as isTerminalsWindowHash,
+  isScreenshotRingWindow as isScreenshotRingWindowHash,
+} from "./lib/window-target";
 
 // ---------------------------------------------------------------------------
 // FeatureRoute — hard-gate guard (Phase 1)
@@ -485,13 +489,8 @@ export function App(): ReactElement {
   // routed via a hash fragment. When that fragment is set we skip the full
   // app shell (sidebar, topbar, MemoryRouter routes) and mount the
   // terminals-only root directly.
-  const isTerminalsWindow =
-    typeof window !== "undefined" &&
-    window.location.hash === "#/window/terminals";
-
-  const isScreenshotRingWindow =
-    typeof window !== "undefined" &&
-    window.location.hash === "#/window/screenshot-ring";
+  const isTerminalsWindow = isTerminalsWindowHash();
+  const isScreenshotRingWindow = isScreenshotRingWindowHash();
 
   if (isTerminalsWindow) {
     return (
