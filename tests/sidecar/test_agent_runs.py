@@ -14,6 +14,7 @@ Coverage:
 from __future__ import annotations
 
 import uuid
+from unittest import mock
 
 import aiosqlite
 import pytest
@@ -1214,3 +1215,69 @@ async def test_reconcile_endpoint_ends_stale_runs(
     )
     assert resp.status_code == 200
     assert resp.json()["ended"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Path matching — the two sides come from different places (B2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_id_matches_across_separator_styles(
+    migrated_db: aiosqlite.Connection,
+):
+    """A Windows cwd arrives with backslashes; the stored path may not have them.
+
+    A literal compare simply never matched, so every run on Windows would read
+    as project "unknown".
+    """
+    pid = await _insert_project(migrated_db, "acme", "C:/w/acme")
+
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(
+            migrated_db, "C:\\w\\acme\\frontend"
+        )
+        == pid
+    )
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "C:/w/acme")
+        == pid
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_id_is_case_sensitive_where_the_filesystem_is(
+    migrated_db: aiosqlite.Connection,
+):
+    """`/w/App` and `/w/app` are two projects on Linux and one on Windows."""
+    pid = await _insert_project(migrated_db, "acme", "/w/App")
+
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "/w/app/src")
+        is None
+    )
+
+    with mock.patch.object(
+        agent_runs_service, "_paths_are_case_insensitive", return_value=True
+    ):
+        assert (
+            await agent_runs_service.resolve_project_id_for_cwd(
+                migrated_db, "/w/app/src"
+            )
+            == pid
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_id_still_rejects_a_sibling_prefix_on_windows(
+    migrated_db: aiosqlite.Connection,
+):
+    """Normalisation must not weaken the separator boundary."""
+    await _insert_project(migrated_db, "app", "C:/w/app")
+
+    assert (
+        await agent_runs_service.resolve_project_id_for_cwd(
+            migrated_db, "C:\\w\\app-legacy\\src"
+        )
+        is None
+    )

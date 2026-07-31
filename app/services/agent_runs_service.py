@@ -14,6 +14,7 @@ Architecture note
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -80,6 +81,33 @@ async def persist_on_launch(
     return row_id
 
 
+def _paths_are_case_insensitive() -> bool:
+    """Whether this platform compares paths case-insensitively.
+
+    A function rather than a module constant so a test can exercise the Windows
+    branch without running on Windows — the whole point of the normalisation
+    below is behaviour this platform cannot demonstrate.
+    """
+    return os.name == "nt"
+
+
+def _match_key(path: str) -> str:
+    """Normalise a path for prefix comparison.
+
+    Separators are folded to ``/`` because the two sides come from different
+    places: a project path is whatever was stored at import time, while a cwd
+    comes from the pane. On Windows those legitimately differ in separator — a
+    stored ``C:/w/acme`` against a ``C:\\w\\acme`` cwd — and a literal compare
+    would simply never match, which is the bug this fixes.
+
+    Case is folded only where the filesystem does, so ``/w/App`` and ``/w/app``
+    stay distinct projects on Linux (where they can genuinely coexist) and are
+    the same one on Windows.
+    """
+    normalised = path.replace("\\", "/").rstrip("/")
+    return normalised.casefold() if _paths_are_case_insensitive() else normalised
+
+
 async def resolve_project_id_for_cwd(
     db: aiosqlite.Connection, cwd: str | None
 ) -> int | None:
@@ -94,19 +122,24 @@ async def resolve_project_id_for_cwd(
     project (and one project's path can be a prefix of another's, as an umbrella
     repo's is of every repo nested inside it). Matching is prefix-on-separator,
     so ``/w/app`` never claims a pane in ``/w/app-legacy``.
+
+    Both sides are normalised through :func:`_match_key` first, so a Windows
+    ``C:\\w\\acme`` cwd still matches a project stored as ``C:/w/acme`` and the
+    comparison respects the platform's own case rules.
     """
     if not cwd:
         return None
+    needle = _match_key(cwd)
     cur = await db.execute(
         "SELECT id, path FROM projects WHERE path IS NOT NULL AND path != ''"
     )
     best_id: int | None = None
     best_len = -1
     for row in await cur.fetchall():
-        path = str(row["path"]).rstrip("/")
+        path = _match_key(str(row["path"]))
         if not path:
             continue
-        matches = cwd == path or cwd.startswith(f"{path}/")
+        matches = needle == path or needle.startswith(f"{path}/")
         if matches and len(path) > best_len:
             best_id, best_len = row["id"], len(path)
     return best_id
