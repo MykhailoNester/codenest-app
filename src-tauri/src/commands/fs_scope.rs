@@ -27,9 +27,11 @@ use std::path::{Path, PathBuf};
 
 use crate::commands::docs::require_home_scope;
 
-/// Eight noisy directories. Seven mirror `_NOISY_DIRS`
-/// (`app/services/project_discovery_service.py:49-51`); `.git` is added
-/// because it alone fires hundreds of events per git operation.
+/// Eight noisy directories. Seven are the build-output/dependency subset of
+/// `_NOISY_DIRS` (`app/services/project_discovery_service.py`) — that set also
+/// skips vendored trees (`vendor`, `Pods`, …) which the navigator deliberately
+/// still shows. `.git` is added here because it alone fires hundreds of events
+/// per git operation.
 pub(crate) const EXCLUDED_DIRS: [&str; 8] = [
     ".git",
     "node_modules",

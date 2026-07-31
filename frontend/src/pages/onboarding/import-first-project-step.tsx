@@ -92,8 +92,8 @@ export function ImportFirstProjectStep({
     try {
       const result = await scan.mutateAsync({
         roots: [rootPath.trim()],
-        max_depth: 3,
-        max_results: 50,
+        max_depth: 4,
+        max_results: 200,
         git_only: true,
       });
       const list = result.candidates;
@@ -140,8 +140,9 @@ export function ImportFirstProjectStep({
       <h1 className={styles.title}>Import your projects</h1>
       <p className={styles.lead}>
         Point us at a root folder. We recursively find{" "}
-        <strong>git repositories</strong>, detect which AI tooling each one
-        uses, and let you choose what to bring into the workspace.
+        <strong>git repositories</strong> &mdash; including ones nested inside
+        another repo &mdash; detect which AI tooling each one uses, and let you
+        choose what to bring into the workspace.
       </p>
 
       <div className={styles.card}>

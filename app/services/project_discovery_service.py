@@ -12,6 +12,7 @@ Two surfaces:
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,22 @@ DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_RESULTS = 200
 
 _NOISY_DIRS: frozenset[str] = frozenset(
-    {"node_modules", "venv", ".venv", "target", "dist", "build", "__pycache__"}
+    {
+        "node_modules",
+        "venv",
+        ".venv",
+        "target",
+        "dist",
+        "build",
+        "__pycache__",
+        # Vendored dependency trees. These matter more since the walk now
+        # descends *into* matched repos: vendored copies are frequently git
+        # repos themselves and would otherwise show up as candidates.
+        "vendor",
+        "third_party",
+        "bower_components",
+        "Pods",
+    }
 )
 
 
@@ -55,12 +71,14 @@ def _classify(path: Path) -> str | None:
     """Return the stack label for ``path``, or ``None`` if it is not a project.
 
     Single pass over the rule set. ``_is_project_dir`` and the per-row
-    stack label both come out of this — no double-stat.
+    stack label both come out of this — no double-stat. Unreadable
+    directories classify as "not a project" rather than raising: macOS grants
+    the walk plenty of paths it may list but not stat (``~/Library/…``).
     """
-    for label, manifests in _STACK_RULES:
-        if any((path / m).is_file() for m in manifests):
-            return label
     try:
+        for label, manifests in _STACK_RULES:
+            if any((path / m).is_file() for m in manifests):
+                return label
         for pattern in _DOTNET_GLOBS:
             if any(path.glob(pattern)):
                 return "dotnet"
@@ -73,9 +91,13 @@ def _git_present(path: Path) -> bool:
     """True for both a ``.git/`` directory and a ``.git`` gitdir file.
 
     The file form is what worktrees and submodules use, and the previous
-    is_dir-only check missed them.
+    is_dir-only check missed them. ``Path.exists`` re-raises ``EPERM``, so the
+    guard here is what keeps a TCC-protected directory from killing the walk.
     """
-    return (path / ".git").exists()
+    try:
+        return (path / ".git").exists()
+    except OSError:
+        return False
 
 
 # AI-tool detection registry. Each entry maps a tool id to a predicate that
@@ -107,9 +129,9 @@ def _git_remote(path: Path) -> str | None:
     return ``None``.
     """
     cfg = path / ".git" / "config"
-    if not cfg.is_file():
-        return None
     try:
+        if not cfg.is_file():
+            return None
         text = cfg.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return None
@@ -164,8 +186,15 @@ def scan(
     recognised manifest. With ``git_only=True`` only git repos qualify and
     manifest-only directories are walked *through* (so a subprojects root whose
     children are each a git repo is fully discovered) — this is the onboarding
-    mode. The walk does not descend into a matched project root (one match per
-    tree). Results de-duplicate by absolute path.
+    mode.
+
+    **The walk continues below a matched project** so that nested repositories
+    are discovered too: picking a git-tracked umbrella folder whose children are
+    themselves git repos surfaces the umbrella *and* every child. Inside a
+    matched project only git repos qualify, whatever the mode — otherwise every
+    package of a monorepo would be reported as its own project. Results
+    de-duplicate by absolute path and are ordered parent-before-child, each
+    level alphabetically.
 
     Each candidate carries ``tools`` (detected AI tooling, e.g. ``["claude"]``);
     git repos also carry ``git_remote``, and Claude repos add ``agents`` /
@@ -176,16 +205,19 @@ def scan(
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def _walk(dirpath: Path, depth: int) -> None:
+    def _walk(dirpath: Path, depth: int, inside_project: bool) -> None:
         if len(results) >= max_results or depth > max_depth:
             return
-        stack = _classify(dirpath)
         git = _git_present(dirpath)
-        qualifies = git if git_only else (stack is not None or git)
-        if qualifies:
-            abs_path = str(dirpath)
-            if abs_path in seen:
-                return
+        require_git = git_only or inside_project
+        # Skip the manifest probe (a stat per rule plus a glob) for the many
+        # plain directories the walk now passes through in git-only mode; the
+        # stack label is only ever used on a candidate row.
+        stack = _classify(dirpath) if git or not require_git else None
+        qualifies = git if require_git else (stack is not None or git)
+        abs_path = str(dirpath)
+        matched = False
+        if qualifies and abs_path not in seen:
             seen.add(abs_path)
             tools = detect_tools(dirpath)
             candidate: dict[str, Any] = {
@@ -200,24 +232,38 @@ def scan(
             if "claude" in tools:
                 candidate["agents"], candidate["skills"] = _claude_asset_counts(dirpath)
             results.append(candidate)
+            matched = True
+        if len(results) >= max_results:
             return
+        # scandir (not iterdir) so the dirent's cached type answers ``is_dir``
+        # without a stat per child — the walk visits every directory of every
+        # matched repo now, so that syscall is paid thousands of times.
         try:
-            entries = list(dirpath.iterdir())
-        except (PermissionError, OSError):
+            with os.scandir(dirpath) as it:
+                entries = sorted(
+                    (
+                        e
+                        for e in it
+                        if not e.name.startswith(".") and e.name not in _NOISY_DIRS
+                    ),
+                    key=lambda e: e.name,
+                )
+        except OSError:
             return
         for entry in entries:
-            if not entry.is_dir() or entry.name.startswith("."):
+            try:
+                if not entry.is_dir():
+                    continue
+            except OSError:
                 continue
-            if entry.name in _NOISY_DIRS:
-                continue
-            _walk(entry, depth + 1)
+            _walk(Path(entry.path), depth + 1, inside_project or matched or qualifies)
 
     for raw_root in target_roots:
         try:
             resolved = Path(raw_root).expanduser().resolve()
         except (OSError, RuntimeError):
             continue
-        _walk(resolved, 0)
+        _walk(resolved, 0, False)
         if len(results) >= max_results:
             break
 

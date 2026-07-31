@@ -97,12 +97,58 @@ def test_scan_respects_max_results(tmp_path: pathlib.Path) -> None:
     assert len(candidates) == 3
 
 
-def test_scan_does_not_descend_into_matched_project(tmp_path: pathlib.Path) -> None:
+def test_scan_ignores_manifest_subdirs_of_matched_project(
+    tmp_path: pathlib.Path,
+) -> None:
+    # The walk descends below a match, but inside a matched project only git
+    # repos qualify — otherwise every package of a monorepo is a "project".
     outer = _make_repo(tmp_path, "outer", manifest="package.json")
     _make_repo(outer, "inner", manifest="Cargo.toml")
     candidates = project_discovery_service.scan(roots=[tmp_path])
     names = [c["name"] for c in candidates]
     assert names == ["outer"]
+
+
+def test_scan_finds_repos_nested_inside_a_repo(tmp_path: pathlib.Path) -> None:
+    # The reported bug: an umbrella folder that is itself git-tracked and holds
+    # further git repos used to yield only the umbrella.
+    umbrella = _make_repo(tmp_path, "umbrella", git=True)
+    _make_repo(umbrella, "app", git=True, manifest="package.json")
+    _make_repo(umbrella / "games", "engine", git=True, manifest="Cargo.toml")
+    _make_repo(umbrella, "notes")  # plain dir — not a project
+
+    for git_only in (False, True):
+        candidates = project_discovery_service.scan(roots=[tmp_path], git_only=git_only)
+        by_name = {c["name"]: c for c in candidates}
+        assert set(by_name) == {"umbrella", "app", "engine"}, f"{git_only=}"
+        # Parent before child, alphabetical within a level.
+        assert [c["name"] for c in candidates] == ["umbrella", "app", "engine"]
+        assert by_name["app"]["stack"] == "node"
+        assert by_name["engine"]["stack"] == "rust"
+        assert all(c["git"] is True for c in candidates)
+
+
+def test_scan_nested_repos_respect_max_depth_and_noisy_dirs(
+    tmp_path: pathlib.Path,
+) -> None:
+    root = _make_repo(tmp_path, "root", git=True)
+    _make_repo(root / "a" / "b", "deep", git=True)  # depth 3 below the root
+    _make_repo(root / "vendor", "dep", git=True)  # vendored copy — skipped
+
+    shallow = {
+        c["name"]
+        for c in project_discovery_service.scan(
+            roots=[tmp_path], max_depth=2, git_only=True
+        )
+    }
+    assert shallow == {"root"}
+    deeper = {
+        c["name"]
+        for c in project_discovery_service.scan(
+            roots=[tmp_path], max_depth=4, git_only=True
+        )
+    }
+    assert deeper == {"root", "deep"}
 
 
 def test_scan_skips_noisy_directories(tmp_path: pathlib.Path) -> None:
@@ -172,9 +218,9 @@ def test_detect_tools_claude(tmp_path: pathlib.Path) -> None:
 def test_scan_git_only_descends_through_manifest_parent(tmp_path: pathlib.Path) -> None:
     parent = _make_repo(tmp_path, "parent", manifest="package.json")
     _make_repo(parent, "child", git=True)
-    # Default mode stops at the manifest parent (one match per tree).
+    # Default mode reports the manifest parent and still finds the nested repo.
     default = [c["name"] for c in project_discovery_service.scan(roots=[tmp_path])]
-    assert default == ["parent"]
+    assert default == ["parent", "child"]
     # git_only walks THROUGH the manifest-only parent to find the nested git repo.
     git_only = [
         c["name"]

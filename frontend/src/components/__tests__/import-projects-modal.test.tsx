@@ -92,7 +92,7 @@ describe("ImportProjectsModal", () => {
     expect(mockScanMutate.mock.calls[0]?.[0]).toEqual({
       roots: ["/Users/test"],
       git_only: true,
-      max_depth: 3,
+      max_depth: 4,
     });
   });
 
@@ -124,7 +124,7 @@ describe("ImportProjectsModal", () => {
     expect(lastCall?.[0]).toEqual({
       roots: ["/Users/test/Code"],
       git_only: true,
-      max_depth: 3,
+      max_depth: 4,
     });
     expect(screen.getByTitle("/Users/test/Code")).toBeTruthy();
   });
@@ -146,7 +146,7 @@ describe("ImportProjectsModal", () => {
     expect(lastCall?.[0]).toEqual({
       roots: ["/Users/test/Code"],
       git_only: true,
-      max_depth: 3,
+      max_depth: 4,
     });
     expect(
       mockScanMutate.mock.calls.every((call) =>

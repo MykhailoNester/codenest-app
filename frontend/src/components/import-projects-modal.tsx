@@ -52,8 +52,11 @@ const rowStyle: React.CSSProperties = {
   borderBottom: "1px solid var(--line-3)",
 };
 
-/** Scan depth for the modal: three levels below the chosen root. */
-const SCAN_MAX_DEPTH = 3;
+/** Scan depth for the modal: four levels below the chosen root. Four, not
+ * three, because the default root is the home directory and a repo that sits
+ * at e.g. `~/Documents/Work/Acme` only reveals the repos nested inside it on
+ * the level below that. */
+const SCAN_MAX_DEPTH = 4;
 
 /** Build a placeholder row for a manually added folder that hasn't (yet)
  * been confirmed by a scan — no stack/tools/git metadata is known for it. */
