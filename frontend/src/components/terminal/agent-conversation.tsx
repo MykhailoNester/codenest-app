@@ -192,6 +192,20 @@ export function AgentConversation({
   const permission = state.permissions[0];
   const extraPending = Math.max(0, state.permissions.length - 1);
 
+  // A pending permission request blocks the session, so it is scrolled into
+  // view whether or not the user was stuck to the bottom — unlike ordinary
+  // output, which must not yank a scrolled-back reader down. Without this, a
+  // request that arrived while reading scrollback left the pane looking hung
+  // with the dialog off screen; and when the next request in a queue took the
+  // first one's place, the replacement could render below the fold.
+  useEffect(() => {
+    if (permission === undefined) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    stickToBottomRef.current = true;
+  }, [permission]);
+
   return (
     <div className={styles.conv} ref={scrollRef} onScroll={handleScroll}>
       {state.turns.map((turn) => (
@@ -222,6 +236,7 @@ export function AgentConversation({
           <AgentPermissionDialog
             request={permission}
             isFocusedPane={isFocusedPane}
+            pendingBehind={extraPending}
             onAllow={onAllowPermission}
             onAllowSession={onAllowPermissionSession}
             onDeny={onDenyPermission}

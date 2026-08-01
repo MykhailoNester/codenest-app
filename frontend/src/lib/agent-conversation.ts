@@ -92,6 +92,20 @@ export interface PermissionRequest {
   input: unknown;
   description: string | null;
   toolUseId: string | null;
+  /**
+   * `request.decision_reason` — the CLI's own words for why this ask escalated,
+   * which it documents as being "for the consent line of the host's dialog".
+   * For a compound Bash command (`decision_reason_type: "subcommandResults"`)
+   * this is the *nested* check's warning, i.e. the part of the command that
+   * actually needs approving.
+   */
+  decisionReason: string | null;
+  /** `request.decision_reason_type` — `"classifier"`, `"mode"`, `"rule"`,
+   *  `"asyncAgent"`, or `"subcommandResults"` for a decomposed Bash command. */
+  decisionReasonType: string | null;
+  /** `request.blocked_path` — set when a path outside the allowed roots is what
+   *  triggered the ask. */
+  blockedPath: string | null;
   /** See `permissionSessionKey` — what "Allow for this session" auto-answers. */
   sessionKey: string;
 }
@@ -709,16 +723,91 @@ function applyPermission(state: ConversationState, raw: unknown): ConversationSt
     input: req?.["input"],
     description: asString(req?.["description"]) ?? null,
     toolUseId: asString(req?.["tool_use_id"]) ?? null,
+    decisionReason: asString(req?.["decision_reason"]) ?? null,
+    decisionReasonType: asString(req?.["decision_reason_type"]) ?? null,
+    blockedPath: asString(req?.["blocked_path"]) ?? null,
     sessionKey: permissionSessionKey(req),
   };
   return { ...state, permissions: [...state.permissions, request] };
 }
 
-function applySystem(state: ConversationState, raw: unknown): ConversationState {
+/**
+ * The one line of `request.input` worth showing above the Allow/Deny buttons:
+ * the command for `Bash`, the path for a file tool, the pattern for a search,
+ * the URL for a fetch — falling back to compact JSON for a tool this does not
+ * know (including MCP tools, whose input shapes are arbitrary).
+ *
+ * This exists because the dialog used to render `description` alone, and for
+ * many asks the CLI sends no `description` at all — so every request read
+ * "This tool call requires approval", identically. Two different asks in a row
+ * were then indistinguishable from one click having been dropped, which is
+ * exactly how a Bash command that decomposes into several subcommand checks
+ * (`decision_reason_type: "subcommandResults"`) presents itself.
+ */
+export function permissionInputSummary(toolName: string, input: unknown): string | null {
+  const rec = asRecord(input);
+  if (!rec) return null;
+  const command = asString(rec["command"]);
+  // `$` prefix so a shell command reads as one at a glance — the single most
+  // common ask, and the one where seeing the exact string matters most.
+  if (command !== undefined && command.length > 0) {
+    return toolName === "Bash" ? `$ ${command}` : command;
+  }
+  const preferred = ["file_path", "path", "url", "pattern", "notebook_path"];
+  for (const key of preferred) {
+    const value = asString(rec[key]);
+    if (value !== undefined && value.length > 0) return value;
+  }
+  // Unknown shape (an MCP tool, or a tool whose salient field is not a string):
+  // compact JSON is still an honest answer, and truncating keeps a giant
+  // `Write` body from pushing the buttons off screen.
+  try {
+    const json = JSON.stringify(rec);
+    if (json === undefined || json === "{}") return null;
+    return json.length > 300 ? `${json.slice(0, 300)}…` : json;
+  } catch {
+    return null;
+  }
+}
+
+function applySystem(
+  state: ConversationState,
+  raw: unknown,
+  now: number,
+): ConversationState {
   const rec = asRecord(raw);
   const subtype = asString(rec?.["subtype"]);
   if (subtype === "status" && asString(rec?.["status"]) === "requesting") {
     return { ...state, status: "running" };
+  }
+  // `{"type":"system","subtype":"permission_denied", tool_name, tool_use_id,
+  //   decision_reason_type?, decision_reason?, message}` — a tool call the CLI
+  // refused *without* asking us: a deny rule, the auto-mode classifier, or
+  // `dontAsk` mode, which denies anything not already pre-approved.
+  //
+  // The CLI emits this event for exactly this reason ("so SDK hosts can render
+  // the denial instead of only seeing an is_error tool_result"). Dropping it is
+  // what made a `dontAsk` session look broken rather than strict: no dialog
+  // appeared, nothing was logged, and the only trace was the model narrating
+  // "Bash is denied in this mode" a turn later.
+  if (subtype === "permission_denied") {
+    const tool = asString(rec?.["tool_name"]) ?? "tool";
+    const message = asString(rec?.["message"]);
+    const reason = asString(rec?.["decision_reason"]);
+    const reasonType = asString(rec?.["decision_reason_type"]);
+    // `mode` is the case a user can act on — it means the pane's own permission
+    // mode refused the call — so name it rather than leaving a bare "denied".
+    const cause = reason ?? (reasonType === "mode" ? "denied by this pane's permission mode" : null);
+    const detail = [cause, message].filter((p): p is string => Boolean(p)).join(" — ");
+    return appendErrorBlock(
+      state,
+      {
+        type: "error",
+        text: `⊘ ${tool} denied without asking${detail ? `: ${detail}` : ""}`,
+        source: "stdout",
+      },
+      now,
+    );
   }
   // `{"type":"system","subtype":"thinking_tokens","estimated_tokens":N}` — the
   // CLI's own running estimate, emitted as a system frame rather than only as a
@@ -818,7 +907,7 @@ export function applyFrame(
     case "permission":
       return applyPermission(state, frame.raw);
     case "system":
-      return applySystem(state, frame.raw);
+      return applySystem(state, frame.raw, now);
     case "stderr":
     case "error":
       return applyErrorFrame(state, frame.raw, now);

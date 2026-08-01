@@ -21,12 +21,47 @@
   font-weight: 700;
 }
 
+/* The queue position, inside the title. Not uppercased with the rest of it:
+   "(1 of 3)" is a count, not a label. */
+.permCount {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+/* What is actually being approved — the command, path, or URL from the
+   request's `input`. Scrolls rather than wrapping unboundedly so a long
+   command can never push the buttons out of the pane. */
+.permTarget {
+  margin: 0 0 6px;
+  padding: 5px 7px;
+  max-height: 84px;
+  overflow: auto;
+  background: var(--bg-0, rgba(0, 0, 0, 0.25));
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .permBody {
   margin: 0 0 8px;
   font-size: 11.5px;
   color: var(--fg-2);
   font-family: var(--font-mono);
   word-break: break-word;
+}
+
+.permNote {
+  margin: 7px 0 0;
+  font-size: 10.5px;
+  color: var(--fg-3, var(--fg-2));
+  font-family: var(--font-sans);
+  opacity: 0.85;
 }
 
 .permBtns {

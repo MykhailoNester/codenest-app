@@ -236,6 +236,73 @@ describe("composer-store", () => {
     });
   });
 
+  /**
+   * A dropped file's path goes into the draft text, which is what every other
+   * editor does and what the user gets to type around. Drops used to become
+   * `file` context pills, so the path never appeared in the prompt at all.
+   */
+  describe("insertPathsIntoDraft", () => {
+    it("inserts into an empty draft with no leading space", () => {
+      const caret = useComposerStore
+        .getState()
+        .insertPathsIntoDraft("pane-1", ["/Users/me/app/main.py"]);
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe(
+        "/Users/me/app/main.py ",
+      );
+      expect(caret).toBe("/Users/me/app/main.py ".length);
+    });
+
+    it("appends with exactly one separating space", () => {
+      useComposerStore.getState().setDraft("pane-1", "look at");
+      useComposerStore.getState().insertPathsIntoDraft("pane-1", ["/a/b.ts"]);
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe("look at /a/b.ts ");
+    });
+
+    it("does not double a space the draft already ends with", () => {
+      useComposerStore.getState().setDraft("pane-1", "look at ");
+      useComposerStore.getState().insertPathsIntoDraft("pane-1", ["/a/b.ts"]);
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe("look at /a/b.ts ");
+    });
+
+    it("inserts at the caret and returns the offset just past the insertion", () => {
+      useComposerStore.getState().setDraft("pane-1", "compare and tell me why");
+      const caret = useComposerStore
+        .getState()
+        .insertPathsIntoDraft("pane-1", ["/a/b.ts"], "compare".length);
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe(
+        "compare /a/b.ts and tell me why",
+      );
+      // Just past the path and *before* the space that was already there — no
+      // second space is added when the text after the caret starts with one.
+      expect(caret).toBe("compare /a/b.ts".length);
+    });
+
+    it("quotes a path containing spaces so it stays one argument", () => {
+      useComposerStore
+        .getState()
+        .insertPathsIntoDraft("pane-1", ["/Users/me/My Docs/a b.md"]);
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe(
+        '"/Users/me/My Docs/a b.md" ',
+      );
+    });
+
+    it("joins a multi-file drop with single spaces", () => {
+      useComposerStore.getState().insertPathsIntoDraft("pane-1", ["/a.ts", "/b.ts"]);
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe("/a.ts /b.ts ");
+    });
+
+    it("is a no-op for an empty or whitespace-only payload", () => {
+      useComposerStore.getState().setDraft("pane-1", "unchanged");
+      useComposerStore.getState().insertPathsIntoDraft("pane-1", ["", "   "]);
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe("unchanged");
+    });
+
+    it("leaves pills alone — inserting a path is not attaching context", () => {
+      useComposerStore.getState().insertPathsIntoDraft("pane-1", ["/a.ts"]);
+      expect(useComposerStore.getState().panes["pane-1"]?.pills).toEqual([]);
+    });
+  });
+
   describe("history persistence", () => {
     it("survives a store re-import via the stubbed localStorage", async () => {
       localStorage.setItem(

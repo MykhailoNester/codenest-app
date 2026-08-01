@@ -97,6 +97,20 @@ interface ComposerStore {
   setDraft: (paneId: string, draft: string) => void;
   addPills: (paneId: string, pills: ContextPill[]) => void;
   removePill: (paneId: string, pillId: string) => void;
+  /**
+   * Insert dropped paths into the pane's draft as text and return the caret
+   * offset just past the insertion, so the caller can place the cursor there.
+   *
+   * This is what a drop does now — the convention every editor and chat client
+   * follows, and what the paths are for: the agent reads a path it can see in
+   * the prompt. Drops used to become `file` context pills instead, which meant
+   * the path never appeared in the text the user was writing.
+   *
+   * `caret` is where to insert (the textarea's `selectionStart` for a drop that
+   * landed in the editor). Omit it — an OS drop onto the pane, which has no
+   * caret of its own — to append.
+   */
+  insertPathsIntoDraft: (paneId: string, paths: string[], caret?: number) => number;
   /** Adds one `file` pill per unique path not already attached. */
   attachContextToPane: (paneId: string, paths: string[]) => void;
   /** C3 — delegates to `targetPaneId`; a no-op when it is null (the sibling
@@ -127,6 +141,18 @@ export function resolveSendTargets(paneId: string, fanoutAll: boolean): string[]
         .map((l) => l.terminalId)
     : [];
   return agentIds.includes(paneId) ? agentIds : [paneId, ...agentIds];
+}
+
+/**
+ * A dropped path as it should read inside a prompt: bare, unless it contains
+ * whitespace, in which case it is double-quoted so it stays one argument to
+ * whatever the agent does with it (including handing it to a shell). Embedded
+ * double quotes are escaped rather than dropped — a filename may legally
+ * contain one.
+ */
+function quotePathForPrompt(path: string): string {
+  if (!/\s/.test(path)) return path;
+  return `"${path.replace(/"/g, '\\"')}"`;
 }
 
 function pillToMessagePill(pill: ContextPill): UserMessagePill {
@@ -183,6 +209,34 @@ export const useComposerStore = create<ComposerStore>((set, get) => ({
         },
       };
     });
+  },
+
+  insertPathsIntoDraft: (paneId, paths, caret) => {
+    const cleaned = paths.map((p) => p.trim()).filter((p) => p.length > 0);
+    if (cleaned.length === 0) {
+      return get().panes[paneId]?.draft.length ?? 0;
+    }
+    const insertion = cleaned.map(quotePathForPrompt).join(" ");
+    const pane = get().panes[paneId] ?? emptyPaneComposer();
+    const at =
+      caret === undefined
+        ? pane.draft.length
+        : Math.max(0, Math.min(caret, pane.draft.length));
+    const before = pane.draft.slice(0, at);
+    const after = pane.draft.slice(at);
+    // One space on each side, never doubled: a drop into an empty draft must not
+    // leave it starting with a space, and dropping mid-sentence must not glue the
+    // path onto the word in front of it.
+    const lead = before.length > 0 && !/\s$/.test(before) ? " " : "";
+    const trail = /^\s/.test(after) ? "" : " ";
+    const draft = `${before}${lead}${insertion}${trail}${after}`;
+    set((state) => ({
+      panes: {
+        ...state.panes,
+        [paneId]: { ...(state.panes[paneId] ?? emptyPaneComposer()), draft },
+      },
+    }));
+    return before.length + lead.length + insertion.length + trail.length;
   },
 
   attachContextToPane: (paneId, paths) => {

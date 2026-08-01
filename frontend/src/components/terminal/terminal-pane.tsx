@@ -19,6 +19,7 @@ import {
   useTerminalOutput,
   usePtyExited,
   openPath,
+  openExternalUrl,
 } from "../../lib/ipc";
 import { upsertSetting, TERMINAL_SETTING_DEFAULTS } from "../../lib/api";
 import { decodeOsc7, decodeOscTitle } from "./osc-handlers";
@@ -336,9 +337,16 @@ export function TerminalPane({
 
     // WebLinksAddon — handle ⌘+click: open the URL; plain click does nothing
     // extra (xterm's default selection behaviour handles it).
+    //
+    // `openExternalUrl`, never `openPath`: what this addon hands back is always
+    // a web URL, and the opener plugin's path door stats its argument and fails
+    // on anything that is not a file — which is why ⌘-clicking a link in a
+    // shell pane used to do nothing at all.
     const webLinks = new WebLinksAddon((event, uri) => {
       if (event.metaKey) {
-        void openPath(uri);
+        void openExternalUrl(uri).catch((err: unknown) => {
+          console.error("terminal-pane: could not open", uri, err);
+        });
       }
     });
     term.loadAddon(webLinks);

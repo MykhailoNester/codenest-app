@@ -28,6 +28,7 @@ import {
   CODENEST_PATHS_MIME,
   type ContextPill,
 } from "../../stores/composer-store";
+import { readPathDragPayload } from "../../lib/explorer/drag-payload";
 import { useAgentSessionStore } from "../../stores/agent-session-store";
 import { useTerminalStore } from "../../stores/terminal-store";
 import { collectLeaves, paneKind } from "../../lib/layout-tree";
@@ -291,8 +292,16 @@ const LIVE_PERMISSION_MODES: ReadonlyArray<{
   },
   {
     value: "dontAsk",
-    label: "don't ask",
-    title: "Stop asking altogether for the rest of this session.",
+    // Deliberately not ordered last and deliberately not described as "allow
+    // everything": `dontAsk` is a *deny* mode. The CLI documents it as
+    // "Don't prompt for permissions, deny if not pre-approved" (2.1.220), and
+    // it auto-denies through the same path as a deny rule — so on a session
+    // with no allow rules it refuses every Bash call without ever asking.
+    // The old wording ("stop asking altogether") read as bypassPermissions and
+    // sent people here for the opposite of what they wanted.
+    label: "don't ask (deny)",
+    title:
+      "Never prompts — and denies anything your permission rules don't already allow. For a session that just runs things, pick auto-edit, auto, or restart with full access.",
   },
 ];
 
@@ -541,7 +550,7 @@ export function AgentComposer({
   const history = useComposerStore((s) => s.history);
   const setDraft = useComposerStore((s) => s.setDraft);
   const removePill = useComposerStore((s) => s.removePill);
-  const attachContextToPane = useComposerStore((s) => s.attachContextToPane);
+  const insertPathsIntoDraft = useComposerStore((s) => s.insertPathsIntoDraft);
   const setFanoutAll = useComposerStore((s) => s.setFanoutAll);
   const send = useComposerStore((s) => s.send);
   const queue = useComposerStore((s) => s.queue);
@@ -569,10 +578,16 @@ export function AgentComposer({
   const sendDisabled = composedText.trim().length === 0 || sessionEnded;
   const lineCount = draft.length === 0 ? 0 : draft.split("\n").length;
 
-  function handleDraftChange(el: HTMLTextAreaElement): void {
-    setDraft(leafId, el.value);
+  /** The auto-grow measurement, shared by typing and by a drop that inserts
+   *  text the user did not type. */
+  function resizeEditor(el: HTMLTextAreaElement): void {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, EDITOR_MAX_HEIGHT_PX)}px`;
+  }
+
+  function handleDraftChange(el: HTMLTextAreaElement): void {
+    setDraft(leafId, el.value);
+    resizeEditor(el);
   }
 
   function handleSend(): void {
@@ -604,28 +619,67 @@ export function AgentComposer({
     // textarea's own native undo — nothing here intercepts either.
   }
 
+  /**
+   * Paths carried by a drag over the editor, from either half of the contract:
+   * the Codenest MIME type an in-window drag from the explorer sets, or the
+   * `text/plain` fallback `writePathDragPayload` writes alongside it (one path
+   * per line) — which is also what a drag out of another app arrives as.
+   */
+  function pathsFromDrag(dt: DataTransfer): string[] {
+    const payload = readPathDragPayload(dt);
+    if (payload) return payload;
+    return dt
+      .getData("text/plain")
+      .split("\n")
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+  }
+
+  function acceptsEditorDrag(dt: DataTransfer): boolean {
+    return dt.types.includes(CODENEST_PATHS_MIME) || dt.types.includes("text/plain");
+  }
+
   function handleDragOver(e: DragEvent<HTMLTextAreaElement>): void {
-    if (!e.dataTransfer.types.includes(CODENEST_PATHS_MIME)) return;
+    if (!acceptsEditorDrag(e.dataTransfer)) return;
     e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
     // `items.length` is readable during dragover (unlike `getData`, which
     // browsers withhold until drop) — a real count, not a placeholder.
     setDragCount(e.dataTransfer.items.length);
   }
 
+  /**
+   * A drop in the editor inserts the paths as text at the caret — the behaviour
+   * every other editor has, and the reason this stopped attaching context pills:
+   * the point of dropping a file into a prompt is to write about that path.
+   *
+   * `preventDefault` matters even though the textarea would insert `text/plain`
+   * itself: the browser's own insertion bypasses React's `onChange` for a
+   * controlled value, so the draft in the store would not match what is on
+   * screen, and the next keystroke would revert it.
+   */
   function handleDrop(e: DragEvent<HTMLTextAreaElement>): void {
-    if (!e.dataTransfer.types.includes(CODENEST_PATHS_MIME)) return;
+    if (!acceptsEditorDrag(e.dataTransfer)) return;
     e.preventDefault();
+    e.stopPropagation();
     setDragCount(null);
-    const raw = e.dataTransfer.getData(CODENEST_PATHS_MIME);
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      const paths = parsed.filter((p): p is string => typeof p === "string");
-      if (paths.length === 0) return;
-      attachContextToPane(leafId, paths);
-    } catch {
-      // Malformed payload — ignored silently, no pills, no throw.
-    }
+    const paths = pathsFromDrag(e.dataTransfer);
+    if (paths.length === 0) return;
+    const el = e.currentTarget;
+    // Where the pointer landed, not where the caret was last left: the browser
+    // moves the caret to the drop point before `drop` fires, so `selectionStart`
+    // is already the right offset.
+    const caret = el.selectionStart;
+    const nextCaret = insertPathsIntoDraft(leafId, paths, caret);
+    // The store owns the value, so the DOM catches up on the next render —
+    // restore focus and place the caret past the insertion after it does.
+    requestAnimationFrame(() => {
+      const current = textareaRef.current;
+      if (!current) return;
+      current.focus();
+      current.setSelectionRange(nextCaret, nextCaret);
+      resizeEditor(current);
+    });
   }
 
   return (
@@ -715,7 +769,10 @@ export function AgentComposer({
           </span>
           {dragCount !== null ? (
             <div className={styles.dropzone}>
-              drop to attach <b style={{ marginLeft: 5 }}>{dragCount} files</b> as context
+              drop to insert
+              <b style={{ marginLeft: 5 }}>
+                {dragCount} {dragCount === 1 ? "path" : "paths"}
+              </b>
             </div>
           ) : null}
         </div>

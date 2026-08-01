@@ -26,7 +26,7 @@ import {
   levenshtein,
   normalizeTitle,
 } from "../lib/inbox-utils";
-import { openPath } from "../lib/ipc";
+import { openPath, openExternalUrl } from "../lib/ipc";
 import { LaunchFromSourceButton } from "../components/launch/launch-from-source-button";
 
 const VIRTUAL_THRESHOLD = 50;
@@ -91,7 +91,14 @@ function InboxCardInner({
 
   async function handleOpenSource(): Promise<void> {
     if (source.kind === "url") {
-      window.open(source.value, "_blank", "noopener,noreferrer");
+      // `window.open` has no default browser to reach inside a Tauri webview —
+      // it either does nothing or navigates the app away. The opener plugin's
+      // URL door is the only thing that reaches the OS handler.
+      try {
+        await openExternalUrl(source.value);
+      } catch {
+        await navigator.clipboard.writeText(source.value);
+      }
     } else if (source.kind === "path") {
       try {
         await openPath(source.value);

@@ -54,35 +54,37 @@ capitalised, imperative sentence.
 
 ## Format
 
-```
-<Imperative subject under 72 chars>
+Simple change:
 
-<what and why, wrapped at 72 — prose or bullets>
+```
+<type>(<scope>): <summary>
+```
+
+Change with several parts:
+
+```
+<type>(<scope>): <summary>
+
+- <detail one>
+- <detail two>
 ```
 
 ## Examples
 
 ```
-Stop the scheduler re-dispatching a run after a mid-tick restart
-
-A run row stayed `pending` until the spawned process reported back, so a
-restart between the poll and the report queued it a second time. Mark the
-row `dispatching` inside the same transaction the poll reads it in, so a
-second poller cannot claim it.
+fix(dashboard): show a flat period as +0.00%, not as an em dash
 ```
 
-```
-Add a paused state to agent schedules
 
-- migrations/003_schedule_paused.sql adds the column, defaulting to 0 so
+```
+feat(debts): add a paused state to agent schedules
+
+- migrations/003_schedule_paused.sql add the column, defaulting to 0 so
   existing schedules keep firing
 - the tick skips paused rows rather than filtering them out of the list,
   so a paused schedule still shows its next fire time in the UI
 ```
 
 ```
-Mirror the sync feature default across both layers
-
-The nav read `sync: false` from FEATURE_DEFAULTS while the sidecar had no
-`sync` slug in KNOWN_FEATURES, so saving any feature toggle returned 422.
+chore(ci): run the quality gate on pushes to develop
 ```

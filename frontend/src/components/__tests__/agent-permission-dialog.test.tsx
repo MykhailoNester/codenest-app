@@ -12,6 +12,9 @@ function makeRequest(overrides: Partial<PermissionRequest> = {}): PermissionRequ
     input: { command: "curl -s https://example.com" },
     description: "Fetch URL with curl and report exit code",
     toolUseId: "toolu_1",
+    decisionReason: null,
+    decisionReasonType: null,
+    blockedPath: null,
     sessionKey: "Bash curl -s https://example.com",
     ...overrides,
   };
@@ -24,15 +27,20 @@ interface Handlers {
 }
 
 function renderDialog(
-  props: Partial<{ isFocusedPane: boolean }> = {},
+  props: Partial<{
+    isFocusedPane: boolean;
+    pendingBehind: number;
+    request: PermissionRequest;
+  }> = {},
 ): Handlers {
   const onAllow = vi.fn();
   const onAllowSession = vi.fn();
   const onDeny = vi.fn();
   render(
     <AgentPermissionDialog
-      request={makeRequest()}
+      request={props.request ?? makeRequest()}
       isFocusedPane={props.isFocusedPane ?? true}
+      pendingBehind={props.pendingBehind ?? 0}
       onAllow={onAllow}
       onAllowSession={onAllowSession}
       onDeny={onDeny}
@@ -122,5 +130,58 @@ describe("AgentPermissionDialog keyboard model", () => {
     expect(onAllow).toHaveBeenCalledTimes(1);
     expect(onAllowSession).toHaveBeenCalledTimes(1);
     expect(onDeny).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * What the dialog *says*. These exist because "Allow needed two clicks" turned
+ * out to be two genuinely different requests rendering identically: the body
+ * fell back to a constant string and nothing showed which call was being
+ * approved, so a second ask was indistinguishable from a dropped click.
+ */
+describe("AgentPermissionDialog request identity", () => {
+  it("shows the command being approved, not just a generic line", () => {
+    renderDialog();
+    expect(screen.getByText("$ curl -s https://example.com")).toBeTruthy();
+  });
+
+  it("shows the file path for a file tool", () => {
+    renderDialog({
+      request: makeRequest({
+        toolName: "Write",
+        displayName: "Write",
+        input: { file_path: "/tmp/out.txt", content: "hello" },
+      }),
+    });
+    expect(screen.getByText("/tmp/out.txt")).toBeTruthy();
+  });
+
+  it("prefers the CLI's decision_reason over the tool's own description", () => {
+    renderDialog({
+      request: makeRequest({
+        decisionReason: "git push writes to a remote",
+      }),
+    });
+    expect(screen.getByText("git push writes to a remote")).toBeTruthy();
+    expect(
+      screen.queryByText("Fetch URL with curl and report exit code"),
+    ).toBeNull();
+  });
+
+  it("counts the queue in the title so a follow-up ask is not read as a lost click", () => {
+    renderDialog({ pendingBehind: 2 });
+    expect(screen.getByText(/\(1 of 3\)/)).toBeTruthy();
+  });
+
+  it("warns that a compound command is approved part by part", () => {
+    renderDialog({
+      request: makeRequest({ decisionReasonType: "subcommandResults" }),
+    });
+    expect(screen.getByText(/each part is approved separately/i)).toBeTruthy();
+  });
+
+  it("says nothing about compound commands for an ordinary ask", () => {
+    renderDialog();
+    expect(screen.queryByText(/each part is approved separately/i)).toBeNull();
   });
 });

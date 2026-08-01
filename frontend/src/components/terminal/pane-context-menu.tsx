@@ -1,5 +1,5 @@
 import { useEffect, type ReactElement } from "react";
-import { openPath } from "../../lib/ipc";
+import { openPath, openExternalUrl } from "../../lib/ipc";
 import styles from "./pane-context-menu.module.css";
 
 export interface ContextMenuTarget {
@@ -44,9 +44,14 @@ export function PaneContextMenu({
     };
   }, [onClose]);
 
+  // A URL goes through the opener's URL door, not its path door: `openPath`
+  // stats its argument and fails on anything that is not a file, so routing a
+  // link through it made this menu item silently do nothing.
   const handleOpenLink = () => {
     if (target.url) {
-      void openPath(target.url);
+      void openExternalUrl(target.url).catch((err: unknown) => {
+        console.error("pane-context-menu: could not open", target.url, err);
+      });
     }
     onClose();
   };

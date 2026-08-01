@@ -9,6 +9,7 @@ import {
   toolArgSummary,
   toolDiffstat,
   buildUserMessageText,
+  permissionInputSummary,
   type ConvToolBlock,
 } from "../agent-conversation";
 import type { AgentFrame, AgentFrameKind } from "../ipc";
@@ -656,6 +657,89 @@ describe("agent-conversation reducer", () => {
         ],
       }),
     ).toEqual({ added: 3, removed: 3 });
+  });
+
+  /**
+   * The CLI emits `system/permission_denied` for a tool call it refused *without*
+   * asking — a deny rule, the auto-mode classifier, or `dontAsk` mode, which the
+   * CLI documents as "Don't prompt for permissions, deny if not pre-approved".
+   * Dropping the frame is what made a `dontAsk` session look broken rather than
+   * strict: no dialog, no log line, and the only trace was the model narrating
+   * "Bash is denied in this mode" a turn later.
+   */
+  it("a permission_denied system frame renders the refusal", () => {
+    const seeded = applyFrame(
+      emptyConversation(),
+      frame("assistant", {
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: "Checking." }] },
+        session_id: "s1",
+      }),
+      1000,
+    );
+    const state = applyFrame(
+      seeded,
+      frame("system", {
+        type: "system",
+        subtype: "permission_denied",
+        tool_name: "Bash",
+        tool_use_id: "toolu_1",
+        decision_reason_type: "mode",
+        message: "Permission to use Bash has been denied.",
+        session_id: "s1",
+      }),
+      2000,
+    );
+    const blocks = state.turns.at(-1)?.blocks ?? [];
+    const denial = blocks.find((b) => b.type === "error");
+    expect(denial).toBeDefined();
+    if (denial?.type !== "error") throw new Error("expected an error block");
+    expect(denial.text).toContain("Bash");
+    expect(denial.text).toContain("denied without asking");
+    expect(denial.text).toContain("Permission to use Bash has been denied.");
+  });
+
+  it("permission_denied names the pane's mode when that is what refused it", () => {
+    const state = applyFrame(
+      emptyConversation(),
+      frame("system", {
+        type: "system",
+        subtype: "permission_denied",
+        tool_name: "Write",
+        tool_use_id: "toolu_2",
+        decision_reason_type: "mode",
+        message: "denied",
+        session_id: "s1",
+      }),
+      1000,
+    );
+    const block = state.turns[0]?.blocks[0];
+    if (block?.type !== "error") throw new Error("expected an error block");
+    expect(block.text).toContain("permission mode");
+  });
+
+  it("an unrelated system subtype still changes nothing", () => {
+    const before = emptyConversation();
+    const after = applyFrame(
+      before,
+      frame("system", { type: "system", subtype: "hook_started", session_id: "s1" }),
+      1000,
+    );
+    expect(after).toEqual(before);
+  });
+
+  it("permissionInputSummary picks the field that identifies the call", () => {
+    expect(permissionInputSummary("Bash", { command: "git push" })).toBe("$ git push");
+    expect(permissionInputSummary("Write", { file_path: "/tmp/a", content: "x" })).toBe(
+      "/tmp/a",
+    );
+    expect(permissionInputSummary("WebFetch", { url: "https://example.com" })).toBe(
+      "https://example.com",
+    );
+    // An MCP tool's input shape is arbitrary — compact JSON is still honest.
+    expect(permissionInputSummary("mcp__x__y", { anything: 1 })).toBe('{"anything":1}');
+    expect(permissionInputSummary("Bash", {})).toBeNull();
+    expect(permissionInputSummary("Bash", undefined)).toBeNull();
   });
 });
 

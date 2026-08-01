@@ -9,12 +9,14 @@ import {
   fetchProfiles,
   type PathValidationResult,
   type ProviderModelInput,
+  type ProviderModel,
   type SidecarError,
   type Provider,
 } from "../../lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSidecar } from "../../lib/api";
 import { pickDirectory } from "../../lib/ipc";
+import { TIERS, DEFAULT_MODELS, tiersFromModels } from "./provider-tiers";
 import styles from "./onboarding-page.module.css";
 
 /** Extract the leading binary token from a command_template string. */
@@ -33,46 +35,6 @@ function replaceCommandAlias(template: string, alias: string): string {
   return alias + trimmed.slice(spaceIdx);
 }
 
-interface Tier {
-  key: string;
-  label: string;
-  dotColor: string;
-}
-
-const TIERS: Tier[] = [
-  { key: "fable", label: "Fable", dotColor: "var(--warn, #f59e0b)" },
-  { key: "opus", label: "Opus", dotColor: "var(--violet, #a855f7)" },
-  { key: "sonnet", label: "Sonnet", dotColor: "var(--accent, #3b82f6)" },
-  { key: "haiku", label: "Haiku", dotColor: "var(--info, #38bdf8)" },
-];
-
-/**
- * Seeded model IDs, matching the aliases Claude Code 2.1.220 documents for
- * `--model` ("Provide an alias for the latest model (e.g. 'fable', 'opus', or
- * 'sonnet') or a model's full name (e.g. 'claude-fable-5')").
- *
- * Two rules these have to follow, both verified against the installed CLI
- * rather than assumed:
- *
- * 1. **Dashes, never dots.** `claude-haiku-4.5` does not appear anywhere in the
- *    CLI binary; `claude-haiku-4-5` appears throughout. A dotted ID is rejected
- *    at the API, and the failure surfaces as an opaque error inside the pane.
- * 2. **No date suffix on an alias.** `claude-haiku-4-5` is the alias that
- *    tracks the latest Haiku 4.5 build; the dated `claude-haiku-4-5-20251001`
- *    is a pinned snapshot. Seeding the alias means a user who never revisits
- *    this screen keeps following the current build.
- *
- * The user maintains these as new models ship — the inputs below are editable
- * and the values land in `provider_models`, which is what the agent pane's
- * model dropdown reads.
- */
-const DEFAULT_MODELS: Record<string, string> = {
-  fable: "claude-fable-5",
-  opus: "claude-opus-5",
-  sonnet: "claude-sonnet-5",
-  haiku: "claude-haiku-4-5",
-};
-
 /** One Anthropic alias entry in the multi-provider list. */
 interface ProviderEntry {
   /** Stable client-side key for React list rendering. */
@@ -83,8 +45,15 @@ interface ProviderEntry {
   configHome: string;
   models: Record<string, string>;
   /**
-   * The models snapshot at seed time. Only PUT models when `models` differs
-   * from this — avoids clobbering user-edited model IDs on revisit.
+   * What `provider_models` actually holds for this provider, per tier — `""`
+   * for a tier with no row. Only PUT when `models` differs from this, which
+   * avoids clobbering user-edited model IDs on revisit.
+   *
+   * `null` means "unknown, treat as unsaved" and always PUTs: a brand-new entry,
+   * a provider with no rows at all, or a lookup that failed. It must never be
+   * seeded from {@link DEFAULT_MODELS} — that made the two sides equal for a
+   * provider with an empty table and silently skipped the only write that would
+   * have populated it.
    */
   originalModels: Record<string, string> | null;
   defaultTier: string;
@@ -116,6 +85,14 @@ function isBlankEntry(entry: ProviderEntry): boolean {
   return entry.savedId === null && entry.alias === "" && entry.configHome === "";
 }
 
+/** An existing provider plus the `provider_models` rows it actually has.
+ *  `models` is null when the lookup failed — distinct from an empty array,
+ *  which is a provider genuinely registered with no models. */
+interface ExistingProvider {
+  provider: Provider;
+  models: ProviderModel[] | null;
+}
+
 interface Props {
   registerCommit: (fn: () => Promise<void>) => void;
 }
@@ -124,11 +101,27 @@ export function ProviderSetupStep({ registerCommit }: Props): ReactElement {
   const qc = useQueryClient();
 
   // Load existing providers on mount so that revisiting the step doesn't
-  // duplicate rows.
-  const providersQ = useQuery<Provider[], SidecarError>({
-    queryKey: ["providers", "include_disabled"],
-    queryFn: () =>
-      fetchSidecar<Provider[]>("/api/v1/providers?include_disabled=true"),
+  // duplicate rows — together with each one's `provider_models` rows, which the
+  // seed below needs to tell "already saved" from "never saved". Fetching the
+  // provider alone is what let this screen assume the models were already there.
+  const providersQ = useQuery<ExistingProvider[], SidecarError>({
+    queryKey: ["providers", "include_disabled", "with-models"],
+    queryFn: async () => {
+      const providers = await fetchSidecar<Provider[]>(
+        "/api/v1/providers?include_disabled=true",
+      );
+      return Promise.all(
+        providers.map(async (provider) => ({
+          provider,
+          // A failed lookup degrades to null, never to `[]`: "we could not ask"
+          // must not be mistaken for "this provider has no models", since the
+          // latter is exactly the case that has to trigger a write.
+          models: await fetchSidecar<ProviderModel[]>(
+            `/api/v1/providers/${provider.id}/models`,
+          ).catch(() => null),
+        })),
+      );
+    },
     staleTime: 15_000,
     retry: false,
   });
@@ -148,20 +141,26 @@ export function ProviderSetupStep({ registerCommit }: Props): ReactElement {
     setEntries((prev) => {
       if (!prev.every(isBlankEntry)) return prev;
       seededRef.current = true;
-      return existing.map((p) => ({
-        key: `existing-${p.id}`,
-        savedId: p.id,
-        alias: commandAlias(p.command_template),
-        configHome: p.default_env["CLAUDE_CONFIG_DIR"] ?? "",
-        // Seed with DEFAULT_MODELS; originalModels tracks what was here so
-        // the commit loop skips the models PUT when nothing changed.
-        models: { ...DEFAULT_MODELS },
-        originalModels: { ...DEFAULT_MODELS },
-        defaultTier: "opus",
-        pathValid: null,
-        pathChecking: false,
-        saveError: null,
-      }));
+      return existing.map(({ provider: p, models }) => {
+        const seeded = tiersFromModels(models);
+        return {
+          key: `existing-${p.id}`,
+          savedId: p.id,
+          alias: commandAlias(p.command_template),
+          configHome: p.default_env["CLAUDE_CONFIG_DIR"] ?? "",
+          // The inputs show what is saved, filled out with the defaults for any
+          // tier that has no row yet.
+          models: seeded?.models ?? { ...DEFAULT_MODELS },
+          // Only what is genuinely persisted. `null` — no rows, or the lookup
+          // failed — makes the commit loop always PUT, which is what unsticks a
+          // provider registered with an empty `provider_models` table.
+          originalModels: seeded?.persisted ?? null,
+          defaultTier: seeded?.defaultTier ?? "opus",
+          pathValid: null,
+          pathChecking: false,
+          saveError: null,
+        };
+      });
     });
   }, [providersQ.data]);
 

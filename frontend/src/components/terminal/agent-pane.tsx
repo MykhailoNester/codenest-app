@@ -442,14 +442,19 @@ export function AgentPane({
   /**
    * Pane-wide drop target, so dragging files onto an agent pane behaves like
    * dragging them onto a shell pane: anywhere inside the pane works, not just
-   * the composer's textarea. Paths land as context pills (there is no PTY to
-   * paste bytes into) and the agent reads them with its own Read tool, which is
-   * also how a dropped screenshot reaches it. The OS/Finder equivalent arrives
-   * through Tauri's `onDragDropEvent` and is handled in
-   * `use-terminal-file-drop.ts`, which hit-tests `data-agent-pane-id` below.
+   * the composer's textarea. Paths are appended to the composer draft as text
+   * (there is no PTY to paste bytes into), which is how a dropped screenshot
+   * reaches the agent too — it reads the path with its own Read tool. The
+   * OS/Finder equivalent arrives through Tauri's `onDragDropEvent` and is
+   * handled in `use-terminal-file-drop.ts`, which hit-tests
+   * `data-agent-pane-id` below.
    */
+  // `text/plain` as well as the Codenest type: `handlePaneDrop` already falls
+  // back to it, but without accepting the drag here `dragover` is never
+  // defaulted-prevented, so the browser refuses the drop and `onDrop` never
+  // fires — the fallback was unreachable.
   const acceptsDrag = (dt: DataTransfer): boolean =>
-    dt.types.includes(CODENEST_PATHS_MIME);
+    dt.types.includes(CODENEST_PATHS_MIME) || dt.types.includes("text/plain");
 
   function handlePaneDragOver(e: DragEvent<HTMLDivElement>): void {
     if (!acceptsDrag(e.dataTransfer)) return;
@@ -469,7 +474,10 @@ export function AgentPane({
         .split("\n")
         .filter((p) => p.length > 0);
     if (paths.length === 0) return;
-    useComposerStore.getState().attachContextToPane(leafId, paths);
+    // Appended to the draft rather than attached as pills: a dropped file's path
+    // belongs in the text being written, which is what every other app does and
+    // what the agent can act on directly.
+    useComposerStore.getState().insertPathsIntoDraft(leafId, paths);
     setFocusedLeaf(leafId);
   }
 
@@ -575,9 +583,7 @@ export function AgentPane({
         />
 
         {dropActive ? (
-          <div className={styles.paneDropHint}>
-            drop to attach as context
-          </div>
+          <div className={styles.paneDropHint}>drop to insert file path</div>
         ) : null}
       </div>
     </div>

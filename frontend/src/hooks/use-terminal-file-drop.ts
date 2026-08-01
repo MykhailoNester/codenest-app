@@ -188,11 +188,15 @@ export function useTerminalFileDrop(): void {
 
         if (!target) return;
 
-        // Dropping on an agent pane attaches the paths as context pills —
-        // there is no PTY to paste into. Dropping on a shell pane keeps the
+        // Dropping on an agent pane writes the paths into its composer draft —
+        // there is no PTY to paste into, and inserting the path as text is what
+        // a drop means everywhere else. Dropping on a shell pane keeps the
         // existing bracketed-paste behaviour.
         if (target.kind === "agent") {
-          useComposerStore.getState().attachContextToPane(target.id, paths);
+          useComposerStore.getState().insertPathsIntoDraft(target.id, paths);
+          // Focus the pane so the draft the paths just landed in is the one the
+          // user is typing into.
+          useTerminalStore.getState().setFocusedLeaf(target.id);
           return;
         }
 
