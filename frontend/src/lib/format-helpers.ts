@@ -6,6 +6,16 @@ export function formatUSD(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+/**
+ * Format an integer with thousands separators, pinned to en-US grouping
+ * (",") regardless of the host OS locale. Plain `toLocaleString()` resolves
+ * the grouping character from the runtime's default locale — e.g. a space
+ * under `en-UA` — which makes on-screen counts inconsistent across machines.
+ */
+export function formatCount(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
 export function formatDelta(
   current: number,
   previous: number,

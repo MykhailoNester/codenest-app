@@ -32,6 +32,7 @@ import { useExplorerSync } from "../../hooks/use-explorer-sync";
 import { useExplorerHotkey } from "../../hooks/use-explorer-hotkey";
 import { useFindActions } from "../../hooks/use-find-actions";
 import { rootForCwd } from "../../lib/explorer/roots";
+import { formatCount } from "../../lib/format-helpers";
 import { ExplorerTree } from "./explorer-tree";
 import { ChangedList } from "./changed-list";
 import { ExplorerFind } from "./explorer-find";
@@ -398,7 +399,7 @@ export function WorkspaceNavigator(): ReactElement {
               className={`${styles.dot} ${watch.degraded ? styles.dotWarn : ""}`}
             />
             watching {watch.rootCount} roots ·{" "}
-            {watch.indexedFileCount.toLocaleString()} files ·{" "}
+            {formatCount(watch.indexedFileCount)} files ·{" "}
             {backendLabel(watch.backend)}
             <br />
             excluded: {watch.excludedDirs.join(" · ")}

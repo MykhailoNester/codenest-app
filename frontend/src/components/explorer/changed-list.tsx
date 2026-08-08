@@ -11,6 +11,7 @@ import { useExplorerStore } from "../../stores/explorer-store";
 import type { RootDescriptor } from "../../lib/explorer/roots";
 import { gsClassFor } from "../../lib/explorer/git-status";
 import { writePathDragPayload } from "../../lib/explorer/drag-payload";
+import { formatCount } from "../../lib/format-helpers";
 import styles from "./workspace-navigator.module.css";
 
 export interface ChangedListProps {
@@ -96,7 +97,7 @@ export function ChangedList({ roots }: ChangedListProps): ReactElement {
               })}
             {git?.truncated && (
               <div className={styles.empty}>
-                showing first {MAX_STATUS_FILES.toLocaleString()}
+                showing first {formatCount(MAX_STATUS_FILES)}
               </div>
             )}
           </div>
