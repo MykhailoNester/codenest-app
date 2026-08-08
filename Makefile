@@ -6,10 +6,18 @@
 
 .PHONY: check-rust check-python test-python check-frontend test-frontend build-frontend check-all seed-demo
 
+# .venv's interpreter is a universal2 (arm64 + x86_64) binary. Apple Silicon
+# is the only architecture this project ships for (see docs/faq.md), but a
+# parent shell running under Rosetta steers that fat binary to its x86_64
+# slice, which can't dlopen the arm64-only compiled wheels (mypy, pydantic
+# etc.) — "arch -arm64" pins execution to native arm64 regardless of the
+# calling shell's translation state.
+PY := arch -arm64 python
+
 # Seed the demo database (data/codenest.demo.db) with synthetic data.
 # Pass ARGS=--reset to rebuild it from scratch.
 seed-demo:
-	python scripts/seed_demo.py $(ARGS)
+	$(PY) scripts/seed_demo.py $(ARGS)
 
 check-rust:
 	cd src-tauri && cargo check
@@ -18,10 +26,10 @@ check-rust:
 check-python:
 	ruff format --check .
 	ruff check .
-	mypy app/
+	$(PY) -m mypy app/
 
 test-python:
-	python -m pytest app/tests tests/sidecar -q
+	$(PY) -m pytest app/tests tests/sidecar -q
 
 check-frontend:
 	pnpm --filter frontend run typecheck
