@@ -645,4 +645,90 @@ describe("agent pane render", () => {
     expect(screen.getByText("mode switch refused")).toBeTruthy();
     expect(select.value).toBe("manual");
   });
+
+  it("a Task in flight shows the sub-agent cell in the HUD and a badge in the composer", async () => {
+    seedCatalog();
+    seedTab(makeAgentTab("agent-subagent"), "agent-subagent");
+
+    render(<TerminalsLayout />);
+    await waitFor(() => expect(agentStartMock).toHaveBeenCalledTimes(1));
+    const feed = subscribeAgentFramesMock.mock.calls[0]?.[1] as (
+      frame: AgentFrame,
+    ) => void;
+    expect(feed).toBeTypeOf("function");
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-subagent",
+        session_id: "session-1",
+        kind: "init",
+        raw: { type: "system", subtype: "init", model: "claude-opus-5" },
+      });
+    });
+
+    // Nothing delegated yet — neither surface should exist.
+    expect(screen.queryByTestId("composer-subagent-badge")).toBeNull();
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-subagent",
+        session_id: "session-1",
+        kind: "tool_use",
+        raw: {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_task_1",
+                name: "Task",
+                input: { description: "Review the diff", subagent_type: "reviewer" },
+              },
+            ],
+          },
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("composer-subagent-badge")).toBeTruthy(),
+    );
+    expect(screen.getByTestId("composer-subagent-badge").textContent).toContain(
+      "1 sub-agent",
+    );
+    const strip = screen.getByTestId("agent-session-hud");
+    expect(strip.querySelector('[data-cell="subagent"]')?.textContent).toContain(
+      "reviewer",
+    );
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-subagent",
+        session_id: "session-1",
+        kind: "tool_result",
+        raw: {
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_task_1",
+                content: "Looks good.",
+                is_error: false,
+              },
+            ],
+          },
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("composer-subagent-badge")).toBeNull(),
+    );
+    expect(
+      screen.getByTestId("agent-session-hud").querySelector('[data-cell="subagent"]'),
+    ).toBeNull();
+  });
 });

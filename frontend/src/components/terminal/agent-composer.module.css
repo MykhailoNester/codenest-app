@@ -50,6 +50,14 @@
   border: 1px solid rgba(168, 85, 247, 0.3);
 }
 
+/* Outlined rather than filled (D8): related to but not confusable with the
+   filled `.mbadgeComposing` badge beside it. */
+.mbadgeSubagent {
+  background: transparent;
+  color: var(--violet);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+}
+
 .mswap {
   margin-left: auto;
   flex: none;

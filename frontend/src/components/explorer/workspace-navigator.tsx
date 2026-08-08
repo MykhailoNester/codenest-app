@@ -398,7 +398,7 @@ export function WorkspaceNavigator(): ReactElement {
               className={`${styles.dot} ${watch.degraded ? styles.dotWarn : ""}`}
             />
             watching {watch.rootCount} roots ·{" "}
-            {watch.indexedFileCount.toLocaleString()} files ·{" "}
+            {watch.indexedFileCount.toLocaleString("en-US")} files ·{" "}
             {backendLabel(watch.backend)}
             <br />
             excluded: {watch.excludedDirs.join(" · ")}

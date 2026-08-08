@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  activeSubagents,
   applyFrame,
   appendUserTurn,
   emptyConversation,
   formatDuration,
+  isSubagentTool,
   previewUserMessageLine,
   splitInlineCode,
   toolArgSummary,
@@ -740,6 +742,149 @@ describe("agent-conversation reducer", () => {
     expect(permissionInputSummary("mcp__x__y", { anything: 1 })).toBe('{"anything":1}');
     expect(permissionInputSummary("Bash", {})).toBeNull();
     expect(permissionInputSummary("Bash", undefined)).toBeNull();
+  });
+});
+
+// The wire's tool_use.input for a Task/Agent call carries {description, prompt,
+// subagent_type} — the same object the hook side calls tool_input
+// (app/routers/agents.py:189-191).
+function taskToolUseFrame(
+  id: string,
+  input: Record<string, unknown>,
+  name = "Task",
+): AgentFrame {
+  return frame("tool_use", {
+    type: "assistant",
+    message: {
+      role: "assistant",
+      content: [{ type: "tool_use", id, name, input }],
+    },
+  });
+}
+
+function toolResultFrame(toolUseId: string, isError = false): AgentFrame {
+  return frame("tool_result", {
+    type: "user",
+    message: {
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: toolUseId, content: "done", is_error: isError },
+      ],
+    },
+  });
+}
+
+describe("sub-agent activity", () => {
+  it("a Task in flight is reported with its subagent_type and description", () => {
+    const state = applyFrame(
+      emptyConversation(),
+      taskToolUseFrame("toolu_task_1", {
+        description: "Review the auth module",
+        prompt: "Read every file under src/auth and summarise it.",
+        subagent_type: "reviewer",
+      }),
+      5_000,
+    );
+
+    const active = activeSubagents(state);
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({
+      id: "toolu_task_1",
+      toolName: "Task",
+      subagentType: "reviewer",
+      description: "Review the auth module",
+      startedAt: 5_000,
+    });
+  });
+
+  it("a tool_result clears the sub-agent from the active list", () => {
+    let state = applyFrame(
+      emptyConversation(),
+      taskToolUseFrame("toolu_task_2", { description: "d", subagent_type: "planner" }),
+      1_000,
+    );
+    expect(activeSubagents(state)).toHaveLength(1);
+
+    state = applyFrame(state, toolResultFrame("toolu_task_2", false), 2_000);
+    expect(activeSubagents(state)).toHaveLength(0);
+  });
+
+  it("an is_error tool_result clears it too", () => {
+    let state = applyFrame(
+      emptyConversation(),
+      taskToolUseFrame("toolu_task_3", { description: "d", subagent_type: "planner" }),
+      1_000,
+    );
+    state = applyFrame(state, toolResultFrame("toolu_task_3", true), 2_000);
+    expect(activeSubagents(state)).toHaveLength(0);
+  });
+
+  it("an Agent-named call counts as a sub-agent", () => {
+    const state = applyFrame(
+      emptyConversation(),
+      taskToolUseFrame("toolu_agent_1", { description: "d", subagent_type: "explorer" }, "Agent"),
+      1_000,
+    );
+    expect(isSubagentTool("Agent")).toBe(true);
+    expect(activeSubagents(state)).toHaveLength(1);
+    expect(activeSubagents(state)[0]?.toolName).toBe("Agent");
+  });
+
+  it("a Task with no subagent_type reports null, not a placeholder", () => {
+    const state = applyFrame(
+      emptyConversation(),
+      taskToolUseFrame("toolu_task_4", { description: "" }),
+      1_000,
+    );
+    const active = activeSubagents(state);
+    expect(active[0]?.subagentType).toBeNull();
+    // An empty-string description is not a description either.
+    expect(active[0]?.description).toBeNull();
+  });
+
+  it("a Bash call is never reported as a sub-agent", () => {
+    const state = applyFrame(
+      emptyConversation(),
+      frame("tool_use", {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "toolu_bash", name: "Bash", input: { command: "ls" } }],
+        },
+      }),
+      1_000,
+    );
+    expect(activeSubagents(state)).toHaveLength(0);
+  });
+
+  it("an empty conversation reports none", () => {
+    expect(activeSubagents(emptyConversation())).toEqual([]);
+  });
+
+  it("concurrent sub-agents are reported oldest first", () => {
+    let state = applyFrame(
+      emptyConversation(),
+      taskToolUseFrame("toolu_t1", { description: "first", subagent_type: "planner" }),
+      1_000,
+    );
+    state = applyFrame(
+      state,
+      taskToolUseFrame("toolu_t2", { description: "second", subagent_type: "coder" }),
+      2_000,
+    );
+
+    const active = activeSubagents(state);
+    expect(active.map((s) => s.id)).toEqual(["toolu_t1", "toolu_t2"]);
+  });
+
+  it("an exited session reports no active sub-agents even with an unresolved Task", () => {
+    let state = applyFrame(
+      emptyConversation(),
+      taskToolUseFrame("toolu_task_5", { description: "d", subagent_type: "planner" }),
+      1_000,
+    );
+    state = applyFrame(state, frame("exit", { exit_code: 0 }), 2_000);
+    expect(activeSubagents(state)).toEqual([]);
   });
 });
 

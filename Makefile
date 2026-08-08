@@ -18,10 +18,10 @@ check-rust:
 check-python:
 	ruff format --check .
 	ruff check .
-	mypy app/
+	arch -arm64 mypy app/
 
 test-python:
-	python -m pytest app/tests tests/sidecar -q
+	arch -arm64 python -m pytest app/tests tests/sidecar -q
 
 check-frontend:
 	pnpm --filter frontend run typecheck
