@@ -1,12 +1,13 @@
 /**
- * The composer — mode row, real-data context pills, an auto-growing
- * `@`-mention-highlighted editor, an actions row, the literal wire line the
- * send transmits, and re-runnable prompt-history pills. Structure mirrors
- * `prototype:737-768` top to bottom. Every element here is bound to real
- * state — nothing renders from a literal (see the plan's "NO MOCK UI" rule).
+ * The composer — mode row, real-data context pills (plus a `{}` popover onto
+ * the literal wire line send transmits), an auto-growing `@`-mention-highlighted
+ * editor, an actions row, and re-runnable prompt-history pills. Structure
+ * mirrors `prototype:737-768` top to bottom. Every element here is bound to
+ * real state — nothing renders from a literal (see the plan's "NO MOCK UI"
+ * rule).
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useEscapeKey } from "../../hooks/use-escape-key";
 import type { DragEvent, KeyboardEvent, ReactElement } from "react";
 import { useLibraryItems, useTasks, type Task, type LibraryItem } from "../../lib/api";
@@ -49,7 +50,10 @@ interface AgentComposerProps {
 }
 
 const MAX_HISTORY_PILLS = 6;
-const EDITOR_MAX_HEIGHT_PX = 240;
+// Pairs with `.editorTextarea { max-height }` in agent-composer.module.css —
+// the two must move together. Raised 240 -> 264 to reclaim most of the ~26px
+// the deleted `.wire` strip used to cost (see the WirePreview popover below).
+const EDITOR_MAX_HEIGHT_PX = 264;
 
 function pillToMessagePill(pill: ContextPill): UserMessagePill {
   switch (pill.kind) {
@@ -248,6 +252,66 @@ function ContextPicker({
           </button>
         ))
       )}
+    </div>
+  );
+}
+
+/**
+ * The popover behind the `{}` trigger: the exact stdin line Send would write
+ * for the current draft, in full — not the ellipsised fragment the old `.wire`
+ * strip showed. `line` is a prop, not something derived in here: the parent
+ * already re-renders on every keystroke (`draft` from the composer store), so
+ * a fresh `line` arrives per keystroke and this panel stays live for free.
+ *
+ * Dismissal mirrors `ContextPicker` above: outside `mousedown` + Escape, plus
+ * an explicit `×` because this panel opens over its own trigger (it anchors
+ * upward from `.cedit`, the same box `ContextPicker` uses) and so a
+ * pointer-only user needs some way to close it that isn't "click elsewhere".
+ */
+function WirePreview({
+  line,
+  panelId,
+  onClose,
+}: {
+  line: string;
+  panelId: string;
+  onClose: () => void;
+}): ReactElement {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent): void => {
+      if (!panelRef.current?.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+  useEscapeKey(onClose);
+
+  return (
+    <div
+      className={styles.previewPanel}
+      role="group"
+      aria-label="Wire preview"
+      id={panelId}
+      ref={panelRef}
+    >
+      <div className={styles.previewHead}>
+        <span className={styles.previewLabel}>WRITES</span>
+        <span className={styles.previewMeta}>{line.length} chars</span>
+        <button
+          type="button"
+          className={styles.previewClose}
+          aria-label="Close preview"
+          onClick={onClose}
+        >
+          ×
+        </button>
+      </div>
+      <code className={styles.previewCode}>{line}</code>
+      <span className={styles.previewNote}>
+        → claude --print --input-format stream-json · one JSON line on stdin
+      </span>
     </div>
   );
 }
@@ -563,13 +627,22 @@ export function AgentComposer({
     return collectLeaves(tab.layout).filter((l) => paneKind(l) === "agent").length;
   });
 
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // One state, not two booleans: `ContextPicker` and `WirePreview` are both
+  // absolutely-positioned children of `.cedit`, so two independent booleans
+  // would let them overlap. This makes mutual exclusion structural.
+  const [popover, setPopover] = useState<"context" | "preview" | null>(null);
+  const previewPanelId = useId();
+  // Stable identity so neither popover re-subscribes its outside-mousedown
+  // listener on every render — `WirePreview`'s parent re-renders on every
+  // keystroke, which makes that worth doing here.
+  const closePopover = useCallback(() => setPopover(null), []);
   const [dragCount, setDragCount] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   const messagePills = pills.map(pillToMessagePill);
   const composedText = buildUserMessageText(messagePills, draft);
+  const wireLine = previewUserMessageLine(composedText);
   // An exited session has no stdin to write to, so Send is refused rather than
   // failing silently in `agentSend` — the pane's status bar carries the
   // Restart button. Typing itself stays enabled: the draft survives the
@@ -606,6 +679,15 @@ export function AgentComposer({
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
+    // An open popover wins over interrupt: dismissing the preview or picker
+    // must never also interrupt a running session. Checked first, and
+    // regardless of `status`, so a second Escape (popover already closed)
+    // falls through to the interrupt branch below as always.
+    if (e.key === "Escape" && popover !== null) {
+      e.preventDefault();
+      setPopover(null);
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -726,18 +808,42 @@ export function AgentComposer({
           // clicking the trigger while open closes it once rather than closing
           // and reopening in the same gesture.
           onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => setPickerOpen((v) => !v)}
+          onClick={() => setPopover((p) => (p === "context" ? null : "context"))}
+          aria-expanded={popover === "context"}
         >
           + context
+        </button>
+        <button
+          type="button"
+          className={`${styles.pill} ${styles.pillWire}`}
+          aria-label="Show what Send writes to the agent"
+          aria-expanded={popover === "preview"}
+          aria-controls={previewPanelId}
+          title="What Send writes on stdin — one JSON line (click to preview)"
+          onMouseDown={(e) => {
+            // stopPropagation: same reason as `+ context` above — let the
+            // trigger's own toggle handle a reopen instead of racing this
+            // panel's outside-click listener. preventDefault: suppresses the
+            // mousedown's focus shift so the caret stays in the textarea and
+            // the user can keep typing right through opening this panel.
+            e.stopPropagation();
+            e.preventDefault();
+          }}
+          onClick={() => setPopover((p) => (p === "preview" ? null : "preview"))}
+        >
+          {"{}"}
         </button>
       </div>
 
       <div className={styles.cedit}>
-        {pickerOpen ? (
+        {popover === "context" ? (
           <ContextPicker
             onPick={(pill) => useComposerStore.getState().addPills(leafId, [pill])}
-            onClose={() => setPickerOpen(false)}
+            onClose={closePopover}
           />
+        ) : null}
+        {popover === "preview" ? (
+          <WirePreview line={wireLine} panelId={previewPanelId} onClose={closePopover} />
         ) : null}
         <div className={styles.editorStack}>
           <div
@@ -817,12 +923,6 @@ export function AgentComposer({
         <button type="button" className={styles.send} disabled={sendDisabled} onClick={handleSend}>
           Send <span className={styles.kbd}>⌘↩</span>
         </button>
-      </div>
-
-      <div className={styles.wire} title={previewUserMessageLine(composedText)}>
-        <span className={styles.wireLabel}>WRITES</span>
-        <code className={styles.wireCode}>{previewUserMessageLine(composedText)}</code>
-        <span>→ claude --print --input-format stream-json · one JSON line on stdin</span>
       </div>
 
       <div className={styles.chist}>
