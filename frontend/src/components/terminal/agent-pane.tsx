@@ -34,6 +34,7 @@ import {
 import { currentPaneTarget } from "../../lib/window-target";
 import { useAgentCatalogStore } from "../../stores/agent-catalog-store";
 import { readPathDragPayload } from "../../lib/explorer/drag-payload";
+import { logDnd } from "../../lib/drop-diagnostics";
 import { emptyConversation } from "../../lib/agent-conversation";
 import { AgentConversation } from "./agent-conversation";
 import { AgentComposer } from "./agent-composer";
@@ -473,6 +474,11 @@ export function AgentPane({
         .getData("text/plain")
         .split("\n")
         .filter((p) => p.length > 0);
+    // This handler silently absorbing a drop meant for the composer's own
+    // caret-precise `handleDrop` (agent-composer.tsx) is exactly the
+    // ambiguity the dropzone-overlay fix has to resolve — logged here so a
+    // hand-check can tell which of the two actually ran.
+    logDnd("pane.drop", { pathCount: paths.length, leafId });
     if (paths.length === 0) return;
     // Appended to the draft rather than attached as pills: a dropped file's path
     // belongs in the text being written, which is what every other app does and

@@ -221,6 +221,12 @@
 .dropzone {
   position: absolute;
   inset: 0;
+  /* Cosmetic only, like its siblings .editorOverlay and .gut: without this,
+     it sits above .editorTextarea and swallows dragover/drop once mounted,
+     so handleDragOver stops running past the first event and a drop
+     released while it is visible reaches handlePaneDrop (append) instead of
+     handleDrop (caret-precise), or is cancelled outright. */
+  pointer-events: none;
   border: 1.5px dashed var(--accent);
   border-radius: var(--r-3);
   background: rgba(9, 14, 26, 0.93);

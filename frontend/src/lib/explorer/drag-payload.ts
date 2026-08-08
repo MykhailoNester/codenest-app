@@ -5,10 +5,20 @@
 // must keep finding exactly this constant, its use here, and this file's
 // own round-trip test.
 //
-// This is a same-window HTML5 drag: it never reaches Tauri's
-// `onDragDropEvent` (that path stays exactly as it is for OS/Finder drops —
-// see `hooks/use-terminal-file-drop.ts`), so it needs its own MIME type and
-// its own read/write helpers.
+// This drag *does* reach Tauri's `onDragDropEvent` for an in-window
+// HTML5 drag — with an empty `paths` array, because wry's native drop
+// handler only ever reads `NSFilenamesPboardType`, which a same-window
+// string-only drag never populates. On macOS the destination-side DOM
+// events (`dragenter`/`dragover`/`drop`) never fire at all for such a
+// drag — wry's `WryWebView` overrides the whole `NSDraggingDestination`
+// protocol and `tauri-runtime-wry`'s handler always returns `true`, so
+// WKWebView's own drag processing, and therefore the document's DOM drop
+// events, are never reached. The drop is instead resolved from the
+// source-side `dragend` (which wry does not intercept) or from that
+// same empty-paths native event — see `hooks/use-terminal-file-drop.ts`
+// and `lib/explorer/active-path-drag.ts`.
+
+import { beginPathDrag } from "./active-path-drag";
 
 export const CODENEST_PATHS_MIME = "application/x-codenest-paths";
 
@@ -17,11 +27,17 @@ export const CODENEST_PATHS_MIME = "application/x-codenest-paths";
  * `dt` under the Codenest MIME type as a JSON array, plus a `text/plain`
  * fallback so dropping into any ordinary text field still yields something
  * usable — newline-joined, so a single path is just that path.
+ *
+ * Also records `paths` as the in-flight path drag (`beginPathDrag`): this is
+ * the one function every Codenest path drag source calls, so recording here
+ * rather than at each of the three call sites (`explorer-tree.tsx`,
+ * `changed-list.tsx`) makes a future fourth source unable to forget it.
  */
 export function writePathDragPayload(dt: DataTransfer, paths: string[]): void {
   dt.setData(CODENEST_PATHS_MIME, JSON.stringify(paths));
   dt.setData("text/plain", paths.join("\n"));
   dt.effectAllowed = "copy";
+  beginPathDrag(paths);
 }
 
 /**
