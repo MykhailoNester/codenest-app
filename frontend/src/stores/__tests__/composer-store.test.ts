@@ -303,6 +303,34 @@ describe("composer-store", () => {
     });
   });
 
+  describe("recall", () => {
+    it("replaces the draft with the history entry and leaves history alone", () => {
+      useComposerStore.setState({
+        panes: { "pane-1": { draft: "in progress", pills: [], queued: [], fanoutAll: false } },
+        history: ["second most recent", "fix the parser bug"],
+      });
+
+      useComposerStore.getState().recall(1, "pane-1");
+
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe("fix the parser bug");
+      expect(useComposerStore.getState().history).toEqual([
+        "second most recent",
+        "fix the parser bug",
+      ]);
+    });
+
+    it("is a no-op for an out-of-range index", () => {
+      useComposerStore.setState({
+        panes: { "pane-1": { draft: "unchanged", pills: [], queued: [], fanoutAll: false } },
+        history: ["only entry"],
+      });
+
+      useComposerStore.getState().recall(5, "pane-1");
+
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe("unchanged");
+    });
+  });
+
   describe("history persistence", () => {
     it("survives a store re-import via the stubbed localStorage", async () => {
       localStorage.setItem(

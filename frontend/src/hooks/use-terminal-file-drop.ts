@@ -63,6 +63,7 @@ import { findLeaf, paneKind, type PaneLeaf } from "../lib/layout-tree";
 import { sendTerminalInput } from "../lib/ipc";
 import { useTerminalStore } from "../stores/terminal-store";
 import { useComposerStore } from "../stores/composer-store";
+import { focusComposerAt } from "../lib/composer-focus";
 
 // Bracketed-paste markers (ANSI/XTerm bracketed paste mode).
 const BP_START = "\x1b[200~";
@@ -193,10 +194,20 @@ export function useTerminalFileDrop(): void {
         // a drop means everywhere else. Dropping on a shell pane keeps the
         // existing bracketed-paste behaviour.
         if (target.kind === "agent") {
-          useComposerStore.getState().insertPathsIntoDraft(target.id, paths);
-          // Focus the pane so the draft the paths just landed in is the one the
-          // user is typing into.
+          // `insertPathsIntoDraft` with no caret appends and returns
+          // end-of-text — the same default `focusComposerAt` falls back to
+          // when called with no caret, so this explicit request and the
+          // composer's own external-draft effect agree and coalesce into one
+          // frame; no suppression is needed here (unlike the in-editor drop
+          // in `agent-composer.tsx`, which requests a specific mid-draft
+          // caret the effect cannot know).
+          const caret = useComposerStore.getState().insertPathsIntoDraft(target.id, paths);
+          // Store-level pane focus (which pane is "current") is distinct from
+          // the DOM caret/focus restore below: this makes the pane the one
+          // the user is typing into, `focusComposerAt` is what actually
+          // focuses its textarea and places the caret.
           useTerminalStore.getState().setFocusedLeaf(target.id);
+          focusComposerAt(target.id, caret);
           return;
         }
 

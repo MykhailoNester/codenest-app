@@ -32,6 +32,7 @@ import { readPathDragPayload } from "../../lib/explorer/drag-payload";
 import { useAgentSessionStore } from "../../stores/agent-session-store";
 import { useTerminalStore } from "../../stores/terminal-store";
 import { collectLeaves, paneKind } from "../../lib/layout-tree";
+import { focusComposerAt, resizeComposerEditor } from "../../lib/composer-focus";
 import styles from "./agent-composer.module.css";
 
 interface AgentComposerProps {
@@ -49,7 +50,6 @@ interface AgentComposerProps {
 }
 
 const MAX_HISTORY_PILLS = 6;
-const EDITOR_MAX_HEIGHT_PX = 240;
 
 function pillToMessagePill(pill: ContextPill): UserMessagePill {
   switch (pill.kind) {
@@ -567,6 +567,33 @@ export function AgentComposer({
   const [dragCount, setDragCount] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  // Seeded from the mount-time draft, not "": a composer that remounts with a
+  // surviving draft (session restart, a sibling pane closing — see
+  // `agent-pane.tsx`'s unmount cleanup) must not read as an external change
+  // and steal focus on mount.
+  const lastLocalDraftRef = useRef(draft);
+
+  // Default-on focus/caret restore for any draft change that did not come
+  // from this textarea's own `onChange` (`recall`, either drop path, and any
+  // future store mutator that inserts text) — so a new writer cannot
+  // silently ship without the restore, which is how this bug class started.
+  // It deliberately does not touch pane focus (`setFocusedLeaf`): which pane
+  // gets focus is the call site's business (`use-terminal-file-drop.ts`,
+  // `agent-pane.tsx`), this effect only restores the DOM caret/box once a
+  // pane's own composer is the thing that changed.
+  useEffect(() => {
+    if (draft === lastLocalDraftRef.current) return;
+    lastLocalDraftRef.current = draft;
+    // A clear is never an insertion whose caret the user needs, and `send`
+    // only clears *after* `await Promise.all(agentSend …)`
+    // (`composer-store.ts`), i.e. an unbounded time after the keystroke that
+    // triggered it — by which point the user may have clicked into a shell
+    // pane, a sibling composer, or a modal input. Restoring focus on that
+    // transition would yank it back mid-typing, which is exactly the class
+    // of bug this mechanism exists to remove, not reintroduce.
+    if (draft === "") return;
+    focusComposerAt(leafId);
+  }, [draft, leafId]);
 
   const messagePills = pills.map(pillToMessagePill);
   const composedText = buildUserMessageText(messagePills, draft);
@@ -578,16 +605,14 @@ export function AgentComposer({
   const sendDisabled = composedText.trim().length === 0 || sessionEnded;
   const lineCount = draft.length === 0 ? 0 : draft.split("\n").length;
 
-  /** The auto-grow measurement, shared by typing and by a drop that inserts
-   *  text the user did not type. */
-  function resizeEditor(el: HTMLTextAreaElement): void {
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, EDITOR_MAX_HEIGHT_PX)}px`;
-  }
-
   function handleDraftChange(el: HTMLTextAreaElement): void {
+    // Marks this value as locally originated *before* the store write, so the
+    // effect above sees `draft === lastLocalDraftRef.current` and skips it.
+    // This is what keeps ordinary typing and native ⌘Z undo (both arrive
+    // through this same `onChange`) from jumping the caret to end-of-text.
+    lastLocalDraftRef.current = el.value;
     setDraft(leafId, el.value);
-    resizeEditor(el);
+    resizeComposerEditor(el);
   }
 
   function handleSend(): void {
@@ -671,15 +696,16 @@ export function AgentComposer({
     // is already the right offset.
     const caret = el.selectionStart;
     const nextCaret = insertPathsIntoDraft(leafId, paths, caret);
+    // This write is synchronous (`insertPathsIntoDraft`'s `set` has already
+    // run), so reading the store here — before the external-draft effect's
+    // passive-effect flush runs — marks this value as locally originated.
+    // Without this, the effect's caret-less default request could win a
+    // scheduling race against the specific caret requested below and land the
+    // caret at end-of-text instead of just past the insertion.
+    lastLocalDraftRef.current = useComposerStore.getState().panes[leafId]?.draft ?? "";
     // The store owns the value, so the DOM catches up on the next render —
-    // restore focus and place the caret past the insertion after it does.
-    requestAnimationFrame(() => {
-      const current = textareaRef.current;
-      if (!current) return;
-      current.focus();
-      current.setSelectionRange(nextCaret, nextCaret);
-      resizeEditor(current);
-    });
+    // `focusComposerAt` defers to a frame so it reads the post-update value.
+    focusComposerAt(leafId, nextCaret);
   }
 
   return (
@@ -750,6 +776,7 @@ export function AgentComposer({
           <textarea
             ref={textareaRef}
             data-agent-composer
+            data-composer-pane-id={leafId}
             className={styles.editorTextarea}
             value={draft}
             onChange={(e) => handleDraftChange(e.currentTarget)}
@@ -832,7 +859,14 @@ export function AgentComposer({
             type="button"
             className={styles.hpill}
             title={entry}
-            onClick={() => recall(i, leafId)}
+            onClick={() => {
+              recall(i, leafId);
+              // Explicit, not redundant with the effect above: recalling text
+              // identical to what is already in the draft leaves `draft`
+              // unchanged, so the effect never fires and this call is the
+              // only thing that returns focus to the editor.
+              focusComposerAt(leafId);
+            }}
           >
             ↺ {entry}
           </button>
