@@ -7,6 +7,18 @@ import platformdirs
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 APP_SUPPORT = Path.home() / "Library" / "Application Support" / "com.codenest.dashboard"
+# App-data root for the `work` profile, a sibling of the packaged app's own
+# directory. Mirrored by DEV_APP_DATA_DIR_NAME in src-tauri/src/dev_env.rs,
+# which points the shell at the same root.
+DEV_APP_DATA_DIR_NAME = "com.codenest.dev"
+
+# `demo`   — synthetic data in the repo (data/codenest.demo.db); the dev default.
+# `prod`   — the real database: app-support when packaged, data/codenest.db in dev.
+# `work`   — persistent dev workboard in its own app-data root, outside the repo
+#            and outside the packaged app's directory, so neither a repo clean nor
+#            a wipe of com.codenest.dashboard/ can take it. Dev only: the Rust
+#            shell hardcodes `prod` in release builds.
+_KNOWN_ENVS = frozenset({"demo", "prod", "work"})
 
 
 def _is_frozen() -> bool:
@@ -18,7 +30,11 @@ def _resolve_env() -> str:
     # Packaged (frozen) builds serve real users → prod. Every dev run defaults
     # to demo so day-to-day work can never touch the real database.
     default_env = "prod" if _is_frozen() else "demo"
-    return os.environ.get("CODENEST_ENV", default_env).strip().lower()
+    env = os.environ.get("CODENEST_ENV", default_env).strip().lower()
+    # An unrecognised value falls back to the default rather than silently
+    # landing in the `prod` branch — a typo must never open a different database
+    # than the one the operator meant.
+    return env if env in _KNOWN_ENVS else default_env
 
 
 def _resolve_app_data_dir() -> Path:
@@ -26,7 +42,11 @@ def _resolve_app_data_dir() -> Path:
     raw = os.environ.get("CODENEST_APP_DATA_DIR")
     if raw:
         return Path(raw)
-    # 2. Cross-platform user-data dir via platformdirs (standalone dev / tests).
+    # 2. `work` keeps its own root so it shares nothing with the packaged app;
+    #    this is the same directory WorkspaceManager resolves for the shell.
+    if _resolve_env() == "work":
+        return Path(platformdirs.user_data_dir(DEV_APP_DATA_DIR_NAME))
+    # 3. Cross-platform user-data dir via platformdirs (standalone dev / tests).
     return Path(platformdirs.user_data_dir("Codenest", "Codenest"))
 
 
@@ -36,10 +56,19 @@ def _resolve_db_path() -> Path:
     if env_path:
         return Path(env_path)
 
-    # 2. Named environment selects between the demo and prod databases.
-    if _resolve_env() == "demo":
+    # 2. Named environment selects the database.
+    env = _resolve_env()
+
+    if env == "demo":
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         return DATA_DIR / "codenest.demo.db"
+
+    if env == "work":
+        # Persistent dev workboard: lives alongside its own workspace and
+        # org-agents in the dev app-data root.
+        work_dir = _resolve_app_data_dir()
+        work_dir.mkdir(parents=True, exist_ok=True)
+        return work_dir / "codenest.db"
 
     # prod
     if _is_frozen():

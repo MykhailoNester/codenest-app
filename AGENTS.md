@@ -73,7 +73,7 @@ polls for pending runs and spawns headless `claude` processes. The Command Cente
 
 | Var | Effect | Default |
 |---|---|---|
-| `CODENEST_ENV` | `demo` or `prod` — selects the DB file | `demo` in dev; `prod` when packaged |
+| `CODENEST_ENV` | `demo`, `prod` or `work` — selects the DB file and app-data root; an unrecognised value falls back to the default | `demo` in dev; `prod` when packaged |
 | `CODENEST_DB_PATH` | Absolute DB path override (tests/CI); wins over `CODENEST_ENV` | unset |
 | `CODENEST_SIDECAR_PORT` | Sidecar port for standalone runs (the shell pins 8002) | `8002` |
 | `CODENEST_APP_DATA_DIR` | App-data root; injected by the shell | platformdirs fallback |
@@ -83,6 +83,26 @@ polls for pending runs and spawns headless `claude` processes. The Command Cente
 
 DB locations: dev demo `data/codenest.demo.db`; dev prod `data/codenest.db`;
 packaged `~/Library/Application Support/com.codenest.dashboard/codenest.db`.
+
+### `.env.local` and the `work` profile
+
+In debug builds only, the Rust shell loads `<repo root>/.env.local` into its
+environment before resolving any path (`src-tauri/src/dev_env.rs`), so a machine
+can pin a dev profile without prefixing every command. The file is gitignored —
+a fresh clone has none and keeps the `demo` default — and `.env.local.example`
+documents it. Only `CODENEST_*` keys are read (a stray line must not be able to
+rewrite `PATH` for the app and every terminal it spawns), and a variable already
+exported in the shell wins over the file. Packaged builds ignore it entirely.
+
+`CODENEST_ENV=work` is the persistent dev workboard, for real task tracking
+during development. It relocates the *whole* app-data root to
+`~/Library/Application Support/com.codenest.dev/` — database, workspace,
+org-agents and schedule artifacts — so it shares nothing with the packaged app.
+Nothing of it lives in the repo, so `git clean -xdf` cannot take it, and wiping
+`com.codenest.dashboard/` to test a clean first run cannot either. Both sides
+derive that directory independently and must agree: `DEV_APP_DATA_DIR_NAME` in
+`src-tauri/src/dev_env.rs` mirrors the constant of the same name in
+`app/config.py`.
 
 ## Hard rules
 

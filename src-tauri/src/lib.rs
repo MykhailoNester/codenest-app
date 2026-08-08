@@ -1,5 +1,6 @@
 mod agent;
 mod commands;
+mod dev_env;
 mod fswatch;
 mod pty;
 mod scheduler;
@@ -328,6 +329,11 @@ fn list_live_panes(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Dev only, and first: `.env.local` chooses the profile, and both the
+    // app-data root (WorkspaceManager) and the sidecar's database read
+    // CODENEST_ENV out of the process environment further down.
+    dev_env::load_env_local();
+
     let pty_manager = Arc::new(pty::PtyManager::new());
     // Pre-clone for the scheduler dispatch loop so it doesn't contend with the
     // on_window_event move closure that also needs the Arc.

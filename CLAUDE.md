@@ -11,4 +11,10 @@
   `manifest.json` and bump the manifest `version` in the same change.
 - Packaged-app debugging: the prod DB lives in
   `~/Library/Application Support/com.codenest.dashboard/` and survives reinstalls — wipe that
-  directory to test a clean first run.
+  directory to test a clean first run. That wipe is safe for real dev task data: the `work`
+  profile keeps its own root (see below).
+- This machine runs `pnpm tauri:dev` under `CODENEST_ENV=work` via the gitignored `.env.local`,
+  so the dev app opens the persistent workboard at
+  `~/Library/Application Support/com.codenest.dev/codenest.db`. Treat it as real data — it is
+  not the demo DB and `make seed-demo` never writes to it. To run against demo instead for a
+  one-off, prefix the command: `CODENEST_ENV=demo pnpm tauri:dev` (the shell wins over the file).

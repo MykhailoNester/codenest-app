@@ -26,6 +26,8 @@ src-tauri/resources/sidecar/
 # Env
 .env
 scripts/.env
+# Per-machine dev profile for `pnpm tauri:dev`; .example is committed instead
+.env.local
 
 # OS
 .DS_Store

@@ -19,6 +19,10 @@ use tauri::{AppHandle, Manager, State};
 /// | `org_agents_dir`      | `<app_data_dir>/org-agents/`                     |
 /// | `bundle_resources_dir`| `<resource_dir>/org-agents/`  (dev fallback:     |
 /// |                       |  `<CARGO_MANIFEST_DIR>/resources/org-agents/`)   |
+///
+/// Under the dev `work` profile (`CODENEST_ENV=work`, debug builds only) the
+/// root becomes `<...>/com.codenest.dev/` instead of `<...>/<identifier>/`, so
+/// the persistent dev workboard has its own workspace and org-agents.
 pub struct WorkspaceManager {
     app_data_dir: PathBuf,
     workspace_dir: PathBuf,
@@ -33,10 +37,21 @@ impl WorkspaceManager {
     /// `<CARGO_MANIFEST_DIR>/resources/org-agents` directory so `cargo tauri dev`
     /// works without a bundled `.app`.
     pub fn new(app: &AppHandle) -> Result<Self, String> {
-        let app_data_dir = app
+        let resolved_app_data_dir = app
             .path()
             .app_data_dir()
             .map_err(|e| format!("cannot resolve app_data_dir: {e}"))?;
+
+        // The dev `work` profile relocates the whole root to a sibling directory
+        // so the persistent workboard shares nothing with the packaged app —
+        // wiping `com.codenest.dashboard/` to test a clean first run leaves it
+        // untouched. `is_work_env()` is false in release, so this is a no-op there.
+        let app_data_dir = match resolved_app_data_dir.parent() {
+            Some(parent) if crate::dev_env::is_work_env() => {
+                parent.join(crate::dev_env::DEV_APP_DATA_DIR_NAME)
+            }
+            _ => resolved_app_data_dir,
+        };
 
         let workspace_dir = app_data_dir.join("workspace");
         let org_agents_dir = app_data_dir.join("org-agents");

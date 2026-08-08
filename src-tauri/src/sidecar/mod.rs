@@ -382,8 +382,10 @@ fn spawn_sidecar(
             .parent()
             .expect("CARGO_MANIFEST_DIR has no parent");
         // Dev defaults to the demo database (data/codenest.demo.db) so day-to-day
-        // work never touches the real data. Opt into the real DB with
-        // `CODENEST_ENV=prod pnpm tauri:dev`; config.py resolves the path.
+        // work never touches the real data. `CODENEST_ENV=prod` opts into the
+        // repo-local dev DB; `CODENEST_ENV=work` opts into the persistent dev
+        // workboard outside the repo. config.py resolves the path. The value
+        // usually arrives from `.env.local` via dev_env::load_env_local().
         let env = std::env::var("CODENEST_ENV").unwrap_or_else(|_| "demo".to_string());
         let uvicorn = project_root.join(".venv/bin/uvicorn");
         if !uvicorn.exists() {
