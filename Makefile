@@ -6,10 +6,15 @@
 
 .PHONY: check-rust check-python test-python check-frontend test-frontend build-frontend check-all seed-demo
 
+# .venv's compiled extensions (mypy, pydantic_core, ...) are arm64-only; forcing
+# this slice keeps them loadable even when the invoking shell is running under
+# Rosetta, where a universal python3 binary would otherwise default to x86_64.
+PYTHON := arch -arm64 python3
+
 # Seed the demo database (data/codenest.demo.db) with synthetic data.
 # Pass ARGS=--reset to rebuild it from scratch.
 seed-demo:
-	python scripts/seed_demo.py $(ARGS)
+	$(PYTHON) scripts/seed_demo.py $(ARGS)
 
 check-rust:
 	cd src-tauri && cargo check
@@ -18,10 +23,10 @@ check-rust:
 check-python:
 	ruff format --check .
 	ruff check .
-	mypy app/
+	$(PYTHON) -m mypy app/
 
 test-python:
-	python -m pytest app/tests tests/sidecar -q
+	$(PYTHON) -m pytest app/tests tests/sidecar -q
 
 check-frontend:
 	pnpm --filter frontend run typecheck
