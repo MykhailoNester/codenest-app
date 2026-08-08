@@ -8,6 +8,7 @@ import {
   type LibraryItem,
 } from "../lib/api";
 import { Shell } from "../components/layout/shell";
+import { formatCount } from "../lib/format-helpers";
 import styles from "./library.module.css";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -240,7 +241,7 @@ function LibraryEditor({
           aria-invalid={bodyOverLimit}
         />
         <span className={styles.hint}>
-          {bodyBytes.toLocaleString()} / {MAX_BODY_BYTES.toLocaleString()} bytes
+          {formatCount(bodyBytes)} / {formatCount(MAX_BODY_BYTES)} bytes
           {bodyOverLimit ? " — over limit" : ""}
         </span>
       </div>

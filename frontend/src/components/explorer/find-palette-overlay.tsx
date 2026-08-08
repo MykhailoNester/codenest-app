@@ -25,6 +25,7 @@ import { useExplorerStore } from "../../stores/explorer-store";
 import { useExplorerHotkey } from "../../hooks/use-explorer-hotkey";
 import { useFindActions } from "../../hooks/use-find-actions";
 import { resolveRoots } from "../../lib/explorer/roots";
+import { formatCount } from "../../lib/format-helpers";
 import { ExplorerFind } from "./explorer-find";
 import styles from "./workspace-navigator.module.css";
 import overlayStyles from "./find-palette-overlay.module.css";
@@ -137,7 +138,7 @@ export function FindPaletteOverlay(): ReactElement | null {
         </div>
         <ExplorerFind roots={roots} />
         <div className={overlayStyles.foot}>
-          {totalFiles.toLocaleString()} files indexed across {indexedRoots}{" "}
+          {formatCount(totalFiles)} files indexed across {indexedRoots}{" "}
           roots
           {watchBackend ? ` · watcher: ${watchBackend}` : ""}
         </div>

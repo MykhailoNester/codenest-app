@@ -104,6 +104,16 @@ export function formatDurationMs(ms: number | null | undefined): string {
 }
 
 /**
+ * Format an integer with thousands separators, e.g. 1234567 -> "1,234,567".
+ * Pinned to en-US so the grouping separator stays stable regardless of the
+ * host machine's locale (bare toLocaleString() varies, e.g. "1 234" under
+ * locales that group with a space instead of a comma).
+ */
+export function formatCount(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
+/**
  * Format a byte count as a human-readable string (B / KB / MB / GB / TB).
  */
 export function formatBytes(bytes: number): string {

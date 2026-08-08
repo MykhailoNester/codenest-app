@@ -66,6 +66,7 @@ import { useDebounce } from "../hooks/use-debounce";
 import {
   relativeTime as fmtRelTime,
   formatDurationMs as fmtDurationMs,
+  formatCount,
 } from "../lib/format-helpers";
 import styles from "./schedules.module.css";
 
@@ -375,7 +376,7 @@ function SummaryCard({ run }: { run: ScheduleRun }): ReactElement {
           </span>
           {run.tokens_in != null && (
             <span className={styles.summaryMeta}>
-              {(run.tokens_in + (run.tokens_out ?? 0)).toLocaleString()} tokens
+              {formatCount(run.tokens_in + (run.tokens_out ?? 0))} tokens
             </span>
           )}
           {run.cost_usd != null && (

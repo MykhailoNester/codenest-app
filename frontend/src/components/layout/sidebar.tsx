@@ -8,6 +8,7 @@ import {
 } from "../../lib/api";
 import { useProviderStore } from "../../stores/provider-store";
 import { openTerminalsWindow } from "../../lib/ipc";
+import { formatCount } from "../../lib/format-helpers";
 import { NAV_ITEMS, NAV_GROUPS, FEATURES } from "../../lib/nav-items";
 import { useNavGroups } from "../../stores/nav-group-store";
 import { Icon } from "../icon";
@@ -334,8 +335,8 @@ function SidebarInner({
                 tokens
               </span>
               <span style={{ fontSize: "9.5px" }}>
-                {spend.tokens_in.toLocaleString()} in /{" "}
-                {spend.tokens_out.toLocaleString()} out
+                {formatCount(spend.tokens_in)} in /{" "}
+                {formatCount(spend.tokens_out)} out
               </span>
             </div>
           )}
