@@ -197,6 +197,13 @@ function ContextPicker({
           placeholder="Filter templates and tasks…"
           aria-label="Filter context"
           autoFocus
+          // The needle is compared to lowercased titles, slugs and `#<id>`
+          // (see the filters above), so an OS word substitution would
+          // silently empty the list.
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          autoComplete="off"
         />
       </div>
       <div className={styles.pickerHeader}>Templates</div>
@@ -747,6 +754,11 @@ export function AgentComposer({
           >
             {renderMentionOverlay(draft)}
           </div>
+          {/* macOS applies OS-level autocorrect, text replacement and sentence
+              capitalisation inside a WKWebView, which rewrites a prompt as it
+              is typed. `spellCheck` alone only drops the red underline; the
+              WebKit-only `autocorrect`/`autocapitalize` are the pair that stop
+              the substitution (Chromium ignores them, which is harmless). */}
           <textarea
             ref={textareaRef}
             data-agent-composer
@@ -763,6 +775,10 @@ export function AgentComposer({
             onDragLeave={() => setDragCount(null)}
             onDrop={handleDrop}
             placeholder="Message the agent…"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
+            autoComplete="off"
           />
           <span className={styles.gut}>
             {lineCount} lines · {draft.length} chars

@@ -286,6 +286,14 @@ export function OmniBar(): ReactElement {
         }}
         placeholder="Ask, /command, @reference, or ?search…"
         aria-label="Universal prompt bar"
+        // The first character selects the grammar in classifyIntent
+        // (lib/api.ts), and `@library:<slug>` is rejected by a
+        // lowercase-only regex, so an OS rewrite can change which branch
+        // runs or turn a valid slug into an error toast.
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
+        autoComplete="off"
       />
       <span className={`${styles.kind} ${KIND_CLASS[intent.kind] ?? ""}`}>
         {voice.listening ? "listening…" : KIND_LABEL[intent.kind]}
