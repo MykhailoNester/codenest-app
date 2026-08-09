@@ -1,13 +1,20 @@
 /**
- * Prompt syntax — pure string logic shared by the omni-bar and the agent
- * composer. Deliberately zero imports, so this module can never participate
- * in an import cycle (the reason `lib/__tests__/module-load-order.test.ts`
- * exists) and no test needs to mock anything to use it.
+ * Prompt *syntax* — pure string logic, no React, no fetch, zero imports.
+ * Shared by the omni-bar and the agent composer, which arrived here from two
+ * branches independently; the no-imports rule is what let both take this file
+ * without fighting, and it also keeps the module out of any import cycle (the
+ * reason `lib/__tests__/module-load-order.test.ts` exists).
  *
  * `composer-commands.ts` owns command *semantics* (the registry, dispatch,
  * argument resolution) and imports from here; this module owns syntax only —
  * "is this text a slash command line", "is this text a library reference",
  * "which sigil menu is the caret inside".
+ *
+ * `classifyIntent` mirrors `app/services/intent_service.classify`
+ * (`app/services/intent_service.py`). The two must stay in lockstep: this
+ * module is the client-side preview, the Python function is the server-side
+ * (currently unused by the bar, but test-covered independently) mirror. Do
+ * not edit `classifyIntent`'s body without updating the Python side too.
  */
 
 // ---------------------------------------------------------------------------
@@ -15,7 +22,11 @@
 // ---------------------------------------------------------------------------
 
 export type IntentKind =
-  "command-palette" | "slash" | "reference" | "search" | "prompt";
+  | "command-palette"
+  | "slash"
+  | "reference"
+  | "search"
+  | "prompt";
 
 export interface IntentResult {
   kind: IntentKind;
@@ -56,14 +67,23 @@ export type LibraryRef =
   | { ok: true; slug: string }
   | { ok: false; reason: "empty" | "invalid"; slug: string };
 
-/** Reads the `library:<slug>` form out of an `@`-reference payload
- *  (the text after `@`). Returns null when the payload is not a library ref. */
+/**
+ * Parses the text *after* the leading `@` (i.e. an `IntentResult.payload`
+ * for a `"reference"`-kind result) as a `library:<slug>` reference.
+ *
+ * Returns `null` when `payload` does not start with `library:`
+ * (case-insensitive) — i.e. it is not a library reference at all, so the
+ * caller should fall through to its ordinary `@` handling (project/member
+ * suggestions).
+ */
 export function parseLibraryRef(payload: string): LibraryRef | null {
-  if (!payload.toLowerCase().startsWith("library:")) return null;
+  if (!/^library:/i.test(payload)) return null;
   const rest = payload.slice("library:".length);
   const slug = (rest.split(/\s/, 1)[0] ?? "").toLowerCase();
-  if (slug.length === 0) return { ok: false, reason: "empty", slug };
-  if (!LIBRARY_SLUG_RE.test(slug)) return { ok: false, reason: "invalid", slug };
+  if (!slug) return { ok: false, reason: "empty", slug: "" };
+  if (!LIBRARY_SLUG_RE.test(slug)) {
+    return { ok: false, reason: "invalid", slug };
+  }
   return { ok: true, slug };
 }
 

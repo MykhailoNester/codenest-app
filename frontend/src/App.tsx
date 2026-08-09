@@ -25,6 +25,7 @@ import {
   SCREENSHOT_HOTKEY_DEFAULT,
 } from "./lib/api";
 import { FEATURES, TERMINAL_ROUTE } from "./lib/nav-items";
+import { OMNI_EVENT_OPEN_PALETTE } from "./lib/omni-commands";
 import {
   isRegistered as isShortcutRegistered,
   register as registerShortcut,
@@ -295,12 +296,13 @@ function AppInner(): ReactElement {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Universal Prompt Bar dispatches this when the user submits
-  // a slash command or an empty input; we open the existing palette.
+  // The OmniBar dispatches this when the user submits an empty input or
+  // picks its "Open Command Palette" action; we open the existing palette.
+  // (Slash commands execute inline in the bar now — see omni-commands.ts.)
   useEffect(() => {
     const open = () => setPaletteOpen(true);
-    document.addEventListener("omni:open-palette", open);
-    return () => document.removeEventListener("omni:open-palette", open);
+    document.addEventListener(OMNI_EVENT_OPEN_PALETTE, open);
+    return () => document.removeEventListener(OMNI_EVENT_OPEN_PALETTE, open);
   }, []);
 
   useEffect(() => {

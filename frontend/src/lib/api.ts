@@ -2199,6 +2199,7 @@ export type LibraryItemPatch = Partial<
 export function useLibraryItems(
   q?: string,
   tag?: string,
+  enabled = true,
 ): UseQueryResult<{ items: LibraryItem[] }, SidecarError> {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
@@ -2210,13 +2211,21 @@ export function useLibraryItems(
       fetchSidecar<{ items: LibraryItem[] }>(
         qs ? `/api/v1/library?${qs}` : "/api/v1/library",
       ),
+    enabled,
     staleTime: 30_000,
   });
 }
 
-/** One library item by slug, or null when there is none. The shared resolver
- *  for `@library:<slug>` — the list endpoint returns only the newest 50.
- *  Rejects (does not swallow) on any non-404 failure. */
+/**
+ * One library item by slug, or `null` when there is none. The shared resolver
+ * for `@library:<slug>`, needed because the list endpoint returns only the
+ * newest 50.
+ *
+ * A 404 resolves to `null` rather than throwing — the omni-bar's `@`
+ * resolution, the agent composer's mention menu and `useLibraryItemBySlug`
+ * below all need "not found" to be a value, not an exception. Any *other*
+ * failure still rejects and is not swallowed.
+ */
 export async function fetchLibraryItemBySlug(
   slug: string,
 ): Promise<LibraryItem | null> {
