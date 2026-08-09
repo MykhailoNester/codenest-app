@@ -603,6 +603,73 @@ export function useTask(taskId: number): UseQueryResult<Task, SidecarError> {
   });
 }
 
+// Standalone fetchers (no hook — callers invalidate ["tasks"] / ["dashboard"]
+// themselves after a write) for the Work Board's write paths. `tasks.tsx`
+// used to call `fetchSidecar` inline for these three; relocated here so
+// every sidecar URL for tasks lives in `api.ts`, following the
+// createProfile/updateProfile precedent above.
+
+export interface TaskCreateInput {
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string;
+  effort: string | null;
+  assignee_id: number | null;
+  project_id: number;
+}
+
+export function createTask(input: TaskCreateInput): Promise<{ id: number }> {
+  return fetchSidecar<{ id: number }>("/api/v1/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export type TaskPatch = Partial<TaskCreateInput>;
+
+export function updateTask(
+  id: number,
+  patch: TaskPatch,
+): Promise<{ ok: true }> {
+  return fetchSidecar<{ ok: true }>(`/api/v1/tasks/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export function changeTaskStatus(
+  id: number,
+  status: string,
+): Promise<{ ok: true }> {
+  return fetchSidecar<{ ok: true }>(`/api/v1/tasks/${id}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+/**
+ * Builds the next `board_wip_limits` map from `current` (delete the key when
+ * `limit` is null, else set it) and writes it through the existing settings
+ * endpoint. Never mutates `current` in place — the caller (`useLookups()`'s
+ * cached value) is a React Query result, and mutating it in place trips
+ * `react-hooks/immutability`. Does not invalidate `["lookups"]` itself,
+ * mirroring `features-tab.tsx`'s upsertSetting call — the caller does that.
+ */
+export function setBoardWipLimit(
+  current: Readonly<Record<string, number>>,
+  statusSlug: string,
+  limit: number | null,
+): Promise<SettingOut> {
+  const next = { ...current };
+  if (limit === null) delete next[statusSlug];
+  else next[statusSlug] = limit;
+  return upsertSetting("board_wip_limits", next);
+}
+
 // ─── Task labels ──────────────────────────────────────────────────────────────
 //
 // Available labels come from `useTaxonomy("task_label")`, not from a fetcher
