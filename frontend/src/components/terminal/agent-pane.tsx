@@ -38,6 +38,15 @@ import { logDnd } from "../../lib/drop-diagnostics";
 import { emptyConversation } from "../../lib/agent-conversation";
 import { AgentConversation } from "./agent-conversation";
 import { AgentComposer } from "./agent-composer";
+import { AgentViewPanel } from "./agent-view-panel";
+import {
+  findOrchestration,
+  findSubagent,
+  listAgentViews,
+  MAIN_VIEW,
+  resolveView,
+  type AgentViewId,
+} from "../../lib/agent-views";
 import { AgentSessionHud } from "./agent-session-hud";
 import { Icon } from "../icon";
 import styles from "./agent-pane.module.css";
@@ -218,6 +227,7 @@ export function AgentPane({
   const [lastControlNote, setLastControlNote] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
   const [dropActive, setDropActive] = useState(false);
+  const [selectedView, setSelectedView] = useState<AgentViewId>(MAIN_VIEW);
   /**
    * Set by [`requestRestart`] immediately before it bumps `retryToken`, and
    * read (then cleared) by the lifecycle effect's cleanup. This is how the
@@ -440,6 +450,17 @@ export function AgentPane({
   // `ConversationState` cannot be forgotten here.
   const conv = conversation ?? emptyConversation();
 
+  // Which agent this pane's body is showing. `resolveView` re-derives it every
+  // render so a selection whose sub-agent or run has gone — `/clear`, a
+  // restart, a session that exited — falls back to the transcript instead of
+  // rendering an empty panel for something that no longer exists.
+  const effectiveView = resolveView(conv, selectedView);
+  const agentViews = listAgentViews(conv);
+  const viewedSubagent =
+    effectiveView.kind === "subagent" ? findSubagent(conv, effectiveView.id) : null;
+  const viewedRun =
+    effectiveView.kind === "workflow" ? findOrchestration(conv, effectiveView.taskId) : null;
+
   /**
    * Pane-wide drop target, so dragging files onto an agent pane behaves like
    * dragging them onto a shell pane: anywhere inside the pane works, not just
@@ -545,14 +566,24 @@ export function AgentPane({
       <AgentSessionHud state={conv} cwd={cwd} paneId={leafId} />
 
       <div className={styles.body}>
-        <AgentConversation
-          state={conv}
-          isFocusedPane={isFocused && active}
-          onAllowPermission={handleAllow}
-          onAllowPermissionSession={handleAllowSession}
-          onDenyPermission={handleDeny}
-          lastControlNote={lastControlNote}
-        />
+        {effectiveView.kind === "main" ? (
+          <AgentConversation
+            state={conv}
+            isFocusedPane={isFocused && active}
+            onAllowPermission={handleAllow}
+            onAllowPermissionSession={handleAllowSession}
+            onDenyPermission={handleDeny}
+            lastControlNote={lastControlNote}
+          />
+        ) : viewedSubagent !== null ? (
+          <AgentViewPanel
+            kind="subagent"
+            block={viewedSubagent}
+            sessionExited={conv.status === "exited"}
+          />
+        ) : viewedRun !== null ? (
+          <AgentViewPanel kind="workflow" run={viewedRun} />
+        ) : null}
 
         {/*
           A dead session shows its status bar *above* a still-mounted composer
@@ -586,6 +617,9 @@ export function AgentPane({
           model={model ?? null}
           permissionMode={permissionMode ?? null}
           onRequestRestart={requestRestart}
+          views={agentViews}
+          selectedView={effectiveView}
+          onSelectView={setSelectedView}
         />
 
         {dropActive ? (

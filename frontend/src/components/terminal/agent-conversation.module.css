@@ -134,7 +134,7 @@
 }
 
 .toolRunErrors {
-  color: var(--danger);
+  color: var(--err);
   flex: none;
 }
 

@@ -44,6 +44,7 @@ import { useAgentCatalogStore, type CatalogProvider } from "../../stores/agent-c
 import {
   activeSubagents,
   buildUserMessageText,
+  formatDuration,
   orchestrationBadgeLabel,
   previewUserMessageLine,
   type ConversationState,
@@ -83,6 +84,12 @@ import { caretAnchor } from "../../lib/caret-anchor";
 import { slashRowToSuggest, mentionRowToSuggest, type SuggestRow } from "../../lib/composer-menu";
 import { SuggestPanel, MentionSourceProbe } from "./composer-suggest";
 import { focusComposerAt, resizeComposerEditor } from "../../lib/composer-focus";
+import {
+  parseViewKey,
+  viewKey,
+  type AgentViewId,
+  type AgentViewOption,
+} from "../../lib/agent-views";
 import { sanitizeComposerInput } from "../../lib/composer-input";
 import styles from "./agent-composer.module.css";
 
@@ -98,6 +105,12 @@ interface AgentComposerProps {
   /** Stop and respawn the session — the only way to apply a provider change,
    *  since the binary and env are fixed at spawn. */
   onRequestRestart: () => void;
+  /** Which agent the pane body is showing. Owned by `<AgentPane/>` because the
+   *  body it switches is the pane's, not the composer's — the control lives
+   *  here only because this is where the user's attention already is. */
+  views?: AgentViewOption[];
+  selectedView?: AgentViewId;
+  onSelectView?: (id: AgentViewId) => void;
 }
 
 const MAX_HISTORY_PILLS = 6;
@@ -686,6 +699,9 @@ export function AgentComposer({
   model,
   permissionMode,
   onRequestRestart,
+  views,
+  selectedView,
+  onSelectView,
 }: AgentComposerProps): ReactElement {
   const pane = useComposerStore((s) => s.panes[leafId]);
   const draft = pane?.draft ?? "";
@@ -1252,6 +1268,27 @@ export function AgentComposer({
           >
             ◈ {subagentCount} sub-agent{subagentCount === 1 ? "" : "s"}
           </span>
+        ) : null}
+        {views !== undefined && views.length > 1 && onSelectView ? (
+          // The pane's view router. A picker rather than a row of tabs: a busy
+          // session can launch a dozen sub-agents, and tabs would either wrap
+          // over the composer or scroll horizontally, both worse than a list
+          // that stays one control wide however many agents there are.
+          <select
+            className={styles.viewPick}
+            aria-label="Show which agent"
+            value={viewKey(selectedView ?? { kind: "main" })}
+            onChange={(e) => onSelectView(parseViewKey(e.currentTarget.value))}
+            data-testid="composer-view-picker"
+          >
+            {views.map((v) => (
+              <option key={v.key} value={v.key}>
+                {v.running ? "◉ " : ""}
+                {v.label}
+                {v.elapsedMs !== null ? ` · ${formatDuration(v.elapsedMs)}` : ""}
+              </option>
+            ))}
+          </select>
         ) : null}
         {orchestrationBadge !== "" ? (
           <span

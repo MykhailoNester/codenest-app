@@ -1,0 +1,158 @@
+/* The non-main pane body: one sub-agent's task, or one orchestration's
+   phases. Shares the conversation area's scroll and padding rhythm so
+   switching views does not shift the surrounding chrome. */
+
+.panel {
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-2);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-1);
+  margin-bottom: 10px;
+}
+
+.title {
+  color: var(--fg-1);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.kind {
+  color: var(--fg-4);
+  flex: none;
+}
+
+.live {
+  margin-left: auto;
+  color: var(--accent);
+  flex: none;
+}
+
+.muted {
+  margin-left: auto;
+  color: var(--fg-4);
+  flex: none;
+}
+
+.task {
+  margin: 0 0 8px;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.activity {
+  margin: 0 0 10px;
+  color: var(--accent);
+}
+
+.section {
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-4);
+}
+
+/* `.muted` carries `margin-left:auto` for the header row; inside a section it
+   is ordinary prose and must not be pushed to the right. */
+.section .muted {
+  margin-left: 0;
+}
+
+.output,
+.outputError {
+  margin: 0;
+  padding: 6px 9px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.outputError {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.agents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
+  min-width: 0;
+}
+
+.agentLabel {
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.agentMeta {
+  color: var(--fg-4);
+  flex: none;
+}
+
+.chip {
+  padding: 0 5px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  color: var(--fg-3);
+  flex: none;
+}
+
+.err {
+  color: var(--err);
+  flex: none;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-4);
+  flex: none;
+}
+
+.dot_start,
+.dot_progress {
+  background: var(--accent);
+}
+
+.dot_done {
+  background: var(--ok);
+}
+
+.dot_error {
+  background: var(--err);
+}
