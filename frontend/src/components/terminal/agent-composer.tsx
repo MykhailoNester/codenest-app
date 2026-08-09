@@ -7,9 +7,11 @@
  * rule).
  *
  * On top of that: a leading `/` opens a caret-anchored command menu
- * (`/model`, `/mode`, `/clear`, `/compact`, `/help` — a mirror of the CLI
- * TUI's own menu, restored because the composer replaced a raw PTY running
- * that CLI), and a typed `@` opens a caret-anchored mention menu over
+ * (`/clear`, `/compact`, `/help` — a mirror of the CLI TUI's own menu,
+ * restored because the composer replaced a raw PTY running that CLI; `/model`
+ * and `/mode` are deliberately absent, since the MODEL and MODE dropdowns in
+ * the row above already own those choices), and a typed `@` opens a
+ * caret-anchored mention menu over
  * Codenest agents, open tasks and library snippets. See the plan's Design
  * decisions 1-12 for the reasoning behind each choice below.
  */
@@ -66,7 +68,6 @@ import {
   runCommandLine,
   helpRows,
   type CommandData,
-  type CommandOption,
   type CommandOutcome,
   type SlashCommandEffects,
   type SlashRow,
@@ -456,15 +457,6 @@ function modeSelectValue(applied: string | null): string {
   return LIVE_PERMISSION_MODES.some((m) => m.value === applied) ? applied : "";
 }
 
-/** `LIVE_PERMISSION_MODES` as the slash registry's `CommandOption[]` — built
- *  once, module scope, so `/mode`'s menu and cycle order are always exactly
- *  the mode `<select>`'s own order. */
-const MODE_OPTIONS: readonly CommandOption[] = LIVE_PERMISSION_MODES.map((m) => ({
-  value: m.value,
-  label: m.label,
-  hint: m.title,
-}));
-
 /**
  * The provider + model + permission-mode row. The provider and model lists come
  * from Settings → Providers (the `providers` / `provider_models` tables), so
@@ -710,19 +702,12 @@ export function AgentComposer({
   const recall = useComposerStore((s) => s.recall);
 
   const splitPane = useTerminalStore((s) => s.splitPane);
-  const setLeafAgentConfig = useTerminalStore((s) => s.setLeafAgentConfig);
   const agentPaneCount = useTerminalStore((s) => {
     const tab = s.tabs.find((t) => t.id === s.activeTabId);
     if (!tab) return 1;
     return collectLeaves(tab.layout).filter((l) => paneKind(l) === "agent").length;
   });
 
-  const providers = useAgentCatalogStore((s) => s.providers);
-  const rememberSelection = useAgentCatalogStore((s) => s.rememberSelection);
-  // The CLI's own answer, not the optimistic pick — see `modeSelectValue`.
-  const appliedMode = useAgentSessionStore(
-    (s) => s.panes[leafId]?.permissionMode ?? null,
-  );
 
   // Returns a count, not the array, so the composer re-renders when delegation
   // starts or stops — not on every streamed token. `activeSubagents` already
@@ -808,21 +793,12 @@ export function AgentComposer({
   // ── Slash-command / `@`-mention detection ────────────────────────────────
   const trigger = useMemo(() => detectTrigger(draft, caret), [draft, caret]);
 
-  const models = useMemo<CommandOption[]>(() => {
-    const active = activeProvider(providers, providerId);
-    return active?.models.map((m) => ({ value: m.model_name, label: m.display_name })) ?? [];
-  }, [providers, providerId]);
-
-  const currentMode = modeSelectValue(appliedMode) || modeSelectValue(permissionMode);
-
   // Pure data only (Design decision 12) — this is what lets `commandRows`,
   // and with it `menuRows`, keep a stable identity across renders that don't
   // actually change anything, which is what lets arrow-key navigation survive
-  // a re-render at all.
-  const data: CommandData = useMemo(
-    () => ({ models, modes: MODE_OPTIONS, currentMode, live }),
-    [models, currentMode, live],
-  );
+  // a re-render at all. The model and mode lists left with `/model` and
+  // `/mode`; the header dropdowns own those choices now.
+  const data: CommandData = useMemo(() => ({ live }), [live]);
 
   const commandRows: SlashRow[] = useMemo(
     () => (trigger?.kind === "slash" ? buildSlashRows(trigger.query, data) : []),
@@ -953,16 +929,6 @@ export function AgentComposer({
    *  irrelevant, since nothing memoizes on it. */
   function commandEffects(): SlashCommandEffects {
     return {
-      setModel: async (nextModel) => {
-        const active = activeProvider(providers, providerId);
-        setLeafAgentConfig(leafId, { model: nextModel });
-        rememberSelection({ providerId: active?.id ?? null, model: nextModel });
-        if (live) await agentSetModel(leafId, nextModel);
-      },
-      setPermissionMode: async (nextMode) => {
-        setLeafAgentConfig(leafId, { permissionMode: nextMode });
-        if (live) await agentSetPermissionMode(leafId, nextMode);
-      },
       // Reads the session id *before* dropping any state — the pane's own
       // teardown reports the exit under `panes[leafId]?.sessionId` after the
       // restart is requested, so resetting first would make that report

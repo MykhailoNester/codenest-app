@@ -162,52 +162,21 @@ afterEach(() => {
   });
 });
 
-describe("/model", () => {
-  it("runs over the control channel and never reaches agentSend", async () => {
+describe("the removed /model and /mode commands — no second way in", () => {
+  it("fall through to text instead of running, so the dropdowns stay authoritative", async () => {
     seedCatalog();
     seedSession();
     renderComposer();
 
     typeDraft("/model opus");
+    expect(screen.getByText(/^\/model is not a Codenest command/)).toBeTruthy();
     pressKey("Enter");
 
-    await waitFor(() =>
-      expect(agentSetModelMock).toHaveBeenCalledWith(LEAF, SEEDED_MODEL.value),
-    );
-    expect(agentSendMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(agentSendMock).toHaveBeenCalledWith(LEAF, "/model opus"));
+    expect(agentSetModelMock).not.toHaveBeenCalled();
   });
 
-  it("shows the command disposition in the {} popover and a Run button while the draft is a command", () => {
-    seedCatalog();
-    renderComposer();
-    typeDraft("/model opus");
-
-    expect(screen.getByRole("button", { name: /Run/ })).toBeTruthy();
-
-    fireEvent.click(screen.getByLabelText("Show what Send writes to the agent"));
-    const panel = screen.getByRole("group", { name: "Wire preview" });
-    expect(panel.textContent).toContain("/model opus");
-    expect(panel.textContent).toContain("→");
-  });
-
-  it("opens an arg menu on a trailing space, listing every registered model — round-1 gap 1", async () => {
-    seedCatalog();
-    renderComposer();
-    typeDraft("/model ");
-
-    const options = suggestOptions();
-    expect(options).toHaveLength(1);
-    expect(options[0]?.textContent).toContain(SEEDED_MODEL.value);
-
-    pressKey("Enter");
-    await waitFor(() =>
-      expect(agentSetModelMock).toHaveBeenCalledWith(LEAF, SEEDED_MODEL.value),
-    );
-  });
-});
-
-describe("/mode", () => {
-  it("runs /mode, not /model, for the bare complete command — 'model'.startsWith('mode')", async () => {
+  it("never reach the permission-mode control channel either", async () => {
     seedCatalog();
     seedSession();
     renderComposer();
@@ -215,9 +184,8 @@ describe("/mode", () => {
     typeDraft("/mode");
     pressKey("Enter");
 
-    await waitFor(() => expect(agentSetPermissionModeMock).toHaveBeenCalled());
-    expect(agentSetModelMock).not.toHaveBeenCalled();
-    expect(editor().value).toBe("");
+    await waitFor(() => expect(agentSendMock).toHaveBeenCalledWith(LEAF, "/mode"));
+    expect(agentSetPermissionModeMock).not.toHaveBeenCalled();
   });
 });
 
@@ -234,7 +202,7 @@ describe("unregistered commands — decision 4", () => {
 
   it("suppresses the warning while the menu is offering candidates — round-1 note 3", () => {
     renderComposer();
-    typeDraft("/mo");
+    typeDraft("/c");
 
     expect(screen.queryByText(/is not a Codenest command/)).toBeNull();
   });
@@ -308,11 +276,13 @@ describe("/help — decision 12", () => {
     pressKey("Enter");
 
     const panel = await screen.findByRole("note");
-    // `^/mode` alone would also match the "/model" row (`"mode"` is a
-    // prefix of `"model"`), so the boundary requires whitespace or the end
-    // of the string right after the name.
-    for (const name of ["model", "mode", "clear", "compact", "help"]) {
+    // The boundary requires whitespace or end-of-string after the name so a
+    // row cannot be matched by a command that merely prefixes it.
+    for (const name of ["clear", "compact", "help"]) {
       expect(within(panel).getByText(new RegExp(`^/${name}(\\s|$)`))).toBeTruthy();
+    }
+    for (const gone of ["model", "mode"]) {
+      expect(within(panel).queryByText(new RegExp(`^/${gone}(\\s|$)`))).toBeNull();
     }
     expect(within(panel).queryAllByRole("option")).toHaveLength(0);
     expect(editor().value).toBe("");
@@ -339,13 +309,14 @@ describe("multi-line drafts — decision 3", () => {
   it("never lets a command line eat the prose that follows a newline", async () => {
     seedCatalog();
     renderComposer();
-    fireEvent.change(editor(), { target: { value: "/model opus\nplease explain" } });
+    fireEvent.change(editor(), { target: { value: "/compact\nplease explain" } });
 
     expect(screen.getByRole("button", { name: /^Send/ })).toBeTruthy();
 
     pressKey("Enter");
     await waitFor(() => expect(agentSendMock).toHaveBeenCalled());
-    expect(agentSetModelMock).not.toHaveBeenCalled();
+    const sent = agentSendMock.mock.calls.at(-1)?.[1] as string;
+    expect(sent).toContain("please explain");
   });
 });
 
@@ -360,7 +331,7 @@ describe("queue", () => {
 describe("keyboard precedence", () => {
   it("Escape closes the menu without interrupting; with the menu closed it still interrupts", async () => {
     renderComposer({ status: "running" });
-    typeDraft("/mo");
+    typeDraft("/c");
     expect(screen.getByRole("listbox")).toBeTruthy();
 
     pressKey("Escape");
@@ -375,10 +346,10 @@ describe("keyboard precedence", () => {
 describe("menu navigation — decision 12's memo-identity argument", () => {
   it("moves the highlight on ArrowDown twice, surviving the re-render each keystroke causes", () => {
     renderComposer();
-    typeDraft("/mo");
+    typeDraft("/c");
 
     const rows = suggestOptions;
-    expect(rows()).toHaveLength(2); // /model, /mode
+    expect(rows()).toHaveLength(2); // /clear, /compact
     expect(rows()[0]?.getAttribute("data-active")).toBe("true");
 
     pressKey("ArrowDown");
@@ -388,17 +359,5 @@ describe("menu navigation — decision 12's memo-identity argument", () => {
     // Wraps back to the first row — and moved *again*, proving the first
     // ArrowDown's highlight was not reset by its own re-render.
     expect(rows()[0]?.getAttribute("data-active")).toBe("true");
-  });
-
-  it("Tab completes a `runsBare: false` command to its arg menu instead of running it", async () => {
-    seedCatalog();
-    renderComposer();
-    typeDraft("/mo");
-
-    pressKey("Tab");
-
-    await waitFor(() => expect(editor().value).toBe("/model "));
-    await waitFor(() => expect(suggestOptions()).toHaveLength(1));
-    expect(agentSetModelMock).not.toHaveBeenCalled();
   });
 });

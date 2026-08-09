@@ -5,23 +5,26 @@ import type { MentionRow } from "../composer-mentions";
 
 describe("slashRowToSuggest", () => {
   it("labels a command row `/name` and its meta the summary", () => {
-    const model = findCommand("model");
-    if (!model) throw new Error("model command missing from registry");
-    const row: SlashRow = { kind: "command", command: model };
+    const compact = findCommand("compact");
+    if (!compact) throw new Error("compact command missing from registry");
+    const row: SlashRow = { kind: "command", command: compact };
     expect(slashRowToSuggest(row, 0)).toEqual({
-      key: "command-model",
+      key: "command-compact",
       group: null,
-      label: "/model",
-      meta: model.summary,
+      label: "/compact",
+      meta: compact.summary,
     });
   });
 
+  // No registered command declares a `complete` callback since `/model` and
+  // `/mode` were removed, so the row is built by hand: this pins the mapping
+  // for whichever command reintroduces argument completion.
   it("labels an arg row by the option value and its meta the label", () => {
-    const model = findCommand("model");
-    if (!model) throw new Error("model command missing from registry");
+    const compact = findCommand("compact");
+    if (!compact) throw new Error("compact command missing from registry");
     const row: SlashRow = {
       kind: "arg",
-      command: model,
+      command: compact,
       option: { value: "claude-opus-4-6", label: "Opus 4.6" },
     };
     const suggest = slashRowToSuggest(row, 0);
