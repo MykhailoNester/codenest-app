@@ -83,6 +83,7 @@ import { caretAnchor } from "../../lib/caret-anchor";
 import { slashRowToSuggest, mentionRowToSuggest, type SuggestRow } from "../../lib/composer-menu";
 import { SuggestPanel, MentionSourceProbe } from "./composer-suggest";
 import { focusComposerAt, resizeComposerEditor } from "../../lib/composer-focus";
+import { sanitizeComposerInput } from "../../lib/composer-input";
 import styles from "./agent-composer.module.css";
 
 interface AgentComposerProps {
@@ -911,13 +912,27 @@ export function AgentComposer({
   }
 
   function handleDraftChange(el: HTMLTextAreaElement): void {
+    // Every character the user types or pastes enters here, which makes this
+    // the one place that can drop the ones that could never have been typed —
+    // see `composer-input.ts` for why macOS puts U+F703 in the field when you
+    // press the Right arrow.
+    const clean = sanitizeComposerInput(el.value, el.selectionStart);
     // Marks this value as locally originated *before* the store write, so the
     // effect above sees `draft === lastLocalDraftRef.current` and skips it.
     // This is what keeps ordinary typing and native ⌘Z undo (both arrive
     // through this same `onChange`) from jumping the caret to end-of-text.
-    lastLocalDraftRef.current = el.value;
-    setDraft(leafId, el.value);
-    setCaret(el.selectionStart);
+    lastLocalDraftRef.current = clean.text;
+    setDraft(leafId, clean.text);
+    setCaret(clean.caret);
+    if (clean.text !== el.value) {
+      // The DOM already committed the rejected character, and the store write
+      // above will not put it back — a controlled `value` only re-renders when
+      // React's own value changes, and for a pure insertion of a stripped
+      // character it does not. Correcting the node directly is what stops the
+      // box being visible for a frame (or, on a same-value render, for good).
+      el.value = clean.text;
+      el.setSelectionRange(clean.caret, clean.caret);
+    }
     setDismissed(false);
     setHelpOpen(false);
     setNote(null);

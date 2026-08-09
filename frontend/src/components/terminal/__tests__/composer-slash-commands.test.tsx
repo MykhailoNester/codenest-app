@@ -323,6 +323,36 @@ describe("/help — decision 12", () => {
   });
 });
 
+describe("untypeable characters \u2014 the macOS arrow-key bug", () => {
+  // WebKit inserts NSRightArrowFunctionKey (U+F703) into the field when it
+  // does not resolve the press to an editing command, which is why pressing
+  // Right five times left five tofu boxes in the draft.
+  const RIGHT = "\uF703";
+
+  it("keeps arrow-key codepoints out of the draft and out of the wire", async () => {
+    renderComposer();
+
+    typeDraft(RIGHT.repeat(5));
+    expect(editor().value).toBe("");
+    expect(useComposerStore.getState().panes[LEAF]?.draft ?? "").toBe("");
+
+    typeDraft(`ship${RIGHT} it`);
+    expect(editor().value).toBe("ship it");
+
+    pressKey("Enter");
+    await waitFor(() => expect(agentSendMock).toHaveBeenCalled());
+    const sent = agentSendMock.mock.calls.at(-1)?.[1] as string;
+    expect(sent).toContain("ship it");
+    expect(sent).not.toContain(RIGHT);
+  });
+
+  it("does not disturb ordinary text", () => {
+    renderComposer();
+    typeDraft("hello \uD83C\uDF89 world");
+    expect(editor().value).toBe("hello \uD83C\uDF89 world");
+  });
+});
+
 describe("multi-line drafts — decision 3", () => {
   it("never lets a command line eat the prose that follows a newline", async () => {
     seedCatalog();
