@@ -34,12 +34,21 @@ import { useEffect, useState, type ReactElement } from "react";
 import { formatUSD } from "../../lib/format-helpers";
 import { useGitPaneStatus } from "../../stores/session-hud-store";
 import {
+  activeOrchestrations,
   activeSubagents,
+  formatDuration,
   isSubagentTool,
+  orchestrationCounts,
+  orchestrationPhaseTree,
   type ConversationState,
   type ConvToolBlock,
+  type OrchestrationAgent,
+  type OrchestrationRun,
+  type OrchestrationStatus,
   type SubagentCall,
 } from "../../lib/agent-conversation";
+import { agentStopTask } from "../../lib/ipc";
+import { agentStatusClass } from "../command-center/status-utils";
 import {
   elapsedSecondsSinceMs,
   formatContextPercent,
@@ -51,6 +60,12 @@ import styles from "./session-hud.module.css";
 interface AgentSessionHudProps {
   state: ConversationState;
   cwd: string | undefined;
+  /** The pane whose stdin a Stop click must reach — the only prop this strip
+   *  uses for a *write*, and the reason it is required rather than optional
+   *  (D13): the strip's one production mount always has this in scope, and a
+   *  Stop-less panel would be a silent capability regression if a future
+   *  second mount forgot it. */
+  paneId: string;
 }
 
 /** The newest tool call still in flight, or `null` when nothing is running.
@@ -79,9 +94,91 @@ function subagentLabel(calls: readonly SubagentCall[]): string {
   return `${calls.length} sub-agents`;
 }
 
+/** `${primaryRun.name ?? "orchestration"}` for one run, `"N orchestrations"`
+ *  for several — the same single-vs-many idiom as `subagentLabel`. */
+function orchestrationLabel(runs: readonly OrchestrationRun[]): string {
+  const primary = runs[0];
+  if (runs.length === 1 && primary) return primary.name ?? "orchestration";
+  return `${runs.length} orchestrations`;
+}
+
+/** `"N phases · M/K agents"`, honestly degraded (D6/edge cases): the phase
+ *  clause is omitted for a phase-less run, never printed as `0 phases`, and
+ *  the agents clause is omitted while a run has launched no agent yet, never
+ *  printed as `0/0 agents`. Never a percentage — `K` moves as later phases
+ *  start, so a bar or a percent would imply a total the wire has not stated. */
+function orchestrationCountsLabel(counts: {
+  phases: number;
+  agentsDone: number;
+  agentsTotal: number;
+}): string {
+  const parts: string[] = [];
+  if (counts.phases > 0) {
+    parts.push(`${counts.phases} phase${counts.phases === 1 ? "" : "s"}`);
+  }
+  if (counts.agentsTotal > 0) {
+    parts.push(`${counts.agentsDone}/${counts.agentsTotal} agents`);
+  }
+  return parts.join(" · ");
+}
+
+/** Sums each active run's own counts — the multi-run cell's number, mirroring
+ *  `subagentLabel`'s "N sub-agents" collapse for several concurrent calls. */
+function combinedOrchestrationCounts(
+  runs: readonly OrchestrationRun[],
+): { phases: number; agentsDone: number; agentsTotal: number } {
+  return runs.reduce(
+    (acc, run) => {
+      const c = orchestrationCounts(run);
+      return {
+        phases: acc.phases + c.phases,
+        agentsDone: acc.agentsDone + c.agentsDone,
+        agentsTotal: acc.agentsTotal + c.agentsTotal,
+      };
+    },
+    { phases: 0, agentsDone: 0, agentsTotal: 0 },
+  );
+}
+
+/** D8's status-pill mapping for the run's own state. `running` pulses;
+ *  nothing else does. */
+function orchestrationRunPill(status: OrchestrationStatus): {
+  className: string;
+  pulse: boolean;
+  label: string;
+} {
+  if (status === "running") return { className: agentStatusClass("active"), pulse: true, label: "running" };
+  if (status === "completed") return { className: agentStatusClass("active"), pulse: false, label: "completed" };
+  if (status === "failed") return { className: agentStatusClass("idle"), pulse: false, label: "failed" };
+  return { className: agentStatusClass("ended"), pulse: false, label: "stopped" };
+}
+
+/**
+ * D8's status-pill mapping for one `workflow_agent` row. Amber for `error` is
+ * not a fudge: `parallel()`/`pipeline()` resolve a thrown agent to `null` and
+ * the orchestration continues, so an agent error is a warning about one
+ * branch, not a failure of the run — hence `idle` (amber), not a fourth,
+ * red `d3-status` modifier this ticket does not add (D8).
+ */
+function orchestrationAgentPill(agent: OrchestrationAgent): {
+  className: string;
+  pulse: boolean;
+  label: string;
+} {
+  if (agent.state === "error") return { className: agentStatusClass("idle"), pulse: false, label: "error" };
+  if (agent.state === "done") {
+    if (agent.cached) return { className: agentStatusClass("ended"), pulse: false, label: "cached" };
+    return { className: agentStatusClass("active"), pulse: false, label: "done" };
+  }
+  // "start" or "progress" both read as "running" (OrchestrationAgentState's
+  // own doc comment).
+  return { className: agentStatusClass("active"), pulse: true, label: "running" };
+}
+
 export function AgentSessionHud({
   state,
   cwd,
+  paneId,
 }: AgentSessionHudProps): ReactElement | null {
   const git = useGitPaneStatus(cwd);
   const exited = state.status === "exited";
@@ -105,6 +202,15 @@ export function AgentSessionHud({
   // here: once `expandedSubagentId` no longer names a call in `activeCalls`,
   // `subagentExpanded` goes false on its own.
   const [expandedSubagentId, setExpandedSubagentId] = useState<string | null>(null);
+
+  // Same derived-closed idiom, keyed by `task_id`: a run that leaves
+  // `activeRuns` (finishes, fails, is stopped) collapses its own panel with
+  // no reset effect required.
+  const [expandedOrchestrationId, setExpandedOrchestrationId] = useState<string | null>(null);
+  // Task ids with a Stop request in flight — disables the button and blocks a
+  // double-send without an optimistic status change (D9): the wire, not this
+  // set, decides when the run actually stops.
+  const [stoppingTaskIds, setStoppingTaskIds] = useState<readonly string[]>([]);
 
   const cells: ReactElement[] = [];
 
@@ -249,6 +355,43 @@ export function AgentSessionHud({
     );
   }
 
+  // Every `Workflow`-tool run this pane's session has launched and not yet
+  // heard the end of, oldest first. Deliberately not gated on
+  // `state.status === "running"` (D3): an orchestration outlives its turn,
+  // so the pane sits `idle` for most of a run.
+  const activeRuns = exited ? [] : activeOrchestrations(state);
+  const primaryRun = activeRuns[0] ?? null;
+  const orchestrationExpanded =
+    expandedOrchestrationId !== null &&
+    activeRuns.some((r) => r.taskId === expandedOrchestrationId);
+  if (primaryRun !== null) {
+    const runSeconds = elapsedSecondsSinceMs(primaryRun.startedAt);
+    const countsLabel = orchestrationCountsLabel(combinedOrchestrationCounts(activeRuns));
+    cells.push(
+      <div key="orchestration" className={styles.cell} data-cell="orchestration">
+        <button
+          type="button"
+          className={styles.cellBtn}
+          aria-expanded={orchestrationExpanded}
+          onClick={() =>
+            setExpandedOrchestrationId(orchestrationExpanded ? null : primaryRun.taskId)
+          }
+        >
+          <span className={`${styles.pulse} ${styles.acc}`}>◇</span>
+          <span className={`${styles.value} ${styles.acc} ${styles.cellLabel}`}>
+            {orchestrationLabel(activeRuns)}
+          </span>
+          {countsLabel !== "" ? (
+            <span className={`${styles.value} ${styles.muted}`}>{countsLabel}</span>
+          ) : null}
+          <span className={`${styles.value} ${styles.muted}`}>
+            {formatElapsed(runSeconds)}
+          </span>
+        </button>
+      </div>,
+    );
+  }
+
   if (state.thinking && !exited) {
     cells.push(
       <div key="thinking" className={styles.cell} data-cell="thinking">
@@ -297,6 +440,112 @@ export function AgentSessionHud({
           ) : null}
         </div>
       ) : null}
+      {orchestrationExpanded && primaryRun !== null
+        ? (() => {
+            const run = primaryRun;
+            const runPill = orchestrationRunPill(run.status);
+            const runCounts = orchestrationCountsLabel(orchestrationCounts(run));
+            const stopping = stoppingTaskIds.includes(run.taskId);
+            return (
+              <div className={styles.detail} data-testid="agent-orchestration-detail">
+                <div className={styles.detailHead}>
+                  <span className={styles.detailName}>{run.name ?? "orchestration"}</span>
+                  {runCounts !== "" ? (
+                    <span className={`${styles.value} ${styles.muted}`}>{runCounts}</span>
+                  ) : null}
+                  {run.totalTokens !== null ? (
+                    <span className={`${styles.value} ${styles.pink}`}>
+                      {formatTokens(run.totalTokens)}
+                    </span>
+                  ) : null}
+                  <span className={runPill.className}>
+                    {runPill.pulse ? <span className="d3-status__pulse" /> : null}
+                    {runPill.label}
+                  </span>
+                  <button
+                    type="button"
+                    className={`d3-btn d3-btn--sm ${styles.detailStop}`}
+                    style={{ borderColor: "rgba(239,68,68,0.30)", color: "var(--err)" }}
+                    disabled={stopping}
+                    onClick={() => {
+                      setStoppingTaskIds((ids) =>
+                        ids.includes(run.taskId) ? ids : [...ids, run.taskId],
+                      );
+                      // Not optimistic (D9): the wire's own task_updated /
+                      // task_notification decides when the run's status
+                      // actually flips to "stopped".
+                      void agentStopTask(paneId, run.taskId).catch((err: unknown) => {
+                        console.error("agentStopTask failed", err);
+                      });
+                    }}
+                  >
+                    Stop
+                  </button>
+                </div>
+                {run.activity !== null ? (
+                  <div className={styles.detailRow}>
+                    <span className={styles.detailText}>{run.activity}</span>
+                  </div>
+                ) : null}
+                {orchestrationPhaseTree(run).map((group) => (
+                  <div
+                    key={group.phaseIndex ?? "unphased"}
+                    className={styles.detailPhase}
+                  >
+                    <span className={styles.detailPhaseTitle}>{group.title}</span>
+                    {group.agents.map((agent) => {
+                      const pill = orchestrationAgentPill(agent);
+                      return (
+                        <div key={agent.index} className={styles.detailAgent}>
+                          <span className={pill.className}>
+                            {pill.pulse ? <span className="d3-status__pulse" /> : null}
+                            {pill.label}
+                          </span>
+                          <span
+                            className={`${styles.value} ${styles.detailAgentLabel}`}
+                            title={agent.label}
+                          >
+                            {agent.label}
+                          </span>
+                          {agent.agentType !== null ? (
+                            <span className={`${styles.value} ${styles.muted}`}>
+                              {agent.agentType}
+                            </span>
+                          ) : null}
+                          {agent.model !== null ? (
+                            <span className={`${styles.value} ${styles.muted}`}>
+                              {agent.model}
+                            </span>
+                          ) : null}
+                          {agent.tokens !== null ? (
+                            <span className={`${styles.value} ${styles.pink}`}>
+                              {formatTokens(agent.tokens)}
+                            </span>
+                          ) : null}
+                          {agent.toolCalls !== null ? (
+                            <span className={`${styles.value} ${styles.muted}`}>
+                              {agent.toolCalls} calls
+                            </span>
+                          ) : null}
+                          {agent.durationMs !== null ? (
+                            <span className={`${styles.value} ${styles.muted}`}>
+                              {formatDuration(agent.durationMs)}
+                            </span>
+                          ) : null}
+                          {agent.error !== null ? (
+                            <span className={styles.detailText}>{agent.error}</span>
+                          ) : agent.resultPreview !== null ? (
+                            <span className={styles.detailText}>{agent.resultPreview}</span>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            );
+          })()
+        : null}
     </>
   );
 }

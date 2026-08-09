@@ -42,6 +42,7 @@ import { useAgentCatalogStore, type CatalogProvider } from "../../stores/agent-c
 import {
   activeSubagents,
   buildUserMessageText,
+  orchestrationBadgeLabel,
   previewUserMessageLine,
   type ConversationState,
   type UserMessagePill,
@@ -731,6 +732,15 @@ export function AgentComposer({
     return pane === undefined ? 0 : activeSubagents(pane).length;
   });
 
+  // Sibling of `subagentCount` above. Returns a string, not the array, so the
+  // composer re-renders when an orchestration starts, finishes an agent, or
+  // ends — never on a streamed token. `activeOrchestrations` already returns
+  // [] for an exited session, so there is no status guard here.
+  const orchestrationBadge = useAgentSessionStore((s) => {
+    const pane = s.panes[leafId];
+    return pane === undefined ? "" : orchestrationBadgeLabel(pane);
+  });
+
   // One state, not two booleans: `ContextPicker` and `WirePreview` are both
   // absolutely-positioned children of `.cedit`, so two independent booleans
   // would let them overlap. This makes mutual exclusion structural.
@@ -1257,6 +1267,14 @@ export function AgentComposer({
             data-testid="composer-subagent-badge"
           >
             ◈ {subagentCount} sub-agent{subagentCount === 1 ? "" : "s"}
+          </span>
+        ) : null}
+        {orchestrationBadge !== "" ? (
+          <span
+            className={`${styles.mbadge} ${styles.mbadgeOrchestration}`}
+            data-testid="composer-orchestration-badge"
+          >
+            ◇ {orchestrationBadge}
           </span>
         ) : null}
         <ProviderModelRow

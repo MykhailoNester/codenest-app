@@ -54,6 +54,10 @@ vi.mock("../../../lib/ipc", async () => {
     agentSetPermissionMode: vi.fn(async () => undefined),
     agentInterrupt: vi.fn(async () => undefined),
     agentStop: vi.fn(async () => undefined),
+    // Belt-and-braces (this file's test never clicks Stop): a factory mock
+    // throws on *access* of a missing named export, not only on a call, and
+    // this keeps the mock symmetric with `agent-session-hud.test.tsx`'s.
+    agentStopTask: vi.fn(async () => undefined),
     agentRespondPermission: vi.fn(async () => undefined),
     subscribeAgentFrames: vi.fn(async () => () => undefined),
     useTerminalOutput: (
@@ -729,6 +733,118 @@ describe("agent pane render", () => {
     );
     expect(
       screen.getByTestId("agent-session-hud").querySelector('[data-cell="subagent"]'),
+    ).toBeNull();
+  });
+
+  it("a Workflow run shows the orchestration cell in the HUD and a badge in the composer", async () => {
+    seedCatalog();
+    seedTab(makeAgentTab("agent-orchestration"), "agent-orchestration");
+
+    render(<TerminalsLayout />);
+    await waitFor(() => expect(agentStartMock).toHaveBeenCalledTimes(1));
+    const feed = subscribeAgentFramesMock.mock.calls[0]?.[1] as (
+      frame: AgentFrame,
+    ) => void;
+    expect(feed).toBeTypeOf("function");
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-orchestration",
+        session_id: "session-1",
+        kind: "init",
+        raw: { type: "system", subtype: "init", model: "claude-opus-5" },
+      });
+    });
+
+    // Nothing orchestrating yet — neither surface should exist.
+    expect(screen.queryByTestId("composer-orchestration-badge")).toBeNull();
+    expect(
+      screen.getByTestId("agent-session-hud").querySelector('[data-cell="orchestration"]'),
+    ).toBeNull();
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-orchestration",
+        session_id: "session-1",
+        kind: "system",
+        raw: {
+          type: "system",
+          subtype: "task_started",
+          task_id: "wt8nboga7",
+          tool_use_id: "toolu_01As1tHX8yBzfjZ8DS1Sdpyp",
+          description: "Two-phase probe",
+          task_type: "local_workflow",
+          workflow_name: "wire-probe",
+        },
+      });
+    });
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-orchestration",
+        session_id: "session-1",
+        kind: "system",
+        raw: {
+          type: "system",
+          subtype: "task_progress",
+          task_id: "wt8nboga7",
+          description: "Alpha: blue",
+          usage: { total_tokens: 0, tool_uses: 0, duration_ms: 54 },
+          workflow_progress: [
+            { type: "workflow_phase", index: 1, title: "Alpha" },
+            { type: "workflow_phase", index: 2, title: "Beta" },
+            {
+              type: "workflow_agent",
+              index: 1,
+              label: "red",
+              phaseIndex: 1,
+              phaseTitle: "Alpha",
+              state: "start",
+            },
+            {
+              type: "workflow_agent",
+              index: 2,
+              label: "blue",
+              phaseIndex: 1,
+              phaseTitle: "Alpha",
+              state: "start",
+            },
+          ],
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("composer-orchestration-badge")).toBeTruthy(),
+    );
+    expect(screen.getByTestId("composer-orchestration-badge").textContent).toContain(
+      "0/2 agents",
+    );
+    const strip = screen.getByTestId("agent-session-hud");
+    expect(strip.querySelector('[data-cell="orchestration"]')?.textContent).toContain(
+      "wire-probe",
+    );
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-orchestration",
+        session_id: "session-1",
+        kind: "system",
+        raw: {
+          type: "system",
+          subtype: "task_notification",
+          task_id: "wt8nboga7",
+          status: "completed",
+          summary: 'Dynamic workflow "Two-phase probe" completed',
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("composer-orchestration-badge")).toBeNull(),
+    );
+    expect(
+      screen.getByTestId("agent-session-hud").querySelector('[data-cell="orchestration"]'),
     ).toBeNull();
   });
 });
