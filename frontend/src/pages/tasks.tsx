@@ -1,25 +1,27 @@
 /**
- * Work Board — unified kanban over `workflow_items` (triage) + `tasks`.
+ * Work Board — a kanban + list view over `tasks`.
  *
- * Both tables stay; the board just reads from both.
- * Column → status mapping:
- *   Triage      = workflow_items with status inbox | review | ready
- *   Backlog     = tasks with status backlog
- *   Todo        = tasks with status todo
- *   In Progress = tasks with status in-progress (+ blocked shown with badge)
- *   Done        = tasks with status done
+ * One board column per active `task_status` taxonomy row (Settings →
+ * Workflow Labels), in taxonomy sort order, using its label + colour.
+ * Status moves go through `POST /api/v1/tasks/{id}/status`. Labels come from
+ * the `task_label` taxonomy + `task_label_assignments` join table and are
+ * toggled per-pair (`POST`/`DELETE /api/v1/tasks/{id}/labels[/…]`). WIP
+ * limits are the `board_wip_limits` app-setting, read from `useLookups()`
+ * and written through `PUT /api/v1/settings/board_wip_limits`. The live
+ * dot on a card is driven by `agent_runs` rows with `source_kind: "task"`
+ * and `status: "running"` — not `agent_sessions.task_id`, which nothing
+ * ever writes.
  *
- * Moving a triage card out → promote via POST /api/v1/inbox/{id}/promote (modal).
- * Moving a task card        → POST /api/v1/tasks/{id}/status.
- *
- * TODO: when workflow_items is merged into tasks, remove the triage-column
- * fetch, the promote modal, and the inbox hooks here.
+ * TODO: the Inbox's triage → task promote flow
+ * (`components/inbox-promote-modal.tsx`, mounted at `pages/inbox.tsx`) reads
+ * `workflow_items` and writes `tasks` on promotion. When `workflow_items` is
+ * folded into `tasks`, this file needs no change — it already reads only
+ * `tasks`.
  */
 import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -28,17 +30,39 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { toast } from "sonner";
 import {
   useTasks,
   useProjects,
   useTeamMembers,
   useLookups,
-  fetchSidecar,
+  useTaxonomy,
+  useAgentRuns,
+  changeTaskStatus,
+  updateTask,
+  setBoardWipLimit,
+  addTaskLabel,
+  removeTaskLabel,
+  type AgentRun,
+  type LookupsOut,
   type Task,
+  type Taxonomy,
   type WorkflowVocabEntry,
 } from "../lib/api";
 import { Shell } from "../components/layout/shell";
 import { LaunchFromSourceButton } from "../components/launch/launch-from-source-button";
+import { BoardColumn } from "../components/taskboard/board-column";
+import { ComposerModal } from "../components/taskboard/composer-modal";
+import { FilterBar } from "../components/taskboard/filter-bar";
+import {
+  ViewToggle,
+  type ViewMode,
+} from "../components/taskboard/view-toggle";
+import type {
+  BoardColumnDef,
+  ChipOption,
+  TaskBoardVocab,
+} from "../components/taskboard/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -58,14 +82,13 @@ const FALLBACK_PRIORITY_COLORS: Record<string, string> = {
   urgent: "#a855f7",
 };
 
-// Board columns are fully dynamic: one column per active task-status from the
-// Workflow Labels taxonomy, in its sort order, using its label + colour. Adding
-// a status adds a column; deactivating/removing it drops the column.
-interface BoardColumn {
-  id: string; // task-status slug
-  label: string;
-  color: string;
-}
+// Seed fallback used only until the priority taxonomy lookups resolve, so
+// the picker options and the "never blank" default aren't momentarily empty.
+const FALLBACK_PRIORITY_VOCAB: ReadonlyArray<WorkflowVocabEntry> = [
+  { slug: "high", label: "High", color: null, sort_order: 10 },
+  { slug: "medium", label: "Medium", color: null, sort_order: 20 },
+  { slug: "low", label: "Low", color: null, sort_order: 30 },
+];
 
 // Seed fallback used only until the taxonomy lookups resolve, so the board
 // isn't momentarily empty on first paint.
@@ -77,167 +100,30 @@ const FALLBACK_TASK_STATUSES: ReadonlyArray<WorkflowVocabEntry> = [
   { slug: "done", label: "Done", color: "#22c55e", sort_order: 50 },
 ];
 
-// Resolved per-card vocabulary helpers, threaded to the memoised card/row
-// components so a rename/recolour in Settings → Workflow Labels shows up live.
-interface VocabMaps {
-  priorityColors: Record<string, string>;
-  priorityLabels: Record<string, string>;
-  statusLabels: Record<string, string>;
-}
+// D5 — shown under every Agents-group option in the card's assignee picker.
+// Kept in sync by hand with the identical string in composer-modal.tsx
+// (not shared via an export: see the note at that file's private
+// buildAssigneeOptions for why).
+const AGENT_HINT =
+  "Assigning does not start a session. The agent's saved provider and model become the defaults when you launch this task with ▶.";
 
-// Module-level sentinels to avoid fresh-reference cascade
+const SORT_OPTIONS: readonly ChipOption[] = [
+  { value: "", label: "Newest" },
+  { value: "created_at_asc", label: "Oldest" },
+  { value: "priority", label: "Priority" },
+  { value: "project", label: "Project" },
+];
+
+// Module-level sentinels to avoid fresh-reference cascade.
 const NO_STATUSES: string[] = [];
 const NO_STATUS_COLORS: Record<string, string> = {};
 const NO_VOCAB: WorkflowVocabEntry[] = [];
+const NO_TAXONOMY: Taxonomy[] = [];
+const NO_WIP: Record<string, number> = {};
+const NO_RUNS: AgentRun[] = [];
 
-// ─── Board card components ────────────────────────────────────────────────────
-
-interface TaskCardProps {
-  task: Task;
-  vocab: VocabMaps;
-  targetStatuses: ReadonlyArray<{ value: string; label: string }>;
-  onNavigate: (path: string) => void;
-  onMoveTask: (id: number, status: string) => void;
-}
-
-function TaskCardInner({
-  task: t,
-  vocab,
-  targetStatuses,
-  onNavigate,
-  onMoveTask,
-}: TaskCardProps): ReactElement {
-  const priorityColor = vocab.priorityColors[t.priority] ?? "var(--fg-4)";
-  const isDone = t.status === "done";
-
-  return (
-    <div
-      className="wb-card"
-      style={{
-        ["--wb-accent" as string]: priorityColor,
-        opacity: isDone ? 0.62 : 1,
-      }}
-    >
-      {/* Title */}
-      <div className="wb-card__title">
-        <button
-          type="button"
-          className="wb-card__id"
-          onClick={() => onNavigate(`/tasks/${t.id}`)}
-        >
-          #{t.id}
-        </button>
-        <button
-          type="button"
-          className="wb-card__name"
-          style={isDone ? { textDecoration: "line-through" } : undefined}
-          onClick={() => onNavigate(`/tasks/${t.id}`)}
-        >
-          {t.title}
-        </button>
-      </div>
-
-      {/* Badges */}
-      <div className="wb-card__badges">
-        <span
-          className="wb-chip"
-          style={{
-            color: priorityColor,
-            borderColor: `${priorityColor}40`,
-            background: `${priorityColor}1a`,
-          }}
-        >
-          {vocab.priorityLabels[t.priority] ?? t.priority}
-        </span>
-        {t.project_name && (
-          <span className="wb-chip wb-chip--project" title={t.project_name}>
-            {t.project_name}
-          </span>
-        )}
-      </div>
-
-      {/* Move control + launch */}
-      <div className="wb-card__foot">
-        <select
-          value={t.status}
-          onChange={(e) => {
-            if (e.target.value !== t.status) onMoveTask(t.id, e.target.value);
-          }}
-          className="wb-select"
-          title="Move to column"
-        >
-          {targetStatuses.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-        <LaunchFromSourceButton
-          kind="task"
-          id={t.id}
-          label=""
-          icon="play"
-          tooltip="Launch agent"
-          tone="run"
-        />
-      </div>
-    </div>
-  );
-}
-const TaskCard = memo(TaskCardInner);
-
-// ─── Board column component ───────────────────────────────────────────────────
-
-interface BoardColProps {
-  col: BoardColumn;
-  taskItems: Task[];
-  vocab: VocabMaps;
-  targetStatuses: ReadonlyArray<{ value: string; label: string }>;
-  onNavigate: (path: string) => void;
-  onMoveTask: (id: number, status: string) => void;
-}
-
-function BoardCol({
-  col,
-  taskItems,
-  vocab,
-  targetStatuses,
-  onNavigate,
-  onMoveTask,
-}: BoardColProps): ReactElement {
-  const count = taskItems.length;
-
-  return (
-    <div className="wb-col">
-      {/* Column header */}
-      <div className="wb-col__head">
-        <span className="wb-col__dot" style={{ background: col.color }} />
-        <span className="wb-col__title">{col.label}</span>
-        <span className="wb-col__count">{count}</span>
-      </div>
-
-      {/* Cards */}
-      <div className="wb-col__body">
-        {taskItems.length === 0 ? (
-          <div className="wb-col__empty">No tasks</div>
-        ) : (
-          taskItems.map((task) => (
-            <TaskCard
-              key={`task-${task.id}`}
-              task={task}
-              vocab={vocab}
-              targetStatuses={targetStatuses}
-              onNavigate={onNavigate}
-              onMoveTask={onMoveTask}
-            />
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── List-view sub-components (preserved from original tasks.tsx) ─────────────
+// ─── List-view sub-components (unchanged — only the toolbar above them is
+//     reskinned; the row markup, virtualization and grouping stay as-is) ──────
 
 interface TaskRowCallbacks {
   navigate: (path: string) => void;
@@ -570,312 +456,7 @@ function VirtualTaskList({
   );
 }
 
-// ─── New task form ────────────────────────────────────────────────────────────
-
-interface NewTaskFormProps {
-  projects: Array<{ id: number; name: string }>;
-  members: Array<{ id: number; name: string }>;
-  statuses: string[];
-  statusLabels: Record<string, string>;
-  priorities: ReadonlyArray<{ value: string; label: string }>;
-  defaultProjectId: string;
-  onCancel: () => void;
-  onCreated: () => void;
-}
-
-function growTextarea(el: HTMLTextAreaElement): void {
-  el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
-}
-
-function NewTaskForm({
-  projects,
-  members,
-  statuses,
-  statusLabels,
-  priorities,
-  defaultProjectId,
-  onCancel,
-  onCreated,
-}: NewTaskFormProps): ReactElement {
-  const [form, setForm] = useState({
-    title: "",
-    description: "",
-    status: "todo",
-    priority: "medium",
-    effort: "",
-    assignee_id: "",
-    project_id: defaultProjectId,
-  });
-  const [formError, setFormError] = useState<string | null>(null);
-  const descRef = useRef<HTMLTextAreaElement>(null);
-
-  // Auto-grow the description field whenever its value changes (covers the
-  // initial mount and any future pre-fill, not just per-keystroke onChange).
-  useLayoutEffect(() => {
-    if (descRef.current) growTextarea(descRef.current);
-  }, [form.description]);
-
-  const effectiveProjectId = form.project_id || defaultProjectId;
-
-  const inputStyle = {
-    width: "100%",
-    padding: "6px 10px",
-    background: "var(--bg-3)",
-    border: "1px solid var(--line-2)",
-    color: "var(--fg-0)",
-    borderRadius: 6,
-    fontSize: 13,
-    boxSizing: "border-box" as const,
-  };
-
-  const handleCreate = async () => {
-    if (!form.title.trim()) return;
-    if (!effectiveProjectId) {
-      setFormError("Project is required");
-      return;
-    }
-    setFormError(null);
-    await fetchSidecar("/api/v1/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: form.title,
-        description: form.description || null,
-        status: form.status,
-        priority: form.priority,
-        effort: form.effort || null,
-        assignee_id: form.assignee_id ? parseInt(form.assignee_id) : null,
-        project_id: parseInt(effectiveProjectId),
-      }),
-    });
-    onCreated();
-  };
-
-  return (
-    <div className="d3-card" style={{ padding: "16px 20px", marginBottom: 16 }}>
-      <span className="d3-h" style={{ display: "block", marginBottom: 12 }}>
-        New Task
-      </span>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "2fr 1fr 1fr",
-          gap: 10,
-          marginBottom: 10,
-        }}
-      >
-        <div>
-          <label
-            style={{
-              fontSize: 11,
-              color: "var(--fg-3)",
-              display: "block",
-              marginBottom: 4,
-            }}
-          >
-            Title *
-          </label>
-          <input
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-            placeholder="Task title..."
-            style={inputStyle}
-          />
-        </div>
-        <div>
-          <label
-            style={{
-              fontSize: 11,
-              color: "var(--fg-3)",
-              display: "block",
-              marginBottom: 4,
-            }}
-          >
-            Priority
-          </label>
-          <select
-            value={form.priority}
-            onChange={(e) => setForm({ ...form, priority: e.target.value })}
-            style={inputStyle}
-          >
-            {priorities.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label
-            style={{
-              fontSize: 11,
-              color: "var(--fg-3)",
-              display: "block",
-              marginBottom: 4,
-            }}
-          >
-            Status
-          </label>
-          <select
-            value={form.status}
-            onChange={(e) => setForm({ ...form, status: e.target.value })}
-            style={inputStyle}
-          >
-            {statuses.map((s) => (
-              <option key={s} value={s}>
-                {statusLabels[s] ?? s}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <div style={{ marginBottom: 10 }}>
-        <label
-          style={{
-            fontSize: 11,
-            color: "var(--fg-3)",
-            display: "block",
-            marginBottom: 4,
-          }}
-        >
-          Description
-        </label>
-        <textarea
-          ref={descRef}
-          value={form.description}
-          onChange={(e) => {
-            setForm({ ...form, description: e.target.value });
-            growTextarea(e.target);
-          }}
-          placeholder="Describe the task..."
-          style={{
-            ...inputStyle,
-            minHeight: "calc(2 * 1.4em + 12px)",
-            overflow: "hidden",
-            resize: "none",
-          }}
-        />
-      </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 10,
-          marginBottom: 12,
-        }}
-      >
-        <div>
-          <label
-            style={{
-              fontSize: 11,
-              color: "var(--fg-3)",
-              display: "block",
-              marginBottom: 4,
-            }}
-          >
-            Project *
-          </label>
-          <select
-            value={effectiveProjectId}
-            onChange={(e) => {
-              setForm({ ...form, project_id: e.target.value });
-              if (e.target.value) setFormError(null);
-            }}
-            required
-            style={{
-              ...inputStyle,
-              border: formError ? "1px solid #ef4444" : inputStyle.border,
-            }}
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          {formError && (
-            <div
-              style={{
-                fontSize: 11,
-                color: "#ef4444",
-                marginTop: 4,
-              }}
-            >
-              {formError}
-            </div>
-          )}
-        </div>
-        <div>
-          <label
-            style={{
-              fontSize: 11,
-              color: "var(--fg-3)",
-              display: "block",
-              marginBottom: 4,
-            }}
-          >
-            Assignee
-          </label>
-          <select
-            value={form.assignee_id}
-            onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}
-            style={inputStyle}
-          >
-            <option value="">—</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label
-            style={{
-              fontSize: 11,
-              color: "var(--fg-3)",
-              display: "block",
-              marginBottom: 4,
-            }}
-          >
-            Effort
-          </label>
-          <select
-            value={form.effort}
-            onChange={(e) => setForm({ ...form, effort: e.target.value })}
-            style={inputStyle}
-          >
-            <option value="">—</option>
-            <option value="small">Small</option>
-            <option value="medium">Medium</option>
-            <option value="large">Large</option>
-          </select>
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button
-          className="d3-btn d3-btn--primary"
-          type="button"
-          onClick={() => void handleCreate()}
-        >
-          Create Task
-        </button>
-        <button
-          className="d3-btn d3-btn--ghost"
-          type="button"
-          onClick={onCancel}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main page ────────────────────────────────────────────────────────────────
-
-type ViewMode = "board" | "list";
 
 export function TasksPage(): ReactElement {
   const navigate = useNavigate();
@@ -887,15 +468,21 @@ export function TasksPage(): ReactElement {
   const viewMode: ViewMode = viewParam === "list" ? "list" : "board";
 
   const projectFilter = searchParams.get("project_id") ?? "";
+  const priorityFilter = searchParams.get("priority") ?? "";
+  const assigneeFilter = searchParams.get("assignee_id") ?? "";
+  const labelFilter = searchParams.get("label") ?? "";
   const statusFilter = searchParams.get("status") ?? "";
   const sortFilter = searchParams.get("sort") ?? "";
 
   // ── Data fetching ────────────────────────────────────────────────────────
 
-  // Tasks — fetch all (no status filter) so the board can bucket them
+  // Tasks — server-side filters that exist on every mode; board always shows
+  // every status (the columns are the status axis), so `status`/`sort` are
+  // only honoured in list mode.
   const taskFilters: Record<string, string> = {};
   if (projectFilter) taskFilters.project_id = projectFilter;
-  // In list mode honour the status filter; board always shows all columns
+  if (priorityFilter) taskFilters.priority = priorityFilter;
+  if (assigneeFilter) taskFilters.assignee_id = assigneeFilter;
   if (viewMode === "list" && statusFilter) taskFilters.status = statusFilter;
   if (viewMode === "list" && sortFilter) taskFilters.sort = sortFilter;
 
@@ -903,10 +490,37 @@ export function TasksPage(): ReactElement {
   const { data: projects = [] } = useProjects();
   const { data: members = [] } = useTeamMembers();
   const { data: lookups } = useLookups();
+  const { data: labelTaxonomy = NO_TAXONOMY } = useTaxonomy("task_label");
+  const { data: liveRuns = NO_RUNS } = useAgentRuns(null, "running");
+
   const statuses = lookups?.statuses ?? NO_STATUSES;
   const statusColors = lookups?.status_colors ?? NO_STATUS_COLORS;
   const taskStatusVocab = lookups?.workflow_task_statuses ?? NO_VOCAB;
   const priorityVocab = lookups?.workflow_task_priorities ?? NO_VOCAB;
+  const wipLimits = lookups?.board_wip_limits ?? NO_WIP;
+
+  // `label` is a taxonomies.id and is applied client-side — there is no
+  // server-side label filter (see the Composer/filter-bar plan's D9/§Edge
+  // cases: `TaskFilters` intentionally has no `label` key).
+  const visibleTasks = useMemo(() => {
+    if (!labelFilter) return tasks;
+    const labelId = Number(labelFilter);
+    return tasks.filter((t) => (t.labels ?? []).some((l) => l.id === labelId));
+  }, [tasks, labelFilter]);
+
+  // D4 — the live dot comes from agent_runs (real, already-populated data),
+  // not the dead agent_sessions.task_id column. `flatMap`, not
+  // `filter(...).map(...)`: a property-narrowing filter predicate does not
+  // narrow under --strict, so the filter form types as Set<number | null>.
+  const liveTaskIds = useMemo<ReadonlySet<number>>(
+    () =>
+      new Set(
+        liveRuns.flatMap((r) =>
+          r.source_kind === "task" && r.source_id != null ? [r.source_id] : [],
+        ),
+      ),
+    [liveRuns],
+  );
 
   // ── Workflow Labels → live vocabulary (labels/colours/order) ───────────────
   // Everything below reads from the taxonomy-backed lookups, so a rename or
@@ -930,40 +544,47 @@ export function TasksPage(): ReactElement {
     return m;
   }, [priorityVocab]);
 
-  const vocab = useMemo<VocabMaps>(
-    () => ({ priorityColors, priorityLabels, statusLabels }),
-    [priorityColors, priorityLabels, statusLabels],
+  // D3 — priority rank/count for the card glyph. Deliberately NOT
+  // fallback-merged: `priorityCount` reads 0 until lookups resolve, so every
+  // glyph renders "▬" (never a crash) rather than guessing at a rank.
+  const priorityRank = useMemo(() => {
+    const m: Record<string, number> = {};
+    priorityVocab.forEach((e, i) => {
+      m[e.slug] = i;
+    });
+    return m;
+  }, [priorityVocab]);
+
+  const boardVocab = useMemo<TaskBoardVocab>(
+    () => ({
+      priorityColors,
+      priorityLabels,
+      statusLabels,
+      priorityRank,
+      priorityCount: priorityVocab.length,
+    }),
+    [
+      priorityColors,
+      priorityLabels,
+      statusLabels,
+      priorityRank,
+      priorityVocab.length,
+    ],
   );
 
-  const priorities = useMemo<ReadonlyArray<{ value: string; label: string }>>(
-    () =>
-      priorityVocab.length
-        ? priorityVocab.map((e) => ({ value: e.slug, label: e.label }))
-        : [
-            { value: "high", label: "High" },
-            { value: "medium", label: "Medium" },
-            { value: "low", label: "Low" },
-          ],
-    [priorityVocab],
-  );
-
-  // The board now has one column per active task status (in taxonomy order), so
-  // the move-task dropdown offers every status, including the ones the cascade
-  // also manages (e.g. blocked).
+  // Fallback-merged lists for pickers, so options (and the Composer's
+  // defaults) are never empty before lookups resolve.
+  const priorityVocabOrFallback = priorityVocab.length
+    ? priorityVocab
+    : FALLBACK_PRIORITY_VOCAB;
   const taskStatusList = taskStatusVocab.length
     ? taskStatusVocab
     : FALLBACK_TASK_STATUSES;
 
-  const targetStatuses = useMemo<
-    ReadonlyArray<{ value: string; label: string }>
-  >(
-    () => taskStatusList.map((e) => ({ value: e.slug, label: e.label })),
-    [taskStatusList],
-  );
-
-  // Board columns: one per active task status, ordered/labelled/coloured by the
-  // Workflow Labels taxonomy. Adding a status adds a column; removing it drops one.
-  const boardColumns = useMemo<BoardColumn[]>(
+  // Board columns: one per active task status, ordered/labelled/coloured by
+  // the Workflow Labels taxonomy. Adding a status adds a column; removing it
+  // drops one.
+  const boardColumns = useMemo<BoardColumnDef[]>(
     () =>
       taskStatusList.map((e) => ({
         id: e.slug,
@@ -973,45 +594,256 @@ export function TasksPage(): ReactElement {
     [taskStatusList],
   );
 
-  // ── Derived board data ───────────────────────────────────────────────────
-
   const tasksByColumn = useMemo<Map<string, Task[]>>(() => {
     const map = new Map<string, Task[]>();
     for (const col of boardColumns) map.set(col.id, []);
     const fallbackId = boardColumns[0]?.id;
-    for (const t of tasks) {
+    for (const t of visibleTasks) {
       // Each column id is a status slug; an orphan status (e.g. one that was
       // deactivated while tasks still carry it) falls into the first column.
       const colId = map.has(t.status) ? t.status : fallbackId;
       if (colId) map.get(colId)?.push(t);
     }
     return map;
-  }, [tasks, boardColumns]);
+  }, [visibleTasks, boardColumns]);
+
+  // ── Chip-picker option arrays (cards + Composer) ────────────────────────
+
+  const statusOptions = useMemo<ChipOption[]>(
+    () =>
+      taskStatusList.map((e) => ({
+        value: e.slug,
+        label: e.label,
+        color: e.color,
+      })),
+    [taskStatusList],
+  );
+
+  const priorityOptions = useMemo<ChipOption[]>(
+    () =>
+      priorityVocabOrFallback.map((e) => ({
+        value: e.slug,
+        label: e.label,
+        color: priorityColors[e.slug] ?? e.color,
+      })),
+    [priorityVocabOrFallback, priorityColors],
+  );
+
+  // Grouped Humans/Agents, alphabetical within each group, "— Unassigned"
+  // first. Mirrors ComposerModal's own (module-private) construction —
+  // ComposerModal takes raw `members` and builds its own options (D9/D10
+  // in the plan already treat these as two separate constructions, not one
+  // shared helper), while the card takes this pre-built array.
+  const assigneeOptions = useMemo<ChipOption[]>(() => {
+    const humans = members
+      .filter((m) => m.type === "human")
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((m): ChipOption => ({ value: String(m.id), label: m.name, group: "Humans" }));
+    const agents = members
+      .filter((m) => m.type === "agent")
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(
+        (m): ChipOption => ({
+          value: String(m.id),
+          label: m.name,
+          group: "Agents",
+          hint: AGENT_HINT,
+        }),
+      );
+    return [{ value: "", label: "— Unassigned" }, ...humans, ...agents];
+  }, [members]);
+
+  const labelOptions = useMemo(
+    () => labelTaxonomy.map((t) => ({ id: t.id, label: t.display_name, color: t.color })),
+    [labelTaxonomy],
+  );
+
+  // ── Filter-bar option arrays — separate from the card/Composer arrays
+  //    above: a filter's "" row means "stop filtering" ("Any …"), never
+  //    "— Unassigned", which on a card means "write assignee_id: null". No
+  //    agent hint is carried here either. ─────────────────────────────────
+
+  const projectFilterOptions = useMemo<ChipOption[]>(
+    () => [
+      { value: "", label: "Any project" },
+      ...projects.map((p) => ({ value: String(p.id), label: p.name })),
+    ],
+    [projects],
+  );
+
+  const priorityFilterOptions = useMemo<ChipOption[]>(
+    () => [
+      { value: "", label: "Any priority" },
+      ...priorityVocabOrFallback.map((e) => ({
+        value: e.slug,
+        label: e.label,
+        color: priorityColors[e.slug] ?? e.color,
+      })),
+    ],
+    [priorityVocabOrFallback, priorityColors],
+  );
+
+  const assigneeFilterOptions = useMemo<ChipOption[]>(
+    () => [
+      { value: "", label: "Any assignee" },
+      ...members
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((m) => ({ value: String(m.id), label: m.name })),
+    ],
+    [members],
+  );
+
+  const labelFilterOptions = useMemo<ChipOption[]>(
+    () => [
+      { value: "", label: "Any label" },
+      ...labelTaxonomy.map((t) => ({
+        value: String(t.id),
+        label: t.display_name,
+        color: t.color,
+      })),
+    ],
+    [labelTaxonomy],
+  );
+
+  const statusFilterOptions = useMemo<ChipOption[]>(
+    () => [
+      { value: "", label: "Any status" },
+      ...taskStatusList.map((e) => ({
+        value: e.slug,
+        label: e.label,
+        color: e.color,
+      })),
+    ],
+    [taskStatusList],
+  );
+
+  // Never blank: "medium"/"todo" when the active vocabulary has them,
+  // otherwise the first active slug — preserves the pre-Composer NewTaskForm
+  // seed without hardcoding a slug that a custom taxonomy might not have.
+  const defaultPriority = useMemo(() => {
+    if (priorityVocabOrFallback.some((e) => e.slug === "medium")) return "medium";
+    return priorityVocabOrFallback[0]?.slug ?? "";
+  }, [priorityVocabOrFallback]);
+
+  const defaultStatus = useMemo(() => {
+    if (taskStatusList.some((e) => e.slug === "todo")) return "todo";
+    return taskStatusList[0]?.slug ?? "";
+  }, [taskStatusList]);
 
   // ── UI state ─────────────────────────────────────────────────────────────
 
-  const [showForm, setShowForm] = useState(false);
+  const [showComposer, setShowComposer] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
 
   // ── Callbacks ────────────────────────────────────────────────────────────
 
   const invalidateTasks = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["tasks"] });
+    void qc.invalidateQueries({ queryKey: ["dashboard"] });
   }, [qc]);
 
-  const handleMoveTask = useCallback(
-    async (taskId: number, status: string) => {
-      await fetchSidecar(`/api/v1/tasks/${taskId}/status`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      invalidateTasks();
+  const handleStatus = useCallback(
+    async (id: number, status: string) => {
+      try {
+        await changeTaskStatus(id, status);
+        invalidateTasks();
+      } catch (err) {
+        toast.error(`Failed to change status: ${(err as Error).message}`);
+      }
     },
     [invalidateTasks],
   );
 
-  // ── List-view filter helpers ─────────────────────────────────────────────
+  const handlePriority = useCallback(
+    async (id: number, priority: string) => {
+      try {
+        await updateTask(id, { priority });
+        invalidateTasks();
+      } catch (err) {
+        toast.error(`Failed to change priority: ${(err as Error).message}`);
+      }
+    },
+    [invalidateTasks],
+  );
+
+  const handleAssignee = useCallback(
+    async (id: number, assigneeId: number | null) => {
+      try {
+        await updateTask(id, { assignee_id: assigneeId });
+        invalidateTasks();
+      } catch (err) {
+        toast.error(`Failed to change assignee: ${(err as Error).message}`);
+      }
+    },
+    [invalidateTasks],
+  );
+
+  const handleToggleLabel = useCallback(
+    async (id: number, labelId: number, next: boolean) => {
+      try {
+        if (next) await addTaskLabel(id, labelId);
+        else await removeTaskLabel(id, labelId);
+        invalidateTasks();
+      } catch (err) {
+        toast.error(`Failed to update labels: ${(err as Error).message}`);
+      }
+    },
+    [invalidateTasks],
+  );
+
+  const wipLimitWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const handleSetWipLimit = useCallback(
+    (statusSlug: string, limit: number | null) => {
+      wipLimitWriteQueueRef.current = wipLimitWriteQueueRef.current.then(
+        async () => {
+          try {
+            const current =
+              qc.getQueryData<LookupsOut>(["lookups"])?.board_wip_limits ??
+              NO_WIP;
+            await setBoardWipLimit(current, statusSlug, limit);
+            await qc.invalidateQueries({ queryKey: ["lookups"] });
+          } catch (err) {
+            toast.error(
+              `Failed to update WIP limit: ${(err as Error).message}`,
+            );
+          }
+        },
+      );
+    },
+    [qc],
+  );
+
+  // Stable wrappers so TaskCard's memo() actually short-circuits — every
+  // callback below keeps referential identity across renders as long as its
+  // dependency (an already-useCallback'd handler) does too.
+  const onCardNavigate = useCallback(
+    (path: string) => void navigate(path),
+    [navigate],
+  );
+  const onCardStatus = useCallback(
+    (id: number, status: string) => void handleStatus(id, status),
+    [handleStatus],
+  );
+  const onCardPriority = useCallback(
+    (id: number, priority: string) => void handlePriority(id, priority),
+    [handlePriority],
+  );
+  const onCardAssignee = useCallback(
+    (id: number, assigneeId: number | null) =>
+      void handleAssignee(id, assigneeId),
+    [handleAssignee],
+  );
+  const onCardToggleLabel = useCallback(
+    (id: number, labelId: number, next: boolean) =>
+      void handleToggleLabel(id, labelId, next),
+    [handleToggleLabel],
+  );
+
+  // ── Filter helpers ───────────────────────────────────────────────────────
 
   const setFilter = useCallback(
     (key: string, value: string) => {
@@ -1023,6 +855,14 @@ export function TasksPage(): ReactElement {
     [searchParams, setSearchParams],
   );
 
+  const handleClearAll = useCallback(() => {
+    const p = new URLSearchParams(searchParams);
+    for (const key of ["project_id", "priority", "assignee_id", "label", "status"]) {
+      p.delete(key);
+    }
+    setSearchParams(p);
+  }, [searchParams, setSearchParams]);
+
   const setViewMode = useCallback(
     (mode: ViewMode) => {
       const p = new URLSearchParams(searchParams);
@@ -1033,7 +873,11 @@ export function TasksPage(): ReactElement {
     [searchParams, setSearchParams],
   );
 
-  // ── Default project id for new-task form ─────────────────────────────────
+  const filtersActive = Boolean(
+    projectFilter || priorityFilter || assigneeFilter || labelFilter,
+  );
+
+  // ── Default project id for the Composer ──────────────────────────────────
 
   const defaultProjectId = useMemo(() => {
     if (projectFilter) return projectFilter;
@@ -1043,22 +887,42 @@ export function TasksPage(): ReactElement {
     return preferred ? String(preferred.id) : "";
   }, [projects, projectFilter]);
 
+  // ── Keyboard shortcut: N opens the Composer ──────────────────────────────
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      if (showComposer) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== "n" && e.key !== "N") return;
+      if (e.target instanceof HTMLElement) {
+        const editable = e.target.closest(
+          "input, textarea, select, [contenteditable=''], [contenteditable='true']",
+        );
+        if (editable) return;
+      }
+      e.preventDefault();
+      setShowComposer(true);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showComposer]);
+
   // ── Stable callbacks for memoised list-view rows ─────────────────────────
 
   const navigateRef = useRef(navigate);
   const setFilterRef = useRef(setFilter);
-  const handleMoveTaskRef = useRef(handleMoveTask);
+  const handleStatusRef = useRef(handleStatus);
   useEffect(() => {
     navigateRef.current = navigate;
     setFilterRef.current = setFilter;
-    handleMoveTaskRef.current = handleMoveTask;
+    handleStatusRef.current = handleStatus;
   });
   const rowCallbacks = useMemo<TaskRowCallbacks>(
     () => ({
       navigate: (path: string) => void navigateRef.current(path),
       setProjectFilter: (id: string) => setFilterRef.current("project_id", id),
       changeStatus: (id: number, status: string) =>
-        void handleMoveTaskRef.current(id, status),
+        void handleStatusRef.current(id, status),
       statuses,
       statusColors,
       statusLabels,
@@ -1073,7 +937,7 @@ export function TasksPage(): ReactElement {
   const groups = useMemo(() => {
     if (viewMode !== "list" || projectFilter) return null;
     const byProject = new Map<number, { name: string; rows: Task[] }>();
-    for (const t of tasks) {
+    for (const t of visibleTasks) {
       const entry = byProject.get(t.project_id);
       if (entry) {
         entry.rows.push(t);
@@ -1091,7 +955,7 @@ export function TasksPage(): ReactElement {
         if (b.name === UNASSIGNED_NAME) return -1;
         return a.name.localeCompare(b.name);
       });
-  }, [tasks, projectFilter, viewMode]);
+  }, [visibleTasks, projectFilter, viewMode]);
 
   const renderTable = (rows: Task[]) => (
     <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -1129,53 +993,12 @@ export function TasksPage(): ReactElement {
     <Shell
       actions={
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {/* View toggle */}
-          <div
-            style={{
-              display: "flex",
-              background: "var(--bg-2)",
-              border: "1px solid var(--line-2)",
-              borderRadius: 6,
-              overflow: "hidden",
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setViewMode("board")}
-              style={{
-                padding: "5px 12px",
-                fontSize: 12,
-                border: "none",
-                cursor: "pointer",
-                background:
-                  viewMode === "board" ? "var(--accent)" : "transparent",
-                color: viewMode === "board" ? "#fff" : "var(--fg-3)",
-                fontWeight: viewMode === "board" ? 600 : 400,
-              }}
-            >
-              Board
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("list")}
-              style={{
-                padding: "5px 12px",
-                fontSize: 12,
-                border: "none",
-                cursor: "pointer",
-                background:
-                  viewMode === "list" ? "var(--accent)" : "transparent",
-                color: viewMode === "list" ? "#fff" : "var(--fg-3)",
-                fontWeight: viewMode === "list" ? 600 : 400,
-              }}
-            >
-              List
-            </button>
-          </div>
+          <ViewToggle mode={viewMode} onChange={setViewMode} />
           <button
             className="d3-btn d3-btn--primary"
             type="button"
-            onClick={() => setShowForm(!showForm)}
+            title="New task (N)"
+            onClick={() => setShowComposer(true)}
           >
             + New Task
           </button>
@@ -1183,108 +1006,61 @@ export function TasksPage(): ReactElement {
       }
     >
       <div style={{ padding: "0 24px 24px" }}>
-        {/* New task form */}
-        {showForm && (
-          <NewTaskForm
-            projects={projects}
-            members={members}
-            statuses={statuses}
-            statusLabels={statusLabels}
-            priorities={priorities}
-            defaultProjectId={defaultProjectId}
-            onCancel={() => setShowForm(false)}
-            onCreated={() => {
-              setShowForm(false);
-              invalidateTasks();
+        <div className="tb-toolbar">
+          <FilterBar
+            values={{
+              project_id: projectFilter,
+              priority: priorityFilter,
+              assignee_id: assigneeFilter,
+              label: labelFilter,
+              status: statusFilter,
             }}
+            projectOptions={projectFilterOptions}
+            priorityOptions={priorityFilterOptions}
+            assigneeOptions={assigneeFilterOptions}
+            labelOptions={labelFilterOptions}
+            statusOptions={
+              viewMode === "list" ? statusFilterOptions : undefined
+            }
+            sort={
+              viewMode === "list"
+                ? { value: sortFilter, options: SORT_OPTIONS }
+                : undefined
+            }
+            onSet={setFilter}
+            onSetSort={
+              viewMode === "list" ? (v) => setFilter("sort", v) : undefined
+            }
+            onClearAll={handleClearAll}
           />
-        )}
-
-        {/* Project filter (both views) */}
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            marginBottom: 16,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          <select
-            value={projectFilter}
-            onChange={(e) => setFilter("project_id", e.target.value)}
-            style={{
-              fontSize: 13,
-              padding: "4px 8px",
-              background: "var(--bg-2)",
-              border: "1px solid var(--line-2)",
-              color: "var(--fg-1)",
-              borderRadius: 6,
-            }}
-          >
-            <option value="">All Projects</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-
-          {/* List-only filters */}
-          {viewMode === "list" && (
-            <>
-              <select
-                value={statusFilter}
-                onChange={(e) => setFilter("status", e.target.value)}
-                style={{
-                  fontSize: 13,
-                  padding: "4px 8px",
-                  background: "var(--bg-2)",
-                  border: "1px solid var(--line-2)",
-                  color: "var(--fg-1)",
-                  borderRadius: 6,
-                }}
-              >
-                <option value="">All Statuses</option>
-                {statuses.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={sortFilter}
-                onChange={(e) => setFilter("sort", e.target.value)}
-                style={{
-                  fontSize: 13,
-                  padding: "4px 8px",
-                  background: "var(--bg-2)",
-                  border: "1px solid var(--line-2)",
-                  color: "var(--fg-1)",
-                  borderRadius: 6,
-                }}
-              >
-                <option value="">Sort: Newest</option>
-                <option value="created_at_asc">Sort: Oldest</option>
-                <option value="priority">Sort: Priority</option>
-                <option value="project">Sort: Project</option>
-              </select>
-            </>
-          )}
         </div>
 
         {/* ── BOARD VIEW ── */}
         {viewMode === "board" && (
-          <div className="wb-board">
+          <div className="tb-board">
             {boardColumns.map((col) => (
-              <BoardCol
+              <BoardColumn
                 key={col.id}
                 col={col}
-                taskItems={tasksByColumn.get(col.id) ?? []}
-                vocab={vocab}
-                targetStatuses={targetStatuses}
-                onNavigate={(path) => void navigate(path)}
-                onMoveTask={(id, status) => void handleMoveTask(id, status)}
+                tasks={tasksByColumn.get(col.id) ?? []}
+                wipLimit={wipLimits[col.id] ?? null}
+                filtersActive={filtersActive}
+                onSetWipLimit={(slug, limit) =>
+                  void handleSetWipLimit(slug, limit)
+                }
+                liveTaskIds={liveTaskIds}
+                card={{
+                  vocab: boardVocab,
+                  statusOptions,
+                  priorityOptions,
+                  assigneeOptions,
+                  labelOptions,
+                  onNavigate: onCardNavigate,
+                  onStatus: onCardStatus,
+                  onPriority: onCardPriority,
+                  onAssignee: onCardAssignee,
+                  onToggleLabel: onCardToggleLabel,
+                }}
               />
             ))}
           </div>
@@ -1293,7 +1069,7 @@ export function TasksPage(): ReactElement {
         {/* ── LIST VIEW ── */}
         {viewMode === "list" && (
           <>
-            {tasks.length === 0 ? (
+            {visibleTasks.length === 0 ? (
               <div
                 style={{
                   color: "var(--fg-3)",
@@ -1306,8 +1082,8 @@ export function TasksPage(): ReactElement {
                 {statusFilter ? ` with status "${statusFilter}"` : ""}
                 {projectFilter ? " in selected project" : ""}.
               </div>
-            ) : tasks.length >= VIRTUAL_THRESHOLD ? (
-              <VirtualTaskList tasks={tasks} cb={rowCallbacks} />
+            ) : visibleTasks.length >= VIRTUAL_THRESHOLD ? (
+              <VirtualTaskList tasks={visibleTasks} cb={rowCallbacks} />
             ) : groups ? (
               <div
                 style={{
@@ -1377,12 +1153,27 @@ export function TasksPage(): ReactElement {
                 className="d3-card"
                 style={{ padding: 0, overflow: "hidden" }}
               >
-                {renderTable(tasks)}
+                {renderTable(visibleTasks)}
               </div>
             )}
           </>
         )}
       </div>
+
+      {showComposer && (
+        <ComposerModal
+          projects={projects}
+          members={members}
+          statusOptions={statusOptions}
+          priorityOptions={priorityOptions}
+          labelOptions={labelOptions}
+          defaultProjectId={defaultProjectId}
+          defaultStatus={defaultStatus}
+          defaultPriority={defaultPriority}
+          onClose={() => setShowComposer(false)}
+          onCreated={invalidateTasks}
+        />
+      )}
     </Shell>
   );
 }
