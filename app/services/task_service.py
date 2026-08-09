@@ -1,6 +1,8 @@
 from datetime import date
+from typing import Any
 
 import aiosqlite
+from fastapi import HTTPException
 
 from . import notification_service
 from .activity_service import log_activity
@@ -12,8 +14,54 @@ _SORT_CLAUSES = {
 }
 _DEFAULT_SORT = "t.created_at DESC"
 
+# Keep any generated `IN (...)` list below SQLITE_MAX_VARIABLE_NUMBER (999 on
+# older SQLite builds), so a long-lived board with thousands of tasks can't
+# blow the limit when fetching labels for all of them at once.
+_LABEL_ID_CHUNK = 500
 
-async def get_all_tasks(db: aiosqlite.Connection, filters: dict | None = None):
+
+async def _labels_by_task(
+    db: aiosqlite.Connection, task_ids: list[int]
+) -> dict[int, list[dict[str, Any]]]:
+    """Fetch active task_label rows for a batch of tasks in one (or a few) query.
+
+    Returns ``{}`` immediately for an empty input — an empty ``IN ()`` is a SQL
+    syntax error, and an empty task list means there is nothing to fetch.
+    """
+    by_task: dict[int, list[dict[str, Any]]] = {}
+    if not task_ids:
+        return by_task
+    for start in range(0, len(task_ids), _LABEL_ID_CHUNK):
+        chunk = task_ids[start : start + _LABEL_ID_CHUNK]
+        placeholders = ",".join("?" for _ in chunk)
+        async with db.execute(
+            "SELECT a.task_id AS task_id, "
+            "tx.id AS id, tx.slug AS slug, tx.display_name AS label, "
+            "tx.color AS color, tx.sort_order AS sort_order "
+            "FROM task_label_assignments a "
+            "JOIN taxonomies tx ON tx.id = a.label_id "
+            f"WHERE tx.kind = 'task_label' AND tx.is_active = 1 "
+            f"AND a.task_id IN ({placeholders}) "
+            "ORDER BY tx.sort_order, tx.id",
+            chunk,
+        ) as cur:
+            rows = await cur.fetchall()
+        for row in rows:
+            by_task.setdefault(int(row["task_id"]), []).append(
+                {
+                    "id": row["id"],
+                    "slug": row["slug"],
+                    "label": row["label"],
+                    "color": row["color"],
+                    "sort_order": row["sort_order"],
+                }
+            )
+    return by_task
+
+
+async def get_all_tasks(
+    db: aiosqlite.Connection, filters: dict | None = None
+) -> list[dict[str, Any]]:
     query = (
         "SELECT t.*, m.name as assignee_name, p.name as project_name "
         "FROM tasks t "
@@ -44,10 +92,14 @@ async def get_all_tasks(db: aiosqlite.Connection, filters: dict | None = None):
     query += " ORDER BY " + _SORT_CLAUSES.get(sort, _DEFAULT_SORT)
 
     rows = await db.execute(query, params)
-    return await rows.fetchall()
+    tasks = [dict(r) for r in await rows.fetchall()]
+    by_task = await _labels_by_task(db, [int(t["id"]) for t in tasks])
+    for t in tasks:
+        t["labels"] = by_task.get(int(t["id"]), [])
+    return tasks
 
 
-async def get_task(db: aiosqlite.Connection, task_id: int):
+async def get_task(db: aiosqlite.Connection, task_id: int) -> dict[str, Any] | None:
     row = await db.execute(
         "SELECT t.*, m.name as assignee_name, p.name as project_name "
         "FROM tasks t "
@@ -56,7 +108,13 @@ async def get_task(db: aiosqlite.Connection, task_id: int):
         "WHERE t.id = ?",
         (task_id,),
     )
-    return await row.fetchone()
+    result = await row.fetchone()
+    if result is None:
+        return None
+    task = dict(result)
+    by_task = await _labels_by_task(db, [task_id])
+    task["labels"] = by_task.get(task_id, [])
+    return task
 
 
 async def create_task(db: aiosqlite.Connection, data: dict) -> int:
@@ -276,3 +334,168 @@ async def _cascade_unblock(db: aiosqlite.Connection, completed_task_id: int):
                     },
                     priority="normal",
                 )
+
+
+# --- Task labels (many-to-many via task_label_assignments) -----------------
+#
+# A task carries any number of `task_label` taxonomy rows. Cascade on task
+# deletion is the FK (task_label_assignments.task_id ON DELETE CASCADE,
+# migration 004), not an explicit DELETE here — the same pattern task_blockers
+# already relies on above. That also covers raw `DELETE FROM tasks` paths
+# (e.g. the factory reset) that never call delete_task.
+
+
+async def _task_exists(db: aiosqlite.Connection, task_id: int) -> bool:
+    async with db.execute("SELECT 1 FROM tasks WHERE id = ?", (task_id,)) as cur:
+        return await cur.fetchone() is not None
+
+
+async def _assert_task(db: aiosqlite.Connection, task_id: int) -> None:
+    if not await _task_exists(db, task_id):
+        raise HTTPException(status_code=404, detail="task not found")
+
+
+async def _task_project_id(db: aiosqlite.Connection, task_id: int) -> int | None:
+    async with db.execute(
+        "SELECT project_id FROM tasks WHERE id = ?", (task_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    return row["project_id"] if row else None
+
+
+async def _label_slug(db: aiosqlite.Connection, label_id: int) -> str:
+    async with db.execute(
+        "SELECT slug FROM taxonomies WHERE id = ?", (label_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    return row["slug"] if row else str(label_id)
+
+
+async def _assert_label_ids(db: aiosqlite.Connection, label_ids: list[int]) -> None:
+    """Every id must be an *active* task_label row.
+
+    This is the invariant that stops a task being tagged with, say, the
+    `high` priority id — priority ids and label ids live in the same
+    `taxonomies` table — and stops a deactivated (hidden) label from being
+    newly assigned.
+    """
+    if not label_ids:
+        return
+    placeholders = ",".join("?" for _ in label_ids)
+    async with db.execute(
+        "SELECT id FROM taxonomies WHERE kind = 'task_label' AND is_active = 1 "
+        f"AND id IN ({placeholders})",
+        label_ids,
+    ) as cur:
+        present = {row["id"] for row in await cur.fetchall()}
+    missing = sorted(set(label_ids) - present)
+    if missing:
+        raise HTTPException(
+            status_code=400, detail=f"not an active task_label id: {missing}"
+        )
+
+
+async def list_task_labels(
+    db: aiosqlite.Connection, task_id: int
+) -> list[dict[str, Any]]:
+    await _assert_task(db, task_id)
+    by_task = await _labels_by_task(db, [task_id])
+    return by_task.get(task_id, [])
+
+
+async def add_task_label(db: aiosqlite.Connection, task_id: int, label_id: int) -> None:
+    await _assert_task(db, task_id)
+    await _assert_label_ids(db, [label_id])
+    await db.execute(
+        "INSERT OR IGNORE INTO task_label_assignments (task_id, label_id) "
+        "VALUES (?, ?)",
+        (task_id, label_id),
+    )
+    await db.commit()
+    await log_activity(
+        db,
+        "task",
+        task_id,
+        "label_added",
+        new_value=await _label_slug(db, label_id),
+        project_id=await _task_project_id(db, task_id),
+    )
+
+
+async def remove_task_label(
+    db: aiosqlite.Connection, task_id: int, label_id: int
+) -> None:
+    """Remove one assignment. Removing an unassigned pair is a silent success
+    so two clients can race the same untag — no `is_active` requirement, so a
+    hidden assignment can still be explicitly dropped."""
+    await _assert_task(db, task_id)
+    slug = await _label_slug(db, label_id)
+    await db.execute(
+        "DELETE FROM task_label_assignments WHERE task_id = ? AND label_id = ?",
+        (task_id, label_id),
+    )
+    await db.commit()
+    await log_activity(
+        db,
+        "task",
+        task_id,
+        "label_removed",
+        old_value=slug,
+        project_id=await _task_project_id(db, task_id),
+    )
+
+
+async def set_task_labels(
+    db: aiosqlite.Connection, task_id: int, label_ids: list[int]
+) -> list[dict[str, Any]]:
+    """Replace the whole label set for a task.
+
+    Validates the entire requested list before mutating anything (same
+    discipline as taxonomy_service.reorder) so a bad id leaves the existing
+    set untouched. A deactivated label's assignment is never destroyed by the
+    delete step below, even though it is invisible to the read path — the
+    delete only targets assignments to *active* labels, and the picker this
+    feeds is built from the active vocabulary anyway.
+    """
+    await _assert_task(db, task_id)
+    # Dedupe, preserving order.
+    deduped: list[int] = list(dict.fromkeys(label_ids))
+    await _assert_label_ids(db, deduped)
+
+    if deduped:
+        keep_placeholders = ",".join("?" for _ in deduped)
+        await db.execute(
+            "DELETE FROM task_label_assignments "
+            f"WHERE task_id = ? AND label_id NOT IN ({keep_placeholders}) "
+            "AND label_id IN "
+            "(SELECT id FROM taxonomies WHERE kind = 'task_label' AND is_active = 1)",
+            (task_id, *deduped),
+        )
+    else:
+        # Nothing to keep: clear every *active* assignment, leaving a
+        # deactivated label's assignment untouched.
+        await db.execute(
+            "DELETE FROM task_label_assignments "
+            "WHERE task_id = ? AND label_id IN "
+            "(SELECT id FROM taxonomies WHERE kind = 'task_label' AND is_active = 1)",
+            (task_id,),
+        )
+    for label_id in deduped:
+        await db.execute(
+            "INSERT OR IGNORE INTO task_label_assignments (task_id, label_id) "
+            "VALUES (?, ?)",
+            (task_id, label_id),
+        )
+    await db.commit()
+
+    labels = await list_task_labels(db, task_id)
+    slugs = ",".join(label["slug"] for label in labels)
+    await log_activity(
+        db,
+        "task",
+        task_id,
+        "labels_set",
+        new_value=slugs,
+        project_id=await _task_project_id(db, task_id),
+    )
+    return labels

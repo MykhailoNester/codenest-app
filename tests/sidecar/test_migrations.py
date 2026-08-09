@@ -287,3 +287,127 @@ async def test_agent_sessions_has_context_tokens(migrated_db) -> None:
     assert "context_tokens" in col_names, (
         "context_tokens column missing from agent_sessions"
     )
+
+
+# ---------------------------------------------------------------------------
+# Migration 004 — task labels
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_task_label_assignments_table_schema(migrated_db) -> None:
+    """task_label_assignments must have exactly the documented columns."""
+    cur = await migrated_db.execute("PRAGMA table_info(task_label_assignments)")
+    rows = await cur.fetchall()
+    col_names = {r["name"] for r in rows}
+    assert col_names == {"task_id", "label_id", "created_at"}
+
+
+@pytest.mark.asyncio
+async def test_task_label_assignments_composite_pk(migrated_db) -> None:
+    """The composite PRIMARY KEY (task_id, label_id) must reject a duplicate."""
+    import aiosqlite
+
+    cur = await migrated_db.execute(
+        "INSERT INTO projects (name, description, tech_stack, status) VALUES (?, ?, ?, ?)",
+        ("LabelPkProj", None, None, "active"),
+    )
+    await migrated_db.commit()
+    cur = await migrated_db.execute("SELECT id FROM projects WHERE name='LabelPkProj'")
+    proj = await cur.fetchone()
+    assert proj is not None
+
+    cur = await migrated_db.execute(
+        "INSERT INTO tasks (title, project_id) VALUES (?, ?)",
+        ("Label PK task", proj["id"]),
+    )
+    await migrated_db.commit()
+    task_id = cur.lastrowid
+    assert task_id is not None
+
+    label_cur = await migrated_db.execute(
+        "SELECT id FROM taxonomies WHERE kind = 'task_label' LIMIT 1"
+    )
+    label = await label_cur.fetchone()
+    assert label is not None
+    label_id = label["id"]
+
+    await migrated_db.execute(
+        "INSERT INTO task_label_assignments (task_id, label_id) VALUES (?, ?)",
+        (task_id, label_id),
+    )
+    await migrated_db.commit()
+
+    with pytest.raises(aiosqlite.IntegrityError):
+        await migrated_db.execute(
+            "INSERT INTO task_label_assignments (task_id, label_id) VALUES (?, ?)",
+            (task_id, label_id),
+        )
+
+
+@pytest.mark.asyncio
+async def test_idx_task_label_assignments_label_exists(migrated_db) -> None:
+    """The idx_task_label_assignments_label index must be present."""
+    cur = await migrated_db.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' "
+        "AND name='idx_task_label_assignments_label'"
+    )
+    row = await cur.fetchone()
+    assert row is not None, "index idx_task_label_assignments_label missing"
+
+
+@pytest.mark.asyncio
+async def test_task_label_seed_rows_present(migrated_db) -> None:
+    """Migration 004 must seed exactly five task_label rows, all non-default."""
+    cur = await migrated_db.execute(
+        "SELECT slug, is_default FROM taxonomies WHERE kind = 'task_label'"
+    )
+    rows = await cur.fetchall()
+    assert {r["slug"] for r in rows} == {"bug", "feature", "chore", "research", "docs"}
+    assert all(r["is_default"] == 0 for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_task_label_assignment_task_fk_cascade(migrated_db) -> None:
+    """Deleting a task must cascade-delete its label assignments."""
+    cur = await migrated_db.execute(
+        "INSERT INTO projects (name, description, tech_stack, status) VALUES (?, ?, ?, ?)",
+        ("LabelCascadeProj", None, None, "active"),
+    )
+    await migrated_db.commit()
+    cur = await migrated_db.execute(
+        "SELECT id FROM projects WHERE name='LabelCascadeProj'"
+    )
+    proj = await cur.fetchone()
+    assert proj is not None
+
+    cur = await migrated_db.execute(
+        "INSERT INTO tasks (title, project_id) VALUES (?, ?)",
+        ("Label cascade task", proj["id"]),
+    )
+    await migrated_db.commit()
+    task_id = cur.lastrowid
+    assert task_id is not None
+
+    label_cur = await migrated_db.execute(
+        "SELECT id FROM taxonomies WHERE kind = 'task_label' LIMIT 1"
+    )
+    label = await label_cur.fetchone()
+    assert label is not None
+
+    await migrated_db.execute(
+        "INSERT INTO task_label_assignments (task_id, label_id) VALUES (?, ?)",
+        (task_id, label["id"]),
+    )
+    await migrated_db.commit()
+
+    await migrated_db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    await migrated_db.commit()
+
+    cur = await migrated_db.execute(
+        "SELECT COUNT(*) AS cnt FROM task_label_assignments WHERE task_id = ?",
+        (task_id,),
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    assert row["cnt"] == 0, "assignment should have been cascade-deleted"

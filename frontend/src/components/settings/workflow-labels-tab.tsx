@@ -2,13 +2,18 @@
  * WorkflowLabelsTab — Settings → Workflow Labels.
  *
  * Single source of truth for the workflow vocabulary the Work Board renders:
- * task statuses (one board column each) and task priorities (badges + sorting).
- * Editing a label, colour, or order here drives the board, card dropdowns, and
- * list view live; the underlying slug stays stable, so existing tasks are never
- * touched by a rename.
+ * task statuses (one board column each), task priorities (badges + sorting),
+ * and task labels (multi-value tags on cards — a task can carry any number of
+ * them). Editing a label, colour, or order here drives the board, card
+ * dropdowns, and list view live; the underlying slug stays stable, so existing
+ * tasks are never touched by a rename.
  *
  * Add a status → a new board column appears. Remove a built-in status → its
  * column is hidden (it can be restored). Remove a custom status → it's deleted.
+ * Task labels follow the same add/remove rules as the other two groups; unlike
+ * them, a task's label membership lives in a separate join table
+ * (`task_label_assignments`), so removing or restoring a label here only ever
+ * hides/reveals its tag on cards — it never touches which tasks were tagged.
  *
  * UX modelled on JetBrains' Settings → editable-list (ToolbarDecorator):
  * inline in-place editing, a colour cell editor, add / remove / move-up-down,
@@ -33,8 +38,8 @@ interface GroupDef {
   addLabel: string;
 }
 
-// Only the two vocabularies the Work Board uses. (The board has no separate
-// "inbox"/triage lane, so inbox statuses + priorities are not edited here.)
+// The three vocabularies the Work Board uses. (The board has no separate
+// "inbox"/triage lane, so inbox statuses are not edited here.)
 const GROUPS: readonly GroupDef[] = [
   {
     kind: "task_status",
@@ -48,6 +53,13 @@ const GROUPS: readonly GroupDef[] = [
     title: "Task priorities",
     description: "Priority badges and priority sorting.",
     addLabel: "Add priority",
+  },
+  {
+    kind: "task_label",
+    title: "Task labels",
+    description:
+      "Multi-select tags on Work Board cards. A task can carry any number of them.",
+    addLabel: "Add label",
   },
 ];
 
@@ -68,6 +80,11 @@ const DEFAULTS: Record<string, { label: string; color: string; order: number }> 
     "task_priority:high": { label: "High", color: "#ef4444", order: 10 },
     "task_priority:medium": { label: "Medium", color: "#f59e0b", order: 20 },
     "task_priority:low": { label: "Low", color: "#22c55e", order: 30 },
+    "task_label:bug": { label: "Bug", color: "#ef4444", order: 10 },
+    "task_label:feature": { label: "Feature", color: "#3b82f6", order: 20 },
+    "task_label:chore": { label: "Chore", color: "#6b7280", order: 30 },
+    "task_label:research": { label: "Research", color: "#a855f7", order: 40 },
+    "task_label:docs": { label: "Docs", color: "#38bdf8", order: 50 },
   };
 
 function slugify(label: string): string {
@@ -107,10 +124,10 @@ export function WorkflowLabelsTab(): ReactElement {
             maxWidth: 580,
           }}
         >
-          Rename, recolour, reorder, add, or remove the labels your Work Board
-          uses. Changes apply everywhere — board columns, dropdowns, and badges.
-          The underlying key stays stable, so existing tasks are never touched
-          by a rename.
+          Rename, recolour, reorder, add, or remove the statuses, priorities,
+          and labels your Work Board uses. Changes apply everywhere — board
+          columns, dropdowns, badges, and card tags. The underlying key stays
+          stable, so existing tasks are never touched by a rename.
         </p>
       </div>
 

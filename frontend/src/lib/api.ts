@@ -483,6 +483,20 @@ export interface Task {
   created_at: string;
   updated_at: string;
   blockers?: TaskBlocker[];
+  labels?: TaskLabel[];
+}
+
+/**
+ * One `task_label` tag on a task. `id` is the `taxonomies.id` the
+ * `/api/v1/tasks/{id}/labels` endpoints key on; `label` is the taxonomy row's
+ * `display_name`. A task can carry any number of these.
+ */
+export interface TaskLabel {
+  id: number;
+  slug: string;
+  label: string;
+  color: string | null;
+  sort_order: number;
 }
 
 export interface TaskBlocker {
@@ -587,6 +601,50 @@ export function useTask(taskId: number): UseQueryResult<Task, SidecarError> {
     queryFn: () => fetchSidecar<Task>(`/api/v1/tasks/${taskId}`),
     enabled: taskId > 0,
   });
+}
+
+// ─── Task labels ──────────────────────────────────────────────────────────────
+//
+// Available labels come from `useTaxonomy("task_label")`, not from a fetcher
+// here — see the `TaxonomyKind` union below. These four cover reading and
+// writing the per-task assignment; there is no dedicated React Query hook —
+// callers invalidate `["tasks"]` / `["dashboard"]` themselves after a write,
+// since a task's `labels` array is embedded in both.
+
+export function fetchTaskLabels(taskId: number): Promise<TaskLabel[]> {
+  return fetchSidecar<TaskLabel[]>(`/api/v1/tasks/${taskId}/labels`);
+}
+
+export function setTaskLabels(
+  taskId: number,
+  labelIds: number[],
+): Promise<TaskLabel[]> {
+  return fetchSidecar<TaskLabel[]>(`/api/v1/tasks/${taskId}/labels`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label_ids: labelIds }),
+  });
+}
+
+export function addTaskLabel(
+  taskId: number,
+  labelId: number,
+): Promise<{ ok: true }> {
+  return fetchSidecar<{ ok: true }>(`/api/v1/tasks/${taskId}/labels`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label_id: labelId }),
+  });
+}
+
+export function removeTaskLabel(
+  taskId: number,
+  labelId: number,
+): Promise<{ ok: true }> {
+  return fetchSidecar<{ ok: true }>(
+    `/api/v1/tasks/${taskId}/labels/${labelId}`,
+    { method: "DELETE" },
+  );
 }
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
@@ -832,7 +890,11 @@ export function useRichImportProjects(): UseMutationResult<
 // ─── Taxonomies ────────────────────────────────────────────────────
 
 export type TaxonomyKind =
-  "task_status" | "task_priority" | "workflow_status" | "workflow_priority";
+  | "task_status"
+  | "task_priority"
+  | "workflow_status"
+  | "workflow_priority"
+  | "task_label";
 
 export interface Taxonomy {
   id: number;
@@ -2413,6 +2475,13 @@ export interface LookupsOut {
   workflow_inbox_statuses: WorkflowVocabEntry[];
   document_categories: string[];
   document_category_colors: Record<string, string>;
+  /**
+   * Work-in-progress cap per board column, keyed by task-status slug. A
+   * missing key means "no limit". Values are always positive integers —
+   * the sidecar coerces out anything else. Write with
+   * `upsertSetting("board_wip_limits", nextMap)` then invalidate `["lookups"]`.
+   */
+  board_wip_limits: Record<string, number>;
   profiles: ProfileOut[];
   /**
    * `true` once the legacy first-run persona wizard was completed.
