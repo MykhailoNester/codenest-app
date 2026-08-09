@@ -1,16 +1,22 @@
+from typing import TypeGuard
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
 from app.services.task_service import (
     add_blocker,
+    add_task_label,
     change_task_status,
     create_task,
     delete_task,
     get_all_tasks,
     get_task,
     get_task_blockers,
+    list_task_labels,
     remove_blocker,
+    remove_task_label,
+    set_task_labels,
     update_task,
 )
 
@@ -110,4 +116,67 @@ async def api_add_blocker(task_id: int, request: Request):
 async def api_remove_blocker(task_id: int, blocker_id: int):
     db = await get_db()
     await remove_blocker(db, blocker_id)
+    return JSONResponse({"ok": True})
+
+
+def _is_positive_int(value: object) -> TypeGuard[int]:
+    """True for a positive int that is not a bool.
+
+    ``isinstance(True, int)`` is ``True`` in Python, so a bare
+    ``isinstance(v, int)`` check would silently accept ``{"label_id": true}``
+    as ``1``.
+    """
+    return not isinstance(value, bool) and isinstance(value, int) and value > 0
+
+
+@router.get("/api/v1/tasks/{task_id}/labels")
+async def api_list_task_labels(task_id: int):
+    db = await get_db()
+    labels = await list_task_labels(db, task_id)
+    return JSONResponse(labels)
+
+
+@router.put("/api/v1/tasks/{task_id}/labels")
+async def api_set_task_labels(task_id: int, request: Request):
+    db = await get_db()
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
+    label_ids = data.get("label_ids")
+    if not isinstance(label_ids, list) or not all(
+        _is_positive_int(v) for v in label_ids
+    ):
+        return JSONResponse(
+            {"error": "label_ids must be a list of positive integers"},
+            status_code=400,
+        )
+    labels = await set_task_labels(db, task_id, label_ids)
+    return JSONResponse(labels)
+
+
+@router.post("/api/v1/tasks/{task_id}/labels")
+async def api_add_task_label(task_id: int, request: Request):
+    db = await get_db()
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
+    label_id = data.get("label_id")
+    if not _is_positive_int(label_id):
+        return JSONResponse(
+            {"error": "label_id must be a positive integer"}, status_code=400
+        )
+    await add_task_label(db, task_id, label_id)
+    return JSONResponse({"ok": True}, status_code=201)
+
+
+@router.delete("/api/v1/tasks/{task_id}/labels/{label_id}")
+async def api_remove_task_label(task_id: int, label_id: int):
+    db = await get_db()
+    await remove_task_label(db, task_id, label_id)
     return JSONResponse({"ok": True})

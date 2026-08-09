@@ -276,6 +276,22 @@ async def get_lookups(db: aiosqlite.Connection) -> dict:
     document_category_colors = await _read_json_setting(
         db, "document_category_colors", {}
     )
+    # WIP limits: task-status slug -> positive card-count cap; a missing key
+    # means "no limit". Stored as a hand-editable JSON app_setting, so the
+    # coercion below drops anything that isn't a non-bool positive int —
+    # a hand-edited `0`, a negative number, a string, or `true` can't crash
+    # the board that reads this map.
+    raw_wip = await _read_json_setting(db, "board_wip_limits", {})
+    board_wip_limits: dict[str, int] = {}
+    if isinstance(raw_wip, dict):
+        for wip_key, wip_value in raw_wip.items():
+            if (
+                isinstance(wip_key, str)
+                and isinstance(wip_value, int)
+                and not isinstance(wip_value, bool)
+                and wip_value >= 1
+            ):
+                board_wip_limits[wip_key] = wip_value
     profiles = await profile_service.list_profiles(db)
     # `wizard.completed` is stored as a JSON string ("true"/"false"). Surfacing
     # the boolean here keeps the first-run gate as a free read on the existing
@@ -304,6 +320,7 @@ async def get_lookups(db: aiosqlite.Connection) -> dict:
         "workflow_inbox_statuses": workflow_inbox_statuses,
         "document_categories": document_categories,
         "document_category_colors": document_category_colors,
+        "board_wip_limits": board_wip_limits,
         "profiles": profiles,
         "wizard_completed": wizard_completed == "true",
         "enabled_features": enabled_features,

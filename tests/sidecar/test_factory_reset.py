@@ -161,6 +161,7 @@ async def test_factory_reset_wipes_user_data_and_restores_seed(
             "task_blockers",
             "attachments",
             "insight_runs",
+            "task_label_assignments",
             "tasks",
             "workflow_items",
             "documents",

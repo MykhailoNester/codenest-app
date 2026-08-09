@@ -7,6 +7,10 @@ and ordering are user-editable. New slugs can be added at runtime (the
 CHECK constraints on tasks/workflow_items.status/priority were dropped
 in migration 027).
 
+``task_label`` is the first **multi-value** kind: membership lives in the
+``task_label_assignments`` join table (migration 004), not in a column on
+the owning row, because a task can carry any number of labels.
+
 All callers pass the shared aiosqlite connection from ``get_db()``.
 """
 
@@ -19,7 +23,13 @@ import aiosqlite
 from fastapi import HTTPException
 
 VALID_KINDS: frozenset[str] = frozenset(
-    {"task_status", "task_priority", "workflow_status", "workflow_priority"}
+    {
+        "task_status",
+        "task_priority",
+        "workflow_status",
+        "workflow_priority",
+        "task_label",
+    }
 )
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
