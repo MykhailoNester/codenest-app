@@ -39,7 +39,9 @@ export interface CommandData {
 
 /** Everything a command may *do*. Built fresh at execution time. */
 export interface SlashCommandEffects {
-  clearSession: () => void;
+  /** Empty this pane's context — transcript, pills, and the CLI's own history
+   *  — *without* ending the session. Rejects if the forward to the CLI fails. */
+  clearContext: () => Promise<void>;
   sendRaw: (text: string) => Promise<void>;
   showHelp: () => void;
 }
@@ -65,16 +67,33 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * `/clear` empties the context and keeps the session — the CLI's own
+ * behaviour, and what the pane needs in order to stay usable.
+ *
+ * It used to restart instead: report the run as exited, drop the pane's
+ * session state, then ask for a respawn. That was wrong twice over. The exit
+ * report made the sidecar announce "Session … finished successfully" and put
+ * the pane into its `Session ended (exit 0)` state behind a Restart button,
+ * for a process that was still very much alive; and the respawn raced that
+ * still-live process, so `agent_start` refused with "agent session already
+ * running" and left the pane wedged with no way back.
+ */
 async function runClearCommand(
   _arg: string,
   ctx: SlashCommandContext,
 ): Promise<CommandOutcome> {
   try {
-    ctx.clearSession();
+    await ctx.clearContext();
   } catch (err) {
     return { kind: "error", note: `clear failed: ${describeError(err)}` };
   }
-  return { kind: "ok", note: "cleared — restarting with an empty context" };
+  return {
+    kind: "ok",
+    note: ctx.live
+      ? "context cleared — same session, keep going"
+      : "transcript cleared — the session had already ended",
+  };
 }
 
 async function runCompactCommand(
@@ -114,7 +133,7 @@ async function runHelpCommand(
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   {
     name: "clear",
-    summary: "Restart the session with an empty context.",
+    summary: "Clear the context and keep working in this session.",
     argHint: null,
     runsBare: true,
     complete: null,

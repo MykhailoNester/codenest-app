@@ -37,6 +37,10 @@ interface AgentSessionStore {
   allowSession: (paneId: string, sessionKey: string) => void;
   resolvePermission: (paneId: string, requestId: string) => void;
   reset: (paneId: string) => void;
+  /** Empty the rendered conversation while keeping the session — what `/clear`
+   *  means. Distinct from `reset`, which drops the pane's whole entry and is
+   *  for a session that has genuinely gone away. */
+  clearContext: (paneId: string) => void;
 }
 
 export const useAgentSessionStore = create<AgentSessionStore>((set, get) => ({
@@ -102,6 +106,34 @@ export const useAgentSessionStore = create<AgentSessionStore>((set, get) => ({
       const sessionAllowed = { ...state.sessionAllowed };
       delete sessionAllowed[paneId];
       return { panes, sessionAllowed };
+    });
+  },
+
+  clearContext: (paneId) => {
+    set((state) => {
+      const pane = state.panes[paneId];
+      if (!pane) return state;
+      return {
+        panes: {
+          ...state.panes,
+          [paneId]: {
+            ...pane,
+            // Everything that *is* the transcript.
+            turns: [],
+            streaming: false,
+            streamText: "",
+            thinking: false,
+            thinkingTokens: 0,
+            lastResult: null,
+            // `sessionId`, `status`, `model`, `permissionMode`, `startedAt`,
+            // `exitCode` and `usage` are deliberately untouched: this is a
+            // context reset, not a teardown. The process is still alive and
+            // still the same session, so anything describing the *session*
+            // rather than the conversation has to survive — resetting them is
+            // what made `/clear` look like an exit.
+          },
+        },
+      };
     });
   },
 

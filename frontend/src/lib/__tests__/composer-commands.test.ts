@@ -12,7 +12,7 @@ import {
 
 function effects(over: Partial<SlashCommandEffects> = {}): SlashCommandEffects {
   return {
-    clearSession: vi.fn(),
+    clearContext: vi.fn(async () => undefined),
     sendRaw: vi.fn(async () => undefined),
     showHelp: vi.fn(),
     ...over,
@@ -49,16 +49,45 @@ describe("SLASH_COMMANDS registry — decision 2", () => {
 });
 
 describe("/clear — decision 6", () => {
-  it("calls clearSession alone, no sendRaw, no IPC", async () => {
-    const clearSession = vi.fn();
+  it("clears context alone — no sendRaw, and the note promises the session survives", async () => {
+    const clearContext = vi.fn(async () => undefined);
     const sendRaw = vi.fn(async () => undefined);
-    const c = ctx({}, { clearSession, sendRaw });
+    const c = ctx({ live: true }, { clearContext, sendRaw });
     const result = await runCommandLine("/clear", c);
-    expect(clearSession).toHaveBeenCalledTimes(1);
+    expect(clearContext).toHaveBeenCalledTimes(1);
+    // The forward to the CLI is `clearContext`'s own business — routing it
+    // through `sendRaw` would record an optimistic user turn and re-populate
+    // the transcript the command just emptied.
     expect(sendRaw).not.toHaveBeenCalled();
     expect(result?.kind).toBe("ran");
     if (result?.kind !== "ran") throw new Error("unreachable");
-    expect(result.outcome).toEqual({ kind: "ok", note: "cleared — restarting with an empty context" });
+    expect(result.outcome).toEqual({
+      kind: "ok",
+      note: "context cleared — same session, keep going",
+    });
+  });
+
+  it("still clears the transcript on an ended session, and says so", async () => {
+    const clearContext = vi.fn(async () => undefined);
+    const c = ctx({ live: false }, { clearContext });
+    const result = await runCommandLine("/clear", c);
+    expect(clearContext).toHaveBeenCalledTimes(1);
+    if (result?.kind !== "ran") throw new Error("unreachable");
+    expect(result.outcome).toEqual({
+      kind: "ok",
+      note: "transcript cleared — the session had already ended",
+    });
+  });
+
+  it("surfaces a failed forward as an error instead of claiming success", async () => {
+    const clearContext = vi.fn(async () => {
+      throw new Error("stdin closed");
+    });
+    const c = ctx({ live: true }, { clearContext });
+    const result = await runCommandLine("/clear", c);
+    if (result?.kind !== "ran") throw new Error("unreachable");
+    expect(result.outcome.kind).toBe("error");
+    expect(result.outcome.note).toContain("stdin closed");
   });
 });
 

@@ -60,7 +60,6 @@ import { logDnd } from "../../lib/drop-diagnostics";
 import { useAgentSessionStore } from "../../stores/agent-session-store";
 import { useTerminalStore } from "../../stores/terminal-store";
 import { collectLeaves, paneKind } from "../../lib/layout-tree";
-import { recordAgentExited } from "../../lib/agent-run-telemetry";
 import { detectTrigger, parseCommandLine } from "../../lib/prompt-intent";
 import {
   findCommand,
@@ -929,16 +928,20 @@ export function AgentComposer({
    *  irrelevant, since nothing memoizes on it. */
   function commandEffects(): SlashCommandEffects {
     return {
-      // Reads the session id *before* dropping any state — the pane's own
-      // teardown reports the exit under `panes[leafId]?.sessionId` after the
-      // restart is requested, so resetting first would make that report
-      // unnamed and unsafe across the replacement session (Design decision 6).
-      clearSession: () => {
-        const sessionId = useAgentSessionStore.getState().panes[leafId]?.sessionId ?? null;
+      // Nothing here reports an exit or asks for a restart: the session is
+      // still running and stays that way. `recordAgentExited` in particular
+      // must not be called — it is the sidecar's cue to announce the run as
+      // finished, and the pane's cue to render `Session ended` behind a
+      // Restart button, neither of which is true of a context reset.
+      clearContext: async () => {
         useComposerStore.getState().clearPane(leafId);
-        if (sessionId !== null) recordAgentExited(leafId, null, sessionId);
-        useAgentSessionStore.getState().reset(leafId);
-        onRequestRestart();
+        useAgentSessionStore.getState().clearContext(leafId);
+        // Forwarded so the CLI drops its own context too — clearing only this
+        // side would leave the model still carrying a conversation the user
+        // can no longer see. Sent through `agentSend` rather than the
+        // `sendRaw` effect deliberately: `sendRaw` records an optimistic user
+        // turn, which would re-populate the transcript we just emptied.
+        if (live) await agentSend(leafId, "/clear");
       },
       sendRaw: async (text) => {
         useAgentSessionStore.getState().markSendStart(leafId, text);

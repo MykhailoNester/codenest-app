@@ -209,7 +209,7 @@ describe("unregistered commands — decision 4", () => {
 });
 
 describe("/clear — decision 6", () => {
-  it("restarts locally, empties the composer and transcript, and reports the exit under the ended session's id", async () => {
+  it("empties the transcript and pills but keeps the very same session running", async () => {
     const onRequestRestart = vi.fn();
     seedSession({ sessionId: "session-1" });
     useComposerStore.setState({
@@ -228,13 +228,25 @@ describe("/clear — decision 6", () => {
     typeDraft("/clear");
     pressKey("Enter");
 
-    await waitFor(() => expect(onRequestRestart).toHaveBeenCalledTimes(1));
-    expect(recordAgentExitedMock).toHaveBeenCalledWith(LEAF, null, "session-1");
-    expect(useAgentSessionStore.getState().panes[LEAF]).toBeUndefined();
+    await waitFor(() => expect(agentSendMock).toHaveBeenCalledWith(LEAF, "/clear"));
+
+    // The three symptoms this command used to cause, each asserted absent.
+    // A restart while the old process is still registered is what produced
+    // "agent session already running" and wedged the pane.
+    expect(onRequestRestart).not.toHaveBeenCalled();
+    // Reporting an exit is what made the sidecar announce the run as finished
+    // and the pane render "Session ended (exit 0)" behind a Restart button.
+    expect(recordAgentExitedMock).not.toHaveBeenCalled();
+
+    const pane = useAgentSessionStore.getState().panes[LEAF];
+    expect(pane).toBeDefined();
+    expect(pane?.sessionId).toBe("session-1");
+    expect(pane?.status).not.toBe("exited");
+    expect(pane?.turns).toEqual([]);
     expect(useComposerStore.getState().panes[LEAF]?.pills ?? []).toEqual([]);
   });
 
-  it("still runs on an exited session — Send is not disabled for a command", async () => {
+  it("clears locally without a doomed forward when the session has already ended", async () => {
     const onRequestRestart = vi.fn();
     seedSession({ status: "exited", sessionId: "session-1" });
     renderComposer({ status: "exited", onRequestRestart });
@@ -243,7 +255,13 @@ describe("/clear — decision 6", () => {
     expect((screen.getByRole("button", { name: /Run/ }) as HTMLButtonElement).disabled).toBe(false);
 
     pressKey("Enter");
-    await waitFor(() => expect(onRequestRestart).toHaveBeenCalledTimes(1));
+
+    await waitFor(() =>
+      expect(useAgentSessionStore.getState().panes[LEAF]?.turns).toEqual([]),
+    );
+    expect(agentSendMock).not.toHaveBeenCalled();
+    expect(onRequestRestart).not.toHaveBeenCalled();
+    expect(recordAgentExitedMock).not.toHaveBeenCalled();
   });
 });
 
