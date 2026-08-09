@@ -11,6 +11,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { Task, Project, SearchResult, SearchResultType } from "../lib/api";
 import { useSearch } from "../lib/api";
 import { useDebounce } from "../hooks/use-debounce";
+import {
+  flattenGrouped,
+  groupResults,
+  GROUP_LABELS,
+  GROUP_ORDER,
+  projectRoute,
+  routeForResult,
+  typeColor,
+  typeIcon,
+} from "../lib/search-results";
 import { Icon } from "./icon";
 import styles from "./command-palette.module.css";
 
@@ -46,55 +56,6 @@ function sanitizeSnippet(raw: string): string {
   return escaped
     .replace(/&lt;mark&gt;/gi, "<mark>")
     .replace(/&lt;\/mark&gt;/gi, "</mark>");
-}
-
-function routeForResult(result: SearchResult): string {
-  switch (result.type) {
-    case "task":
-      return `/tasks/${result.id}`;
-    case "project":
-      return `/projects/${result.id}`;
-    case "doc":
-      return `/docs?id=${result.id}`;
-    case "inbox":
-      return `/inbox?id=${result.id}`;
-    case "event":
-      return result.session_id ? `/sessions/${result.session_id}` : "/sessions";
-  }
-}
-
-const GROUP_ORDER: SearchResultType[] = [
-  "task",
-  "project",
-  "doc",
-  "inbox",
-  "event",
-];
-
-const GROUP_LABELS: Record<SearchResultType, string> = {
-  task: "Tasks",
-  project: "Projects",
-  doc: "Knowledge",
-  inbox: "Inbox",
-  event: "Sessions",
-};
-
-function typeIcon(type: SearchResultType | "member"): string {
-  if (type === "task") return "tasks";
-  if (type === "project") return "projects";
-  if (type === "doc") return "docs";
-  if (type === "inbox") return "inbox";
-  if (type === "event") return "agents";
-  return "team";
-}
-
-function typeColor(type: SearchResultType | "member"): string {
-  if (type === "task") return "#60a5fa";
-  if (type === "project") return "#a855f7";
-  if (type === "doc") return "#f59e0b";
-  if (type === "inbox") return "#ec4899";
-  if (type === "event") return "#10b981";
-  return "#22c55e";
 }
 
 // Hover handler debounce window
@@ -143,31 +104,22 @@ function PaletteInner({ onClose }: { onClose: () => void }): ReactElement {
         id: p.id,
         title: p.name,
         sub: p.tech_stack ?? p.description ?? "",
-        path: `/tasks?project_id=${p.id}`,
+        path: projectRoute(p.id),
       })),
     ].slice(0, 9);
   }, [qc]);
 
   // ── Grouped backend results ───────────────────────────────────────────────
 
-  const grouped = useMemo<Record<SearchResultType, SearchResult[]>>(() => {
-    const empty: Record<SearchResultType, SearchResult[]> = {
-      task: [],
-      project: [],
-      doc: [],
-      inbox: [],
-      event: [],
-    };
-    if (!searchData?.results) return empty;
-    for (const r of searchData.results) {
-      empty[r.type].push(r);
-    }
-    return empty;
-  }, [searchData]);
+  const grouped = useMemo<Record<SearchResultType, SearchResult[]>>(
+    () => groupResults(searchData?.results),
+    [searchData],
+  );
 
-  const flatResults = useMemo<SearchResult[]>(() => {
-    return GROUP_ORDER.flatMap((t) => grouped[t]);
-  }, [grouped]);
+  const flatResults = useMemo<SearchResult[]>(
+    () => flattenGrouped(grouped),
+    [grouped],
+  );
 
   // ── Common flat list for keyboard nav ────────────────────────────────────
 

@@ -21,6 +21,13 @@
   min-width: 0;
 }
 
+.leadIcon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--fg-4);
+}
+
 .input {
   flex: 1;
   background: rgba(255, 255, 255, 0.04);
@@ -65,13 +72,13 @@
 .suggestions {
   position: absolute;
   top: 100%;
-  left: 24px;
-  right: 24px;
+  left: 0;
+  right: 0;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: 6px;
   margin-top: 4px;
-  max-height: 240px;
+  max-height: min(320px, 50vh);
   overflow-y: auto;
   z-index: 100;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
@@ -79,13 +86,14 @@
 
 .suggestion {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 6px 10px;
   font-size: 12px;
   color: var(--fg-1);
   cursor: pointer;
   border-bottom: 1px solid var(--line-1);
+  border-left: 2px solid transparent;
 }
 
 .suggestion:hover {
@@ -96,9 +104,81 @@
   border-bottom: 0;
 }
 
+.suggestionActive {
+  background: rgba(59, 130, 246, 0.1);
+  border-left: 2px solid var(--accent);
+}
+
 .suggestionMeta {
   font-size: 10.5px;
   color: var(--fg-3);
+}
+
+.groupHeader {
+  padding: 4px 10px;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  color: var(--fg-4);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--line-1);
+}
+
+.rowIcon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--fg-3);
+}
+
+.rowMeta {
+  margin-left: auto;
+  flex: none;
+  font-size: 10px;
+  color: var(--fg-3);
+  font-family: var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.emptyState {
+  padding: 14px 10px;
+  text-align: center;
+  color: var(--fg-4);
+  font-size: 12px;
+}
+
+.panelFooter {
+  padding: 5px 10px;
+  font-size: 10px;
+  color: var(--fg-4);
+  border-top: 1px solid var(--line-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.captureChip {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--fg-1);
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  border-radius: 999px;
+  padding: 2px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.captureChip:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.captureChip:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .hint {
@@ -118,16 +198,4 @@
   border-radius: 3px;
   color: var(--fg-3);
   vertical-align: middle;
-}
-
-.actionHint {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  font-size: 10.5px;
-  color: var(--fg-4);
-  white-space: nowrap;
-  pointer-events: none;
-  /* z-index below the suggestions popover (100) but above page content */
-  z-index: 21;
 }

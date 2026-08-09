@@ -993,6 +993,25 @@ export function TasksPage(): ReactElement {
   const [showForm, setShowForm] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
 
+  // The OmniBar's "New Task" command navigates here with `?new=1` — there is
+  // no other cross-page way to open this form. Clearing the param with
+  // `replace` keeps Back and a page refresh from re-opening it, and makes
+  // the command idempotent when you are already on /tasks.
+  //
+  // The state updates are deferred to a microtask so this satisfies
+  // `react-hooks/set-state-in-effect` (no direct synchronous `setState` in
+  // the effect body); the deferral is a microtask, so it still lands before
+  // the next paint.
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") return;
+    queueMicrotask(() => {
+      setShowForm(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("new");
+      setSearchParams(next, { replace: true });
+    });
+  }, [searchParams, setSearchParams]);
+
   // ── Callbacks ────────────────────────────────────────────────────────────
 
   const invalidateTasks = useCallback(() => {

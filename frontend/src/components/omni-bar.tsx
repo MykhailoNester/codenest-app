@@ -2,23 +2,50 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ChangeEvent,
   type DragEvent,
+  type KeyboardEvent,
   type ReactElement,
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  classifyIntent,
-  fetchSidecar,
-  SidecarError,
+  fetchLibraryItemBySlug,
   useCreateAttachment,
   useCreateInboxItem,
+  useEnabledFeatures,
+  useLibraryItems,
   useProjects,
+  useSearch,
   useTeamMembers,
-  type IntentResult,
-  type LibraryItem,
+  type SearchResult,
 } from "../lib/api";
+import {
+  classifyIntent,
+  parseLibraryRef,
+  type IntentResult,
+} from "../lib/prompt-intent";
+import {
+  buildCommandRows,
+  OMNI_COMMAND_LIMIT,
+  OMNI_EVENT_OPEN_LAUNCH,
+  OMNI_EVENT_OPEN_PALETTE,
+  type OmniCommand,
+} from "../lib/omni-commands";
+import { buildMentionRows, type OmniMentionRow } from "../lib/omni-mentions";
+import {
+  flattenGrouped,
+  groupResults,
+  GROUP_LABELS,
+  GROUP_ORDER,
+  projectRoute,
+  routeForResult,
+  typeColor,
+  typeIcon,
+} from "../lib/search-results";
+import { useDebounce } from "../hooks/use-debounce";
 import { useVoiceDictation } from "../lib/use-voice-dictation";
+import { Icon } from "./icon";
 import styles from "./omni-bar.module.css";
 
 function fileToBase64(file: File): Promise<string> {
@@ -40,14 +67,12 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-// Global event the App-level Cmd+K handler subscribes to so Shell consumers
-// don't have to plumb a callback down through every page.
-const PALETTE_OPEN_EVENT = "omni:open-palette";
-
-const LIBRARY_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,127}$/;
-
 function dispatchPaletteOpen(): void {
-  document.dispatchEvent(new CustomEvent(PALETTE_OPEN_EVENT));
+  document.dispatchEvent(new CustomEvent(OMNI_EVENT_OPEN_PALETTE));
+}
+
+function dispatchOpenLaunch(): void {
+  document.dispatchEvent(new CustomEvent(OMNI_EVENT_OPEN_LAUNCH));
 }
 
 const KIND_LABEL: Record<IntentResult["kind"], string> = {
@@ -66,13 +91,78 @@ const KIND_CLASS: Record<IntentResult["kind"], string> = {
   prompt: styles.kindPrompt ?? "",
 };
 
-const KIND_ACTION: Record<IntentResult["kind"], string> = {
-  "command-palette": "",
-  slash: "↵ run command",
-  reference: "↵ navigate  ·  @library:<slug> to insert a snippet",
-  search: "↵ search docs",
-  prompt: "↵ capture to WorkBoard",
-};
+/**
+ * What the dropdown is showing right now. `"search"` covers both the
+ * classifier's `search` and `prompt` kinds — they render the same result
+ * list; only the capture chip (driven by `captureEligible`) distinguishes a
+ * `prompt`-shaped query, per plan D3.
+ */
+type OmniMode = "command" | "reference" | "search" | "none";
+
+function modeForIntent(kind: IntentResult["kind"]): OmniMode {
+  switch (kind) {
+    case "slash":
+      return "command";
+    case "reference":
+      return "reference";
+    case "search":
+    case "prompt":
+      return "search";
+    case "command-palette":
+      return "none";
+  }
+}
+
+type OmniRow =
+  | { kind: "command"; command: OmniCommand }
+  | { kind: "mention"; row: OmniMentionRow }
+  | { kind: "result"; result: SearchResult };
+
+function rowKey(row: OmniRow, idx: number): string {
+  switch (row.kind) {
+    case "command":
+      return row.command.id;
+    case "mention":
+      return `mention-${idx}`;
+    case "result":
+      return `${row.result.type}-${row.result.id}`;
+  }
+}
+
+function rowIconName(row: OmniRow): string {
+  switch (row.kind) {
+    case "command":
+      return row.command.icon;
+    case "mention":
+      if (row.row.kind === "project") return "projects";
+      if (row.row.kind === "member") return "team";
+      return "library";
+    case "result":
+      return typeIcon(row.result.type);
+  }
+}
+
+function rowLabel(row: OmniRow): string {
+  switch (row.kind) {
+    case "command":
+      return row.command.title;
+    case "mention":
+      return row.row.label;
+    case "result":
+      return row.result.title;
+  }
+}
+
+function rowMetaText(row: OmniRow): string {
+  switch (row.kind) {
+    case "command":
+      return row.command.hint;
+    case "mention":
+      return row.row.meta;
+    case "result":
+      return row.result.type;
+  }
+}
 
 export function OmniBar(): ReactElement {
   const navigate = useNavigate();
@@ -80,10 +170,72 @@ export function OmniBar(): ReactElement {
   const members = useTeamMembers();
   const createInbox = useCreateInboxItem();
   const createAttachment = useCreateAttachment();
+  const features = useEnabledFeatures();
 
   const [query, setQuery] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+
   const intent = useMemo(() => classifyIntent(query), [query]);
+  const mode = modeForIntent(intent.kind);
+
+  const snippetsOn = features["snippets"] !== false;
+  // No library request until the user actually types `@`, and none at all
+  // when the Snippets feature is off (the default). `@library:<slug>`
+  // resolution itself stays unconditional — only the suggestion rows gate.
+  const library = useLibraryItems(
+    undefined,
+    undefined,
+    mode === "reference" && snippetsOn,
+  );
+
+  const searchTerm = mode === "search" ? intent.payload : "";
+  const debouncedTerm = useDebounce(searchTerm, 200);
+  // useSearch self-disables below 2 chars, so no extra guard is needed here.
+  const { data: searchData, isFetching, isError } = useSearch(debouncedTerm);
+  const grouped = useMemo(
+    () => groupResults(searchData?.results),
+    [searchData],
+  );
+
+  const captureEligible = intent.kind === "prompt";
+
+  const rows: OmniRow[] = useMemo(() => {
+    if (mode === "command") {
+      return buildCommandRows(intent.payload, features, OMNI_COMMAND_LIMIT).map(
+        (command): OmniRow => ({ kind: "command", command }),
+      );
+    }
+    if (mode === "reference") {
+      return buildMentionRows(
+        {
+          projects: projects.data ?? [],
+          members: members.data ?? [],
+          library: library.data?.items ?? [],
+        },
+        intent.payload,
+      ).map((row): OmniRow => ({ kind: "mention", row }));
+    }
+    if (mode === "search") {
+      return flattenGrouped(grouped).map(
+        (result): OmniRow => ({ kind: "result", result }),
+      );
+    }
+    return [];
+  }, [
+    mode,
+    intent.payload,
+    features,
+    projects.data,
+    members.data,
+    library.data,
+    grouped,
+  ]);
+
+  const open = focused && !dismissed && mode !== "none";
+  const clampedIdx = Math.min(activeIdx, Math.max(0, rows.length - 1));
 
   const voice = useVoiceDictation({
     onFinalTranscript: (text) => {
@@ -155,170 +307,274 @@ export function OmniBar(): ReactElement {
     void ingestFiles(e.dataTransfer.files);
   }
 
-  const refSuggestions = useMemo(() => {
-    if (intent.kind !== "reference") return [];
-    const needle = intent.payload.toLowerCase();
-    // Require at least one character after the `@` — typing just `@`
-    // shouldn't surface every project + member.
-    if (needle.length === 0) return [];
-    const out: { label: string; meta: string; onPick: () => void }[] = [];
-    for (const p of projects.data ?? []) {
-      if (p.name.toLowerCase().includes(needle)) {
-        out.push({
-          label: p.name,
-          meta: "project",
-          onPick: () => {
-            navigate("/projects");
-            setQuery("");
-          },
-        });
+  async function insertLibrarySnippet(slug: string): Promise<void> {
+    try {
+      const item = await fetchLibraryItemBySlug(slug);
+      if (!item) {
+        toast.error(`No library item @library:${slug}`);
+        return;
       }
+      setQuery(item.body);
+      toast.success(`Inserted @library:${slug}`);
+    } catch (err) {
+      toast.error(
+        `Library lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
-    for (const m of members.data ?? []) {
-      if (m.name.toLowerCase().includes(needle)) {
-        out.push({
-          label: m.name,
-          meta: m.type === "agent" ? "agent" : "human",
-          onPick: () => {
-            navigate(`/team/${encodeURIComponent(m.name)}`);
-            setQuery("");
-          },
-        });
-      }
-    }
-    return out.slice(0, 10);
-  }, [intent, projects.data, members.data, navigate]);
+  }
 
-  function handleSubmit(): void {
-    switch (intent.kind) {
-      case "command-palette":
+  function capture(): void {
+    createInbox.mutate(
+      { title: intent.payload, source: "omni-bar", type: "prompt" },
+      {
+        onSuccess: (data) => {
+          toast.success(`Captured to inbox #${data.id}`);
+          setQuery("");
+        },
+        onError: (e) => toast.error(`Capture failed: ${e.message}`),
+      },
+    );
+  }
+
+  function activate(row: OmniRow): void {
+    if (row.kind === "command") {
+      const { target } = row.command;
+      if (target.kind === "navigate") {
+        navigate(target.path);
+      } else if (target.action === "new-task") {
+        navigate("/tasks?new=1");
+      } else if (target.action === "launch-project") {
+        dispatchOpenLaunch();
+      } else {
         dispatchPaletteOpen();
-        return;
-      case "slash":
-        // Re-use the existing palette as the slash execution surface so we
-        // don't reimplement the slash registry.
-        dispatchPaletteOpen();
-        return;
-      case "reference":
-        if (intent.payload.toLowerCase().startsWith("library:")) {
-          const rest = intent.payload.slice("library:".length);
-          const slug = rest.split(/\s/, 1)[0]?.toLowerCase() ?? "";
-          if (!slug) {
-            toast.error("Empty @library:<slug>");
-            return;
-          }
-          if (!LIBRARY_SLUG_RE.test(slug)) {
-            toast.error(`Invalid @library:${slug}`);
-            return;
-          }
-          void (async () => {
-            try {
-              const item = await fetchSidecar<LibraryItem>(
-                `/api/v1/library/by-slug/${encodeURIComponent(slug)}`,
-              );
-              setQuery((current) => {
-                const match = current.match(/@library:/i);
-                const idx = match?.index ?? -1;
-                const head = idx >= 0 ? current.slice(0, idx) : "";
-                return `${head}${item.body}`;
-              });
-              toast.success(`Inserted @library:${slug}`);
-            } catch (err) {
-              if (err instanceof SidecarError && err.status === 404) {
-                toast.error(`No library item @library:${slug}`);
-              } else {
-                toast.error(
-                  `Library lookup failed: ${err instanceof Error ? err.message : String(err)}`,
-                );
-              }
-            }
-          })();
-          return;
-        }
-        // Pick the first suggestion on Enter; if none, fall through to inbox.
-        if (refSuggestions.length > 0) {
-          refSuggestions[0]?.onPick();
-          return;
-        }
-        toast.error(`No match for @${intent.payload}`);
-        return;
-      case "search":
-        // Route to the docs page with a search hash — that page already
-        // wires a search box; it just consumes the hash and filters.
-        navigate(`/docs#q=${encodeURIComponent(intent.payload)}`);
-        setQuery("");
-        return;
-      case "prompt":
-        createInbox.mutate(
-          { title: intent.payload, source: "omni-bar", type: "prompt" },
-          {
-            onSuccess: (data) => {
-              toast.success(`Captured to inbox #${data.id}`);
-              setQuery("");
-            },
-            onError: (e) => toast.error(`Capture failed: ${e.message}`),
-          },
-        );
-        return;
+      }
+      setQuery("");
+      return;
     }
+    if (row.kind === "mention") {
+      const m = row.row;
+      if (m.kind === "project") {
+        navigate(projectRoute(m.projectId));
+        setQuery("");
+      } else if (m.kind === "member") {
+        navigate(`/team/${encodeURIComponent(m.name)}`);
+        setQuery("");
+      } else {
+        void insertLibrarySnippet(m.slug);
+      }
+      return;
+    }
+    navigate(routeForResult(row.result));
+    setQuery("");
+  }
+
+  function onChange(e: ChangeEvent<HTMLInputElement>): void {
+    setQuery(e.target.value);
+    setActiveIdx(0);
+    setDismissed(false);
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>): void {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      if (captureEligible) capture();
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (open && rows.length > 0) {
+        const row = rows[clampedIdx];
+        if (row) activate(row);
+        return;
+      }
+      if (intent.kind === "reference") {
+        const ref = parseLibraryRef(intent.payload);
+        if (ref && !ref.ok) {
+          toast.error(
+            ref.reason === "empty"
+              ? "Empty @library:<slug>"
+              : `Invalid @library:${ref.slug}`,
+          );
+        }
+        return;
+      }
+      if (intent.kind === "command-palette") {
+        dispatchPaletteOpen();
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.min(i + 1, Math.max(0, rows.length - 1)));
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.max(i - 1, 0));
+      return;
+    }
+    if (e.key === "Escape") {
+      // Two-stage, intentionally: escaping out of an open results panel
+      // should not also destroy what you typed. `open` already implies
+      // `mode !== "none"`, so a second Escape (panel already dismissed)
+      // falls through to clearing the input.
+      if (open) {
+        setDismissed(true);
+      } else {
+        setQuery("");
+      }
+    }
+  }
+
+  // `null` means "none" — the idle state, rendered specially below so the
+  // ⌘K kbd stays a real <kbd> element rather than being flattened into text.
+  const modeHint = ((): string | null => {
+    if (mode === "command") return "↑↓ navigate · ↵ run command";
+    if (mode === "reference") return "↑↓ navigate · ↵ insert or open";
+    if (mode === "search")
+      return `↑↓ navigate · ↵ open${captureEligible ? " · ⌘↵ save to inbox" : ""}`;
+    return null;
+  })();
+
+  const panelMessage = ((): string | null => {
+    // The `useSearch`-derived flags are only meaningful in `search` mode —
+    // `/` and `@` need no network, and must keep working even if the last
+    // search errored (edge case: "Sidecar down / useSearch errors").
+    if (mode === "search" && isFetching && !searchData) return "Searching…";
+    if (mode === "search" && debouncedTerm.trim().length < 2)
+      return "Keep typing to search…";
+    if (mode === "search" && isError) return "Search unavailable";
+    if (mode === "reference" && intent.payload.length === 0)
+      return "Type to reference a project, agent or snippet";
+    if (rows.length === 0) return "No matches";
+    return null;
+  })();
+
+  function renderRow(row: OmniRow, idx: number): ReactElement {
+    const selected = idx === clampedIdx;
+    const metaStyle =
+      row.kind === "result" ? { color: typeColor(row.result.type) } : undefined;
+    return (
+      <div
+        key={rowKey(row, idx)}
+        id={`omni-row-${idx}`}
+        role="option"
+        aria-selected={selected}
+        className={`${styles.suggestion ?? ""} ${selected ? (styles.suggestionActive ?? "") : ""}`}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          activate(row);
+        }}
+        onMouseEnter={() => setActiveIdx(idx)}
+      >
+        <span className={styles.rowIcon ?? ""}>
+          <Icon name={rowIconName(row)} size={12} />
+        </span>
+        <span>{rowLabel(row)}</span>
+        <span className={styles.rowMeta ?? ""} style={metaStyle}>
+          {rowMetaText(row)}
+        </span>
+      </div>
+    );
+  }
+
+  function renderPanelRows(): ReactElement {
+    if (mode === "search") {
+      let idx = 0;
+      return (
+        <>
+          {GROUP_ORDER.map((type) => {
+            const items = grouped[type];
+            if (items.length === 0) return null;
+            const groupRows = items.map((result) => {
+              const el = renderRow({ kind: "result", result }, idx);
+              idx += 1;
+              return el;
+            });
+            return (
+              <div key={type}>
+                <div role="presentation" className={styles.groupHeader ?? ""}>
+                  {GROUP_LABELS[type]}
+                </div>
+                {groupRows}
+              </div>
+            );
+          })}
+        </>
+      );
+    }
+    return <>{rows.map((row, idx) => renderRow(row, idx))}</>;
   }
 
   return (
     <div
-      className={`${styles.bar} ${dragOver ? (styles.barDrag ?? "") : ""}`}
+      className={`${styles.bar ?? ""} ${dragOver ? (styles.barDrag ?? "") : ""}`}
       role="search"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <span className={styles.leadIcon ?? ""}>
+        <Icon name="search" size={13} />
+      </span>
       <input
         type="text"
         className={styles.input}
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            handleSubmit();
-          } else if (e.key === "Escape") {
-            setQuery("");
-          }
-        }}
-        placeholder="Ask, /command, @reference, or ?search…"
-        aria-label="Universal prompt bar"
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder="Search, or type / for commands, @ to reference…"
+        aria-label="Search and commands"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls="omni-listbox"
+        aria-activedescendant={
+          open && rows.length ? `omni-row-${clampedIdx}` : undefined
+        }
+        autoComplete="off"
       />
-      <span className={`${styles.kind} ${KIND_CLASS[intent.kind] ?? ""}`}>
+      <span className={`${styles.kind ?? ""} ${KIND_CLASS[intent.kind] ?? ""}`}>
         {voice.listening ? "listening…" : KIND_LABEL[intent.kind]}
       </span>
+      {captureEligible ? (
+        <button
+          type="button"
+          className={styles.captureChip ?? ""}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            capture();
+          }}
+          disabled={createInbox.isPending}
+        >
+          Save as inbox item ⌘↵
+        </button>
+      ) : null}
       <span className={styles.hint}>
         {voice.supported
           ? "Cmd+Shift+Space dictate (audio leaves device) · "
           : ""}
-        <kbd className={styles.kbdHint}>⌘K</kbd> palette · drop files
+        {modeHint !== null ? (
+          modeHint
+        ) : (
+          <>
+            <kbd className={styles.kbdHint}>⌘K</kbd> palette · drop files
+          </>
+        )}
       </span>
-      {refSuggestions.length > 0 ? (
-        <div className={styles.suggestions} role="listbox">
-          {refSuggestions.map((s) => (
-            <div
-              key={`${s.meta}:${s.label}`}
-              className={styles.suggestion}
-              role="option"
-              aria-selected={false}
-              onClick={s.onPick}
-            >
-              <span>{s.label}</span>
-              <span className={styles.suggestionMeta}>{s.meta}</span>
-            </div>
-          ))}
+      {open ? (
+        <div id="omni-listbox" role="listbox" className={styles.suggestions ?? ""}>
+          {panelMessage !== null ? (
+            <div className={styles.emptyState ?? ""}>{panelMessage}</div>
+          ) : (
+            renderPanelRows()
+          )}
+          {/* Complements the always-visible `.hint` strip above (which
+              already states the mode-specific navigate/act hint) rather
+              than repeating it. */}
+          <div className={styles.panelFooter ?? ""}>esc close</div>
         </div>
-      ) : null}
-      {intent.kind !== "command-palette" &&
-      refSuggestions.length === 0 &&
-      query.length > 0 &&
-      !(intent.kind === "reference" && intent.payload.length === 0) ? (
-        <span className={styles.actionHint}>
-          {KIND_ACTION[intent.kind]}
-        </span>
       ) : null}
     </div>
   );

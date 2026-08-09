@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useState,
   type ReactElement,
   type ReactNode,
@@ -14,6 +15,7 @@ import { Icon } from "../icon";
 import { LaunchModal } from "../launch/launch-modal";
 import { useActiveSessionCounts } from "../../lib/api";
 import { NAV_ITEMS } from "../../lib/nav-items";
+import { OMNI_EVENT_OPEN_LAUNCH } from "../../lib/omni-commands";
 
 interface ShellProps {
   children: ReactNode;
@@ -75,6 +77,15 @@ export function Shell({
 
   const openLaunch = useCallback(() => setLaunchOpen(true), []);
   const closeLaunch = useCallback(() => setLaunchOpen(false), []);
+
+  // The OmniBar's "Launch Project" command dispatches this on `document`
+  // (it is mounted on every page, so a shell-level listener always hears
+  // it) rather than needing a callback threaded down through every page.
+  useEffect(() => {
+    document.addEventListener(OMNI_EVENT_OPEN_LAUNCH, openLaunch);
+    return () =>
+      document.removeEventListener(OMNI_EVENT_OPEN_LAUNCH, openLaunch);
+  }, [openLaunch]);
 
   const derived = routeToTopbar(location.pathname);
   const title = topbarTitle ?? derived.title;
