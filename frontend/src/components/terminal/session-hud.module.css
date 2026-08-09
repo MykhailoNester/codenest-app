@@ -151,3 +151,78 @@
     opacity: 1;
   }
 }
+
+/* Shared idiom for any clickable *live* cell — first used by the sub-agent
+   cell below, and reused verbatim (with a different colour class) by the
+   companion multi-phase orchestration cell. */
+
+.cellBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cellBtn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Colour-free — inherits whatever colour class the cell applies, so the same
+   pulse works for a violet sub-agent glyph and (later) a differently-coloured
+   orchestration glyph. */
+.pulse {
+  display: inline-block;
+  animation: ppulse 1.25s ease-in-out infinite;
+}
+
+.violet {
+  color: var(--violet);
+}
+
+/* Keeps a pathologically long subagent_type from stretching the strip; the
+   full value stays available in the button's title. */
+.cellLabel {
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The expanded detail panel — a sibling of .strip, not a child, so it never
+   scrolls with the strip's own horizontal overflow. */
+.detail {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-1);
+  padding: 5px 13px 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-2);
+}
+
+.detailRow {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.detailName {
+  color: var(--violet);
+  font-weight: 700;
+}
+
+.detailText {
+  color: var(--fg-3);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

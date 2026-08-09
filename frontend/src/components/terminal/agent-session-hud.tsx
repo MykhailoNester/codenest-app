@@ -33,7 +33,13 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { formatUSD } from "../../lib/format-helpers";
 import { useGitPaneStatus } from "../../stores/session-hud-store";
-import type { ConversationState, ConvToolBlock } from "../../lib/agent-conversation";
+import {
+  activeSubagents,
+  isSubagentTool,
+  type ConversationState,
+  type ConvToolBlock,
+  type SubagentCall,
+} from "../../lib/agent-conversation";
 import {
   elapsedSecondsSinceMs,
   formatContextPercent,
@@ -47,17 +53,30 @@ interface AgentSessionHudProps {
   cwd: string | undefined;
 }
 
-/** The newest tool call still in flight, or `null` when nothing is running. */
+/** The newest tool call still in flight, or `null` when nothing is running.
+ *  A `Task`/`Agent` delegation is excluded — it owns the sub-agent cell
+ *  below instead, never this one. */
 function runningTool(state: ConversationState): ConvToolBlock | null {
   for (let i = state.turns.length - 1; i >= 0; i -= 1) {
     const turn = state.turns[i];
     if (!turn) continue;
     for (let j = turn.blocks.length - 1; j >= 0; j -= 1) {
       const block = turn.blocks[j];
-      if (block?.type === "tool" && block.endedAt === null) return block;
+      if (block?.type === "tool" && block.endedAt === null && !isSubagentTool(block.name)) {
+        return block;
+      }
     }
   }
   return null;
+}
+
+/** `"planner-agent"` for a single delegation, `"3 sub-agents"` for several.
+ *  Either way the cell's elapsed time is measured from `calls[0]` — the
+ *  oldest, per `activeSubagents`'s own ordering guarantee. */
+function subagentLabel(calls: readonly SubagentCall[]): string {
+  const primary = calls[0];
+  if (calls.length === 1 && primary) return primary.subagentType ?? "sub-agent";
+  return `${calls.length} sub-agents`;
 }
 
 export function AgentSessionHud({
@@ -69,7 +88,9 @@ export function AgentSessionHud({
   const dimmed = exited || state.status === "starting";
 
   // One interval for the elapsed cell, and only while the session is live —
-  // nothing ticks on a dead pane.
+  // nothing ticks on a dead pane. The sub-agent cell's own elapsed time rides
+  // this same tick rather than a second interval, since it can only ever be
+  // live while the session is too.
   const ticking = state.startedAt !== null && !exited;
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -77,6 +98,13 @@ export function AgentSessionHud({
     const id = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [ticking]);
+
+  // Which in-flight delegation's detail panel is open, keyed by tool_use id
+  // rather than a bare boolean so a second Task starting doesn't inherit the
+  // first one's expanded state. Derived-closed (below) rather than cleared
+  // here: once `expandedSubagentId` no longer names a call in `activeCalls`,
+  // `subagentExpanded` goes false on its own.
+  const [expandedSubagentId, setExpandedSubagentId] = useState<string | null>(null);
 
   const cells: ReactElement[] = [];
 
@@ -190,6 +218,37 @@ export function AgentSessionHud({
     );
   }
 
+  // Every Task/Agent call still in flight, oldest first. `[]` on an exited
+  // session already (activeSubagents' own contract), but `exited` is checked
+  // again here anyway, matching every other live-only cell on this strip.
+  const activeCalls = exited ? [] : activeSubagents(state);
+  const primarySubagent = activeCalls[0] ?? null;
+  const subagentExpanded =
+    expandedSubagentId !== null && activeCalls.some((c) => c.id === expandedSubagentId);
+  if (primarySubagent !== null) {
+    const subagentSeconds = elapsedSecondsSinceMs(primarySubagent.startedAt);
+    cells.push(
+      <div key="subagent" className={styles.cell} data-cell="subagent">
+        <button
+          type="button"
+          className={styles.cellBtn}
+          aria-expanded={subagentExpanded}
+          onClick={() =>
+            setExpandedSubagentId(subagentExpanded ? null : primarySubagent.id)
+          }
+        >
+          <span className={`${styles.pulse} ${styles.violet}`}>◈</span>
+          <span className={`${styles.value} ${styles.violet} ${styles.cellLabel}`}>
+            {subagentLabel(activeCalls)}
+          </span>
+          <span className={`${styles.value} ${styles.muted}`}>
+            {formatElapsed(subagentSeconds)}
+          </span>
+        </button>
+      </div>,
+    );
+  }
+
   if (state.thinking && !exited) {
     cells.push(
       <div key="thinking" className={styles.cell} data-cell="thinking">
@@ -215,12 +274,29 @@ export function AgentSessionHud({
   if (cells.length === 0) return null;
 
   return (
-    <div
-      className={dimmed ? `${styles.strip} ${styles.dimmed}` : styles.strip}
-      data-testid="agent-session-hud"
-      data-dimmed={dimmed ? "true" : "false"}
-    >
-      {cells}
-    </div>
+    <>
+      <div
+        className={dimmed ? `${styles.strip} ${styles.dimmed}` : styles.strip}
+        data-testid="agent-session-hud"
+        data-dimmed={dimmed ? "true" : "false"}
+      >
+        {cells}
+      </div>
+      {subagentExpanded && primarySubagent !== null ? (
+        <div className={styles.detail} data-testid="agent-subagent-detail">
+          <div className={styles.detailRow}>
+            <span className={styles.detailName}>
+              {primarySubagent.subagentType ?? "sub-agent"}
+            </span>
+            <span className={`${styles.value} ${styles.violet}`}>running</span>
+          </div>
+          {primarySubagent.description !== null ? (
+            <div className={styles.detailRow}>
+              <span className={styles.detailText}>{primarySubagent.description}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </>
   );
 }

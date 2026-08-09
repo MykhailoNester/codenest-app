@@ -340,6 +340,70 @@ export function toolDiffstat(
   return null;
 }
 
+/**
+ * The two tool names Claude Code launches a sub-agent under. Both spellings are
+ * live: the sidecar's own attribution matches
+ * `tool_name IN ('Agent','Task')` (`app/services/agent_service.py:1047-1049`).
+ */
+export const SUBAGENT_TOOL_NAMES: readonly string[] = ["Task", "Agent"];
+
+export function isSubagentTool(name: string): boolean {
+  return SUBAGENT_TOOL_NAMES.includes(name);
+}
+
+/** One sub-agent call this pane's session has launched and not yet heard back
+ *  from. Every field is a value the wire supplied; absent fields are `null`. */
+export interface SubagentCall {
+  /** The wire's `tool_use.id` — the same key the transcript row uses. May be
+   *  `""` when the wire omitted it (see `blocksFromAssistantContent`, :386). */
+  id: string;
+  /** `"Task"` or `"Agent"`, verbatim off the wire. */
+  toolName: string;
+  /** `input.subagent_type` — the sub-agent's name. `null` when the call named
+   *  none (never a placeholder, never the string "unknown"). */
+  subagentType: string | null;
+  /** `input.description` — the one-line task. `null` when absent or empty. */
+  description: string | null;
+  /** Arrival time of the `tool_use` frame, epoch ms (the block's `startedAt`). */
+  startedAt: number;
+}
+
+/**
+ * Every `Task`/`Agent` call this session has launched and not yet heard back
+ * from, oldest first.
+ *
+ * `[]` on an exited session — a dead process cannot have anything in flight,
+ * and claiming otherwise would be the same lie D11 of the session-state-hud
+ * plan forbids for the running-tool cell (see `agent-session-hud.tsx`'s doc
+ * comment). Folding the check in here, rather than at each call site, means
+ * every consumer (the HUD cell, the composer badge, the future orchestration
+ * cell) gets it for free.
+ *
+ * Deliberately returned oldest-first with no sort: blocks are appended in
+ * frame-arrival order, so a plain forward walk already yields that order —
+ * sorting would only cost cycles to reproduce what iteration order already
+ * guarantees.
+ */
+export function activeSubagents(state: ConversationState): SubagentCall[] {
+  if (state.status === "exited") return [];
+  const calls: SubagentCall[] = [];
+  for (const turn of state.turns) {
+    for (const block of turn.blocks) {
+      if (block.type !== "tool" || block.endedAt !== null) continue;
+      if (!isSubagentTool(block.name)) continue;
+      const input = asRecord(block.input);
+      calls.push({
+        id: block.id,
+        toolName: block.name,
+        subagentType: asString(input?.["subagent_type"]) || null,
+        description: asString(input?.["description"]) || null,
+        startedAt: block.startedAt,
+      });
+    }
+  }
+  return calls;
+}
+
 /** `"340ms"` under a second, `"1.2s"` at or above it. */
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;

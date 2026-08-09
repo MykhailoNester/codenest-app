@@ -40,6 +40,7 @@ import {
 } from "../../lib/ipc";
 import { useAgentCatalogStore, type CatalogProvider } from "../../stores/agent-catalog-store";
 import {
+  activeSubagents,
   buildUserMessageText,
   previewUserMessageLine,
   type ConversationState,
@@ -722,6 +723,14 @@ export function AgentComposer({
     (s) => s.panes[leafId]?.permissionMode ?? null,
   );
 
+  // Returns a count, not the array, so the composer re-renders when delegation
+  // starts or stops — not on every streamed token. `activeSubagents` already
+  // returns [] for an exited session (D4), so there is no status guard here.
+  const subagentCount = useAgentSessionStore((s) => {
+    const pane = s.panes[leafId];
+    return pane === undefined ? 0 : activeSubagents(pane).length;
+  });
+
   // One state, not two booleans: `ContextPicker` and `WirePreview` are both
   // absolutely-positioned children of `.cedit`, so two independent booleans
   // would let them overlap. This makes mutual exclusion structural.
@@ -1242,6 +1251,14 @@ export function AgentComposer({
     <div className={styles.composer} data-agent-composer>
       <div className={styles.cmode}>
         <span className={`${styles.mbadge} ${styles.mbadgeComposing}`}>◆ Conversation</span>
+        {subagentCount > 0 ? (
+          <span
+            className={`${styles.mbadge} ${styles.mbadgeSubagent}`}
+            data-testid="composer-subagent-badge"
+          >
+            ◈ {subagentCount} sub-agent{subagentCount === 1 ? "" : "s"}
+          </span>
+        ) : null}
         <ProviderModelRow
           leafId={leafId}
           providerId={providerId}
