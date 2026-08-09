@@ -139,6 +139,15 @@ pub struct AgentSetPermissionModeArgs {
     pub mode: String,
 }
 
+/// Arguments for [`agent_stop_task`] — stops one background task inside a live
+/// session (a `Workflow` orchestration), leaving the session itself running.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStopTaskArgs {
+    pub pane_id: String,
+    pub task_id: String,
+}
+
 /// Arguments for [`agent_respond_permission`] — answers one `can_use_tool`
 /// `control_request` (frame kind [`frame::AgentFrameKind::Permission`]) over
 /// the same stdin the session already owns. `updated_input` is always the
@@ -973,6 +982,39 @@ impl AgentManager {
             .map_err(|_| format!("agent session stdin closed for pane {}", args.pane_id))
     }
 
+    /// Stop one background task inside a live session — the mechanism behind
+    /// a `Workflow` orchestration's Stop button. Structurally identical to
+    /// [`Self::set_model`]/[`Self::set_permission_mode`] (trim-and-reject
+    /// empty before touching the registry, mint a request id, encode one
+    /// line, hand it to the writer thread).
+    ///
+    /// Deliberately *not* [`Self::stop`]: that SIGTERMs the whole process
+    /// group, which is the wrong blast radius for ending one background task.
+    /// Also deliberately *not* idempotent-on-unknown-pane the way
+    /// [`Self::stop`] is: stopping a task on a pane with no live session is a
+    /// caller bug (the panel is only rendered while its pane has one), not a
+    /// legitimate double-call — so it is a synchronous error, matching
+    /// [`Self::set_model`]. The CLI's own idempotence (a `{}` success for an
+    /// unknown or already-finished *task*, verified live) covers the double-
+    /// Stop-click case instead.
+    pub fn stop_task(&self, args: AgentStopTaskArgs) -> Result<(), String> {
+        let task_id = args.task_id.trim();
+        if task_id.is_empty() {
+            return Err("task id must not be empty".to_string());
+        }
+        let sessions = lock_or_recover(&self.sessions);
+        let session = sessions
+            .get(&args.pane_id)
+            .and_then(SessionSlot::live)
+            .ok_or_else(|| format!("no live agent session for pane {}", args.pane_id))?;
+        let n = session.next_request_id.fetch_add(1, Ordering::SeqCst);
+        let line = frame::encode_stop_task(&format!("codenest-{n}"), task_id)?;
+        session
+            .stdin_tx
+            .send(line)
+            .map_err(|_| format!("agent session stdin closed for pane {}", args.pane_id))
+    }
+
     /// Stop a pane's session. Idempotent — an unknown pane is `Ok(())`,
     /// mirroring `pty::close_terminal` (`pty/mod.rs:309-316`).
     ///
@@ -1162,6 +1204,14 @@ pub fn agent_set_permission_mode(
     state: State<'_, Arc<AgentManager>>,
 ) -> Result<(), String> {
     state.set_permission_mode(args)
+}
+
+#[tauri::command]
+pub fn agent_stop_task(
+    args: AgentStopTaskArgs,
+    state: State<'_, Arc<AgentManager>>,
+) -> Result<(), String> {
+    state.stop_task(args)
 }
 
 #[tauri::command]
@@ -1753,6 +1803,74 @@ mod tests {
             .set_model(AgentSetModelArgs {
                 pane_id: "no-such-pane".to_string(),
                 model: "claude-opus-5".to_string(),
+            })
+            .expect_err("an unknown pane must be an error, not a panic");
+        assert!(err.contains("no live agent session"));
+    }
+
+    /// A live `stop_task` request must reach the child as one `control_request`
+    /// on the session's existing stdin — the mechanism behind a `Workflow`
+    /// orchestration's Stop button, and the reason it does not need a session
+    /// restart (or a session stop) to take effect.
+    #[test]
+    fn stop_task_round_trips_a_control_request_through_the_child() {
+        let mgr = AgentManager::new();
+        let collector: Collector = Arc::new(Mutex::new(Vec::new()));
+        mgr.start_inner(start_args("pane-stop-task"), Some(echoer()), collector_emit(&collector))
+            .expect("start_inner should succeed with the echoer fixture");
+
+        mgr.stop_task(AgentStopTaskArgs {
+            pane_id: "pane-stop-task".to_string(),
+            task_id: "wek0ucptg".to_string(),
+        })
+        .expect("stop_task should succeed");
+
+        assert!(poll_until(|| collector
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|f| f.kind == AgentFrameKind::Control)));
+
+        let frames = collector.lock().unwrap();
+        let control_frames: Vec<&AgentFrame> =
+            frames.iter().filter(|f| f.kind == AgentFrameKind::Control).collect();
+        assert_eq!(control_frames.len(), 1, "expected exactly one echoed control_request frame");
+        assert_eq!(control_frames[0].raw["request"]["subtype"].as_str(), Some("stop_task"));
+        assert_eq!(control_frames[0].raw["request"]["task_id"].as_str(), Some("wek0ucptg"));
+        drop(frames);
+
+        assert_eq!(
+            mgr.active_count(),
+            1,
+            "stopping a background task must leave the session running — it is not agent_stop"
+        );
+
+        mgr.stop(AgentPaneArgs {
+            pane_id: "pane-stop-task".to_string(),
+        })
+        .expect("stop should succeed");
+        assert!(poll_until(|| mgr.active_count() == 0));
+    }
+
+    #[test]
+    fn stop_task_rejects_an_empty_task_id_before_touching_the_registry() {
+        let mgr = AgentManager::new();
+        let err = mgr
+            .stop_task(AgentStopTaskArgs {
+                pane_id: "no-such-pane".to_string(),
+                task_id: "   ".to_string(),
+            })
+            .expect_err("an empty task id must be rejected");
+        assert!(err.contains("task id must not be empty"));
+    }
+
+    #[test]
+    fn stop_task_unknown_pane_is_an_error() {
+        let mgr = AgentManager::new();
+        let err = mgr
+            .stop_task(AgentStopTaskArgs {
+                pane_id: "no-such-pane".to_string(),
+                task_id: "wek0ucptg".to_string(),
             })
             .expect_err("an unknown pane must be an error, not a panic");
         assert!(err.contains("no live agent session"));

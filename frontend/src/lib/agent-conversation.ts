@@ -164,6 +164,11 @@ export interface ConversationState {
     outputTokens: number | null;
   } | null;
   exitCode: number | null;
+  /** Every `Workflow`-tool orchestration this pane's session has launched —
+   *  see the orchestration types and `applySystem`'s four `task_*` branches
+   *  below. Terminal runs are retained (D12); `activeOrchestrations` is the
+   *  filter every consumer should use instead of reading this directly. */
+  orchestrations: OrchestrationRun[];
 }
 
 export function emptyConversation(): ConversationState {
@@ -183,6 +188,7 @@ export function emptyConversation(): ConversationState {
     startedAt: null,
     usage: null,
     exitCode: null,
+    orchestrations: [],
   };
 }
 
@@ -402,6 +408,228 @@ export function activeSubagents(state: ConversationState): SubagentCall[] {
     }
   }
   return calls;
+}
+
+// ---------------------------------------------------------------------------
+// Orchestration runs (the `Workflow` tool) — internal name "orchestration"
+// everywhere in Codenest. The wire's own field/subtype names are "workflow*"
+// (Claude Code's spelling); every read of one of those literals below carries
+// a comment saying so, and nothing derived from them is named "workflow" on
+// this side, so as not to collide with the kanban `workflow_items` /
+// workflow-labels feature that already owns that word in this codebase.
+// ---------------------------------------------------------------------------
+
+/** `workflow_agent.state` on the wire. `start` is queued-or-just-launched;
+ *  `progress` is a live token/tool update; both read as "running". */
+export type OrchestrationAgentState = "start" | "progress" | "done" | "error";
+
+/** One agent launched inside an orchestration's `workflow_progress` snapshot. */
+export interface OrchestrationAgent {
+  /** `workflow_agent.index` — 1-based, assigned by the CLI, stable across
+   *  snapshots and therefore the React key. */
+  index: number;
+  /** `label` — `opts.label` or a truncated prompt. Always present on the wire. */
+  label: string;
+  /** `phaseIndex` — `null` for an agent the script never assigned a phase. */
+  phaseIndex: number | null;
+  phaseTitle: string | null;
+  /** `agentType` — a custom sub-agent type; `null` for the default one. */
+  agentType: string | null;
+  model: string | null;
+  state: OrchestrationAgentState;
+  tokens: number | null;
+  toolCalls: number | null;
+  durationMs: number | null;
+  /** `error` verbatim; the CLI also sends the literal `"skipped by user"` here. */
+  error: string | null;
+  /** `cached: true` — a resume served this agent from the journal, no model call. */
+  cached: boolean;
+  promptPreview: string | null;
+  resultPreview: string | null;
+}
+
+/** A `workflow_phase` entry: the declared phase list, seeded from the script's
+ *  `meta.phases` at launch, so it is known before any agent starts. */
+export interface OrchestrationPhase {
+  index: number;
+  title: string;
+}
+
+export type OrchestrationStatus = "running" | "completed" | "failed" | "stopped";
+
+/** One `Workflow`-tool run, keyed by the CLI's own `task_id`. */
+export interface OrchestrationRun {
+  /** `system.task_id` — the key every later frame correlates on, and the
+   *  `task_id` a `stop_task` control request must carry. */
+  taskId: string;
+  /** `system.tool_use_id` — the `Workflow` block in the transcript. */
+  toolUseId: string | null;
+  /** `task_started.workflow_name`, i.e. the script's `meta.name`. `null` when
+   *  the wire named none — never a placeholder. */
+  name: string | null;
+  /** `task_started.description`, i.e. `meta.description`. */
+  description: string | null;
+  status: OrchestrationStatus;
+  /** `task_progress.description` — the CLI's own live phrase, e.g. `"Alpha: blue"`. */
+  activity: string | null;
+  /** `task_progress.usage.total_tokens` — the run's own running total, rendered
+   *  in the detail panel header. Not summed from the agent rows: the wire's
+   *  figure includes the orchestrator itself. */
+  totalTokens: number | null;
+  /** Arrival time of `task_started`, epoch ms. */
+  startedAt: number;
+  /** `task_updated.patch.end_time` when numeric, else arrival time. */
+  endedAt: number | null;
+  phases: OrchestrationPhase[];
+  agents: OrchestrationAgent[];
+}
+
+/** `task_type` on the wire for a Workflow-tool run. Claude Code's spelling,
+ *  read verbatim — the Codenest-side name for this concept is
+ *  "orchestration" (see the naming note above). */
+const ORCHESTRATION_TASK_TYPE = "local_workflow";
+
+/** The four `OrchestrationAgentState` values, for narrowing an unknown wire
+ *  string before it is trusted as one. */
+const ORCHESTRATION_AGENT_STATES: readonly OrchestrationAgentState[] = [
+  "start",
+  "progress",
+  "done",
+  "error",
+];
+
+function asOrchestrationAgentState(value: unknown): OrchestrationAgentState | undefined {
+  const s = asString(value);
+  return s !== undefined && (ORCHESTRATION_AGENT_STATES as readonly string[]).includes(s)
+    ? (s as OrchestrationAgentState)
+    : undefined;
+}
+
+/** Parses one `workflow_progress` array element into a phase or an agent, or
+ *  `null` for anything else — including `"workflow_log"`, which the CLI's own
+ *  emitter already filters out, and any future/malformed element shape. */
+function parseOrchestrationEntry(
+  raw: unknown,
+): { kind: "phase"; phase: OrchestrationPhase } | { kind: "agent"; agent: OrchestrationAgent } | null {
+  const rec = asRecord(raw);
+  if (!rec) return null;
+  const type = asString(rec["type"]);
+  if (type === "workflow_phase") {
+    const index = asNumber(rec["index"]);
+    const title = asString(rec["title"]);
+    if (index === undefined || title === undefined) return null;
+    return { kind: "phase", phase: { index, title } };
+  }
+  if (type === "workflow_agent") {
+    const index = asNumber(rec["index"]);
+    const label = asString(rec["label"]);
+    if (index === undefined || label === undefined) return null;
+    return {
+      kind: "agent",
+      agent: {
+        index,
+        label,
+        phaseIndex: asNumber(rec["phaseIndex"]) ?? null,
+        phaseTitle: asString(rec["phaseTitle"]) ?? null,
+        agentType: asString(rec["agentType"]) ?? null,
+        model: asString(rec["model"]) ?? null,
+        state: asOrchestrationAgentState(rec["state"]) ?? "start",
+        tokens: asNumber(rec["tokens"]) ?? null,
+        toolCalls: asNumber(rec["toolCalls"]) ?? null,
+        durationMs: asNumber(rec["durationMs"]) ?? null,
+        error: asString(rec["error"]) ?? null,
+        cached: asBool(rec["cached"]) ?? false,
+        promptPreview: asString(rec["promptPreview"]) ?? null,
+        resultPreview: asString(rec["resultPreview"]) ?? null,
+      },
+    };
+  }
+  // "workflow_log" and anything else: not a phase, not an agent.
+  return null;
+}
+
+/**
+ * Every orchestration this pane's session has launched and not yet heard the
+ * end of, oldest first (wire order — no sort, same reasoning as
+ * `activeSubagents`).
+ *
+ * `[]` on an exited session, folding in the same honesty rule
+ * `activeSubagents` applies. Deliberately NOT gated on
+ * `state.status === "running"`: an orchestration outlives its turn, so the
+ * pane sits `idle` for most of a run (wire finding 5).
+ */
+export function activeOrchestrations(state: ConversationState): OrchestrationRun[] {
+  if (state.status === "exited") return [];
+  return state.orchestrations.filter((run) => run.status === "running");
+}
+
+/** One phase and the agents assigned to it. `phaseIndex === null` is the
+ *  single unphased group a script with no `phase()` calls produces. */
+export interface OrchestrationPhaseGroup {
+  phaseIndex: number | null;
+  title: string;
+  agents: OrchestrationAgent[];
+}
+
+/**
+ * Group `run.agents` under `run.phases`, reproducing the CLI's own display
+ * grouping so one run does not read differently here than in the TUI:
+ * keyed by `phaseIndex`, titled from the matching `workflow_phase` entry with
+ * a `Phase N` fallback, sorted by `phaseIndex`. A declared phase that has no
+ * agent yet still gets a group (its title is already known — wire finding 3).
+ * When no agent carries a `phaseIndex`, returns exactly one group with
+ * `phaseIndex: null` and title `"agents"` rather than inventing phases.
+ */
+export function orchestrationPhaseTree(run: OrchestrationRun): OrchestrationPhaseGroup[] {
+  if (run.phases.length === 0 && !run.agents.some((a) => a.phaseIndex !== null)) {
+    return [{ phaseIndex: null, title: "agents", agents: run.agents }];
+  }
+  const titleByIndex = new Map<number, string>();
+  for (const phase of run.phases) titleByIndex.set(phase.index, phase.title);
+
+  const indices = new Set<number>(titleByIndex.keys());
+  for (const agent of run.agents) {
+    if (agent.phaseIndex !== null) indices.add(agent.phaseIndex);
+  }
+
+  const groups: OrchestrationPhaseGroup[] = Array.from(indices)
+    .sort((a, b) => a - b)
+    .map((phaseIndex) => ({
+      phaseIndex,
+      title: titleByIndex.get(phaseIndex) ?? `Phase ${phaseIndex}`,
+      agents: run.agents.filter((a) => a.phaseIndex === phaseIndex),
+    }));
+
+  const unphased = run.agents.filter((a) => a.phaseIndex === null);
+  if (unphased.length > 0) {
+    groups.push({ phaseIndex: null, title: "agents", agents: unphased });
+  }
+  return groups;
+}
+
+/** `phases` is the declared phase count (`0` for a phase-less script);
+ *  `agentsDone` counts `done` and `error` (D6); `agentsTotal` is agents seen
+ *  so far, which grows as later phases start. */
+export function orchestrationCounts(
+  run: OrchestrationRun,
+): { phases: number; agentsDone: number; agentsTotal: number } {
+  const agentsDone = run.agents.filter((a) => a.state === "done" || a.state === "error").length;
+  return { phases: run.phases.length, agentsDone, agentsTotal: run.agents.length };
+}
+
+/** `""` for no orchestration, `` `${done}/${total} agents` `` for exactly one
+ *  run, `` `${n} orchestrations` `` for several — the composer badge's text,
+ *  the same single-vs-many idiom as `subagentLabel`. */
+export function orchestrationBadgeLabel(state: ConversationState): string {
+  const runs = activeOrchestrations(state);
+  if (runs.length === 0) return "";
+  if (runs.length === 1) {
+    const run = runs[0];
+    if (!run) return "";
+    const { agentsDone, agentsTotal } = orchestrationCounts(run);
+    return `${agentsDone}/${agentsTotal} agents`;
+  }
+  return `${runs.length} orchestrations`;
 }
 
 /** `"340ms"` under a second, `"1.2s"` at or above it. */
@@ -834,6 +1062,37 @@ export function permissionInputSummary(toolName: string, input: unknown): string
   }
 }
 
+/** `task_updated.patch.status` / `task_notification.status` → the Codenest
+ *  status this side tracks. `null` for anything else, meaning "leave the run's
+ *  status unchanged" — never a placeholder terminal state. */
+function mapOrchestrationStatus(status: string | undefined): OrchestrationStatus | null {
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "killed" || status === "stopped" || status === "paused") return "stopped";
+  return null;
+}
+
+/** Finds the orchestration keyed by `taskId` and replaces it with
+ *  `update(run)`'s result, in place (so upsert order and iteration order both
+ *  stay stable). A miss — an absent `taskId`, or one no run carries (the
+ *  `local_bash`/`local_agent` `task_progress` interleave trap) — returns
+ *  `state` unchanged. */
+function updateOrchestration(
+  state: ConversationState,
+  taskId: string | undefined,
+  update: (run: OrchestrationRun) => OrchestrationRun,
+): ConversationState {
+  if (taskId === undefined) return state;
+  const index = state.orchestrations.findIndex((run) => run.taskId === taskId);
+  const existing = state.orchestrations[index];
+  if (index === -1 || !existing) return state;
+  const updated = update(existing);
+  if (updated === existing) return state;
+  const orchestrations = state.orchestrations.slice();
+  orchestrations[index] = updated;
+  return { ...state, orchestrations };
+}
+
 function applySystem(
   state: ConversationState,
   raw: unknown,
@@ -885,6 +1144,93 @@ function applySystem(
       thinking: true,
       thinkingTokens: tokens ?? state.thinkingTokens,
     };
+  }
+  // `{"type":"system","subtype":"task_started","task_id","tool_use_id",
+  //   "description","task_type","workflow_name"}` — `task_type`/`workflow_name`
+  // are Claude Code's own field names for a `Workflow`-tool run; verbatim
+  // reads, not a Codenest name (see the orchestration naming note above).
+  // `task_type` is the discriminator that keeps a `local_agent`/`local_bash`
+  // task from opening an orchestration.
+  if (subtype === "task_started") {
+    const taskType = asString(rec?.["task_type"]);
+    const taskId = asString(rec?.["task_id"]);
+    if (taskType !== ORCHESTRATION_TASK_TYPE || taskId === undefined) return state;
+    const run: OrchestrationRun = {
+      taskId,
+      toolUseId: asString(rec?.["tool_use_id"]) ?? null,
+      name: asString(rec?.["workflow_name"]) ?? null,
+      description: asString(rec?.["description"]) ?? null,
+      status: "running",
+      activity: null,
+      totalTokens: null,
+      startedAt: now,
+      endedAt: null,
+      phases: [],
+      agents: [],
+    };
+    // Upsert by task_id, not push — a duplicate task_started for one task_id
+    // must not double-list the run.
+    const index = state.orchestrations.findIndex((r) => r.taskId === taskId);
+    const orchestrations =
+      index === -1
+        ? [...state.orchestrations, run]
+        : state.orchestrations.map((r, i) => (i === index ? run : r));
+    return { ...state, orchestrations };
+  }
+  // `{"type":"system","subtype":"task_progress","task_id","description",
+  //   "usage":{"total_tokens"},"workflow_progress"?}` — `workflow_progress` is
+  // a full snapshot, not a delta (replace, never accumulate — D4), and is
+  // absent on a throttled batch that changed no state, never on an empty run.
+  if (subtype === "task_progress") {
+    const taskId = asString(rec?.["task_id"]);
+    const activity = asString(rec?.["description"]);
+    const totalTokens = asNumber(asRecord(rec?.["usage"])?.["total_tokens"]);
+    const progressRaw = asArray(rec?.["workflow_progress"]);
+    return updateOrchestration(state, taskId, (run) => {
+      const next: OrchestrationRun = {
+        ...run,
+        activity: activity ?? run.activity,
+        totalTokens: totalTokens ?? run.totalTokens,
+      };
+      if (progressRaw === undefined) return next;
+      const phases: OrchestrationPhase[] = [];
+      const agents: OrchestrationAgent[] = [];
+      for (const entry of progressRaw) {
+        const parsed = parseOrchestrationEntry(entry);
+        if (!parsed) continue;
+        if (parsed.kind === "phase") phases.push(parsed.phase);
+        else agents.push(parsed.agent);
+      }
+      phases.sort((a, b) => a.index - b.index);
+      return { ...next, phases, agents };
+    });
+  }
+  // `{"type":"system","subtype":"task_updated","task_id","patch":{"status",
+  //   "end_time"?}}` — the CLI's own terminal-status spelling
+  // (`completed`/`failed`/`killed`/`paused`), mapped to this side's
+  // `OrchestrationStatus`. Never re-opens a run that is already terminal.
+  if (subtype === "task_updated") {
+    const taskId = asString(rec?.["task_id"]);
+    const patch = asRecord(rec?.["patch"]);
+    const mapped = mapOrchestrationStatus(asString(patch?.["status"]));
+    const endTime = asNumber(patch?.["end_time"]);
+    return updateOrchestration(state, taskId, (run) => {
+      if (run.status !== "running" || mapped === null) return run;
+      return { ...run, status: mapped, endedAt: endTime ?? now };
+    });
+  }
+  // `{"type":"system","subtype":"task_notification","task_id","status",…}` —
+  // the CLI's second terminal frame, arriving alongside `task_updated` (same
+  // millisecond, finding 4). Idempotent by construction: once `task_updated`
+  // has already made the run terminal, the `run.status !== "running"` guard
+  // below makes this a no-op.
+  if (subtype === "task_notification") {
+    const taskId = asString(rec?.["task_id"]);
+    const mapped = mapOrchestrationStatus(asString(rec?.["status"]));
+    return updateOrchestration(state, taskId, (run) => {
+      if (run.status !== "running" || mapped === null) return run;
+      return { ...run, status: mapped, endedAt: run.endedAt ?? now };
+    });
   }
   return state;
 }

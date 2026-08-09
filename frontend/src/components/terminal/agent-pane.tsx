@@ -536,7 +536,7 @@ export function AgentPane({
       {/* Status strip — between the header and the conversation, exactly where
           the prototype puts `.hud`, and where `<TerminalPane/>` puts its own.
           Rendered outside `.body` so it never scrolls with the conversation. */}
-      <AgentSessionHud state={conv} cwd={cwd} />
+      <AgentSessionHud state={conv} cwd={cwd} paneId={leafId} />
 
       <div className={styles.body}>
         <AgentConversation

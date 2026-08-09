@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
+  activeOrchestrations,
   activeSubagents,
   applyFrame,
   appendUserTurn,
   emptyConversation,
   formatDuration,
   isSubagentTool,
+  orchestrationBadgeLabel,
+  orchestrationCounts,
+  orchestrationPhaseTree,
   previewUserMessageLine,
   splitInlineCode,
   toolArgSummary,
@@ -885,6 +889,537 @@ describe("sub-agent activity", () => {
     );
     state = applyFrame(state, frame("exit", { exit_code: 0 }), 2_000);
     expect(activeSubagents(state)).toEqual([]);
+  });
+});
+
+// Fixtures below are transcribed verbatim (or, where the plan's transcription
+// was abridged with "…", filled in with plausible sibling values) from the
+// plan's "Wire evidence" section — three live captures against CLI 2.1.226 of
+// a `Workflow`-tool run (run 1: "Two-phase probe", task_id "wt8nboga7").
+
+/** `system/task_started` for a `Workflow`-tool run — finding 2's payload. */
+function taskStartedFrame(taskId: string, extra: Record<string, unknown> = {}): AgentFrame {
+  return frame("system", {
+    type: "system",
+    subtype: "task_started",
+    task_id: taskId,
+    tool_use_id: "toolu_01As1tHX8yBzfjZ8DS1Sdpyp",
+    description: "Two-phase probe",
+    task_type: "local_workflow",
+    workflow_name: "wire-probe",
+    ...extra,
+  });
+}
+
+/** `system/task_progress` for a `Workflow`-tool run. */
+function taskProgressFrame(taskId: string, extra: Record<string, unknown> = {}): AgentFrame {
+  return frame("system", {
+    type: "system",
+    subtype: "task_progress",
+    task_id: taskId,
+    ...extra,
+  });
+}
+
+/** Finding 3's 5.723s snapshot: two declared phases, two agents in Alpha,
+ *  both `"start"`. */
+const SNAPSHOT_5_723 = [
+  { type: "workflow_phase", index: 1, title: "Alpha" },
+  { type: "workflow_phase", index: 2, title: "Beta" },
+  {
+    type: "workflow_agent",
+    index: 1,
+    label: "red",
+    phaseIndex: 1,
+    phaseTitle: "Alpha",
+    agentId: "aa1c769ec1197b484",
+    model: "claude-opus-5[1m]",
+    state: "start",
+    startedAt: 1_786_255_097_666,
+    queuedAt: 1_786_255_097_665,
+    attempt: 1,
+    promptPreview: "Reply with exactly the word RED…",
+    lastProgressAt: 1_786_255_097_666,
+  },
+  {
+    type: "workflow_agent",
+    index: 2,
+    label: "blue",
+    phaseIndex: 1,
+    phaseTitle: "Alpha",
+    model: "claude-opus-5[1m]",
+    state: "start",
+    startedAt: 1_786_255_097_680,
+    queuedAt: 1_786_255_097_665,
+    attempt: 1,
+    lastProgressAt: 1_786_255_097_680,
+  },
+];
+
+/** Finding 3's 7.287s snapshot: agent 1 ("red") promoted to `"done"`. */
+const SNAPSHOT_7_287 = [
+  SNAPSHOT_5_723[0],
+  SNAPSHOT_5_723[1],
+  {
+    ...SNAPSHOT_5_723[2],
+    state: "done",
+    tokens: 10_304,
+    toolCalls: 0,
+    durationMs: 1_594,
+    resultPreview: "RED",
+  },
+  SNAPSHOT_5_723[3],
+];
+
+/** Finding 3's 7.411s snapshot: a third agent ("green") starts in phase 2. */
+const SNAPSHOT_7_411 = [
+  ...SNAPSHOT_7_287,
+  { type: "workflow_agent", index: 3, label: "green", phaseIndex: 2, phaseTitle: "Beta", state: "start" },
+];
+
+describe("orchestration runs", () => {
+  it("a local_workflow task_started opens a running orchestration keyed by task_id", () => {
+    const state = applyFrame(emptyConversation(), taskStartedFrame("wt8nboga7"), 5_669);
+
+    const runs = activeOrchestrations(state);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      taskId: "wt8nboga7",
+      toolUseId: "toolu_01As1tHX8yBzfjZ8DS1Sdpyp",
+      name: "wire-probe",
+      description: "Two-phase probe",
+      status: "running",
+      startedAt: 5_669,
+    });
+  });
+
+  it("a local_agent or local_bash task_started opens no orchestration", () => {
+    for (const taskType of ["local_agent", "local_bash"]) {
+      const state = applyFrame(
+        emptyConversation(),
+        frame("system", {
+          type: "system",
+          subtype: "task_started",
+          task_id: "t1",
+          task_type: taskType,
+        }),
+        1_000,
+      );
+      expect(activeOrchestrations(state)).toEqual([]);
+    }
+  });
+
+  it("a task_started with no task_type opens no orchestration", () => {
+    const state = applyFrame(
+      emptyConversation(),
+      frame("system", { type: "system", subtype: "task_started", task_id: "t1" }),
+      1_000,
+    );
+    expect(activeOrchestrations(state)).toEqual([]);
+  });
+
+  it("a workflow_progress snapshot replaces the phase and agent lists", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("wt8nboga7"), 5_669);
+    state = applyFrame(
+      state,
+      taskProgressFrame("wt8nboga7", { workflow_progress: SNAPSHOT_5_723 }),
+      5_723,
+    );
+
+    let run = activeOrchestrations(state)[0];
+    expect(run?.agents).toHaveLength(2);
+    expect(run?.agents.find((a) => a.index === 1)).toMatchObject({ label: "red", state: "start" });
+
+    state = applyFrame(
+      state,
+      taskProgressFrame("wt8nboga7", { workflow_progress: SNAPSHOT_7_287 }),
+      7_287,
+    );
+    run = activeOrchestrations(state)[0];
+    // Replaced wholesale, not accumulated: still exactly two agents, no
+    // duplicate index-1 entry.
+    expect(run?.agents).toHaveLength(2);
+    expect(run?.agents.filter((a) => a.index === 1)).toHaveLength(1);
+    expect(run?.agents.find((a) => a.index === 1)).toMatchObject({
+      state: "done",
+      tokens: 10_304,
+      toolCalls: 0,
+      durationMs: 1_594,
+      resultPreview: "RED",
+    });
+  });
+
+  it("a task_progress with no workflow_progress keeps the previous snapshot", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("wt8nboga7"), 5_669);
+    state = applyFrame(
+      state,
+      taskProgressFrame("wt8nboga7", {
+        description: "Alpha: blue",
+        usage: { total_tokens: 0 },
+        workflow_progress: SNAPSHOT_5_723,
+      }),
+      5_723,
+    );
+    const agentsBefore = activeOrchestrations(state)[0]?.agents;
+
+    // The 7.219s frame (finding 3): a throttled batch with no state change
+    // carries no `workflow_progress` key at all.
+    state = applyFrame(
+      state,
+      taskProgressFrame("wt8nboga7", {
+        description: "Alpha: blue (still running)",
+        usage: { total_tokens: 512 },
+      }),
+      7_219,
+    );
+
+    const run = activeOrchestrations(state)[0];
+    expect(run?.agents).toEqual(agentsBefore);
+    expect(run?.activity).toBe("Alpha: blue (still running)");
+    expect(run?.totalTokens).toBe(512);
+  });
+
+  it("a task_progress for an unknown task_id is inert", () => {
+    const state = applyFrame(emptyConversation(), taskStartedFrame("wt8nboga7"), 5_669);
+    const after = applyFrame(
+      state,
+      taskProgressFrame("some-other-task", { description: "local_bash progress" }),
+      6_000,
+    );
+    expect(after).toBe(state);
+  });
+
+  it("task_updated patch statuses map completed/failed/killed to completed/failed/stopped", () => {
+    const cases = [
+      ["completed", "completed"],
+      ["failed", "failed"],
+      ["killed", "stopped"],
+    ] as const;
+    for (const [wireStatus, expected] of cases) {
+      let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+      state = applyFrame(
+        state,
+        frame("system", {
+          type: "system",
+          subtype: "task_updated",
+          task_id: "t1",
+          patch: { status: wireStatus, end_time: 2_000 },
+        }),
+        2_000,
+      );
+      expect(state.orchestrations[0]?.status).toBe(expected);
+    }
+  });
+
+  it("task_updated end_time sets endedAt, and a non-numeric end_time falls back to now", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      frame("system", {
+        type: "system",
+        subtype: "task_updated",
+        task_id: "t1",
+        patch: { status: "completed", end_time: 1_786_255_180_371 },
+      }),
+      9_000,
+    );
+    expect(state.orchestrations[0]?.endedAt).toBe(1_786_255_180_371);
+
+    let state2 = applyFrame(emptyConversation(), taskStartedFrame("t2"), 1_000);
+    state2 = applyFrame(
+      state2,
+      frame("system", {
+        type: "system",
+        subtype: "task_updated",
+        task_id: "t2",
+        patch: { status: "completed", end_time: "not-a-number" },
+      }),
+      9_000,
+    );
+    expect(state2.orchestrations[0]?.endedAt).toBe(9_000);
+  });
+
+  it("a task_notification after a task_updated does not reopen or re-stamp the run", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("wek0ucptg"), 1_000);
+    state = applyFrame(
+      state,
+      frame("system", {
+        type: "system",
+        subtype: "task_updated",
+        task_id: "wek0ucptg",
+        patch: { status: "killed", end_time: 1_786_255_282_149 },
+      }),
+      10_399,
+    );
+    state = applyFrame(
+      state,
+      frame("system", {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "wek0ucptg",
+        status: "stopped",
+        summary: "Slow one-phase probe",
+      }),
+      10_399,
+    );
+    const run = state.orchestrations[0];
+    expect(run?.status).toBe("stopped");
+    expect(run?.endedAt).toBe(1_786_255_282_149);
+  });
+
+  it("a terminal run is retained in state but excluded from activeOrchestrations", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      frame("system", {
+        type: "system",
+        subtype: "task_updated",
+        task_id: "t1",
+        patch: { status: "completed", end_time: 2_000 },
+      }),
+      2_000,
+    );
+    expect(state.orchestrations).toHaveLength(1);
+    expect(activeOrchestrations(state)).toEqual([]);
+  });
+
+  it("activeOrchestrations returns [] on an exited session", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(state, frame("exit", { exit_code: 0 }), 2_000);
+    expect(activeOrchestrations(state)).toEqual([]);
+  });
+
+  it("activeOrchestrations still lists a run while the session status is idle", () => {
+    // Finding 5: `result success` arrives mid-run, well before the run's own
+    // terminal frames — the pane goes `idle` for most of an orchestration.
+    let state = applyFrame(emptyConversation(), frame("init", { model: "claude-opus-5" }), 0);
+    state = applyFrame(state, taskStartedFrame("wt8nboga7"), 5_669);
+    state = applyFrame(state, frame("result", { is_error: false }), 8_176);
+
+    expect(state.status).toBe("idle");
+    expect(activeOrchestrations(state)).toHaveLength(1);
+  });
+
+  it("a second init frame mid-run keeps the orchestration", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("wt8nboga7"), 5_669);
+    // Finding 5: a fresh `system/init` frame arrives after the turn returns,
+    // while the orchestration is still (or was still) running.
+    state = applyFrame(state, frame("init", { model: "claude-opus-5" }), 10_484);
+    expect(activeOrchestrations(state)).toHaveLength(1);
+  });
+
+  it("orchestrationPhaseTree groups agents under their declared phase titles", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("wt8nboga7"), 5_669);
+    state = applyFrame(
+      state,
+      taskProgressFrame("wt8nboga7", { workflow_progress: SNAPSHOT_7_411 }),
+      7_411,
+    );
+    const run = activeOrchestrations(state)[0];
+    const tree = run ? orchestrationPhaseTree(run) : [];
+
+    expect(tree.map((g) => g.title)).toEqual(["Alpha", "Beta"]);
+    expect(tree[0]?.agents.map((a) => a.label)).toEqual(["red", "blue"]);
+    expect(tree[1]?.agents.map((a) => a.label)).toEqual(["green"]);
+  });
+
+  it('orchestrationPhaseTree titles an unnamed phase index "Phase N"', () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      taskProgressFrame("t1", {
+        workflow_progress: [
+          { type: "workflow_agent", index: 1, label: "red", phaseIndex: 3, state: "start" },
+        ],
+      }),
+      2_000,
+    );
+    const run = activeOrchestrations(state)[0];
+    const tree = run ? orchestrationPhaseTree(run) : [];
+    expect(tree).toHaveLength(1);
+    expect(tree[0]?.title).toBe("Phase 3");
+  });
+
+  it("orchestrationPhaseTree returns one unphased group when no agent carries a phaseIndex", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      taskProgressFrame("t1", {
+        workflow_progress: [
+          { type: "workflow_agent", index: 1, label: "red", state: "start" },
+          { type: "workflow_agent", index: 2, label: "blue", state: "start" },
+        ],
+      }),
+      2_000,
+    );
+    const run = activeOrchestrations(state)[0];
+    const tree = run ? orchestrationPhaseTree(run) : [];
+    expect(tree).toHaveLength(1);
+    expect(tree[0]).toMatchObject({ phaseIndex: null, title: "agents" });
+    expect(tree[0]?.agents).toHaveLength(2);
+  });
+
+  it("orchestrationPhaseTree keeps declared phase titles when no agent has started yet", () => {
+    // A `task_started` batch can seed `workflow_phase` entries before any
+    // agent's own `start` state lands (D4/finding-3: any batch containing a
+    // state change always attaches `workflow_progress`, but a phase-seed
+    // batch need not contain an agent state change at all). `run.agents` is
+    // `[]` here, so the early-return guard must not collapse the declared
+    // phases into a single synthetic "agents" group.
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      taskProgressFrame("t1", {
+        workflow_progress: [
+          { type: "workflow_phase", index: 1, title: "Alpha" },
+          { type: "workflow_phase", index: 2, title: "Beta" },
+        ],
+      }),
+      2_000,
+    );
+    const run = activeOrchestrations(state)[0];
+    expect(run?.agents).toEqual([]);
+    const tree = run ? orchestrationPhaseTree(run) : [];
+    expect(tree.map((g) => g.title)).toEqual(["Alpha", "Beta"]);
+    expect(tree[0]).toMatchObject({ phaseIndex: 1, agents: [] });
+    expect(tree[1]).toMatchObject({ phaseIndex: 2, agents: [] });
+  });
+
+  it("orchestrationPhaseTree keeps a declared phase with no agents yet", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      taskProgressFrame("t1", {
+        workflow_progress: [
+          { type: "workflow_phase", index: 1, title: "Alpha" },
+          { type: "workflow_phase", index: 2, title: "Beta" },
+          { type: "workflow_agent", index: 1, label: "red", phaseIndex: 1, state: "start" },
+        ],
+      }),
+      2_000,
+    );
+    const run = activeOrchestrations(state)[0];
+    const tree = run ? orchestrationPhaseTree(run) : [];
+    expect(tree).toHaveLength(2);
+    expect(tree[1]).toMatchObject({ phaseIndex: 2, title: "Beta" });
+    expect(tree[1]?.agents).toEqual([]);
+  });
+
+  it("orchestrationCounts counts an errored agent as done and reports the declared phase count", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      taskProgressFrame("t1", {
+        workflow_progress: [
+          { type: "workflow_phase", index: 1, title: "Alpha" },
+          { type: "workflow_agent", index: 1, label: "red", phaseIndex: 1, state: "done" },
+          {
+            type: "workflow_agent",
+            index: 2,
+            label: "blue",
+            phaseIndex: 1,
+            state: "error",
+            error: "skipped by user",
+          },
+          { type: "workflow_agent", index: 3, label: "green", phaseIndex: 1, state: "start" },
+        ],
+      }),
+      2_000,
+    );
+    const run = activeOrchestrations(state)[0];
+    const counts = run
+      ? orchestrationCounts(run)
+      : { phases: 0, agentsDone: 0, agentsTotal: 0 };
+    // M (agentsDone) counts the errored agent too, so it can reach K without
+    // stalling; K (agentsTotal) is every agent seen so far.
+    expect(counts).toEqual({ phases: 1, agentsDone: 2, agentsTotal: 3 });
+  });
+
+  it("orchestrationCounts reports 0 phases for a phase-less run", () => {
+    const state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    const run = activeOrchestrations(state)[0];
+    const counts = run ? orchestrationCounts(run) : null;
+    expect(counts).toEqual({ phases: 0, agentsDone: 0, agentsTotal: 0 });
+  });
+
+  it("a workflow_log element in workflow_progress is ignored", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      taskProgressFrame("t1", {
+        workflow_progress: [
+          { type: "workflow_log", index: 1, message: "starting" },
+          { type: "workflow_agent", index: 1, label: "red", state: "start" },
+        ],
+      }),
+      2_000,
+    );
+    const run = activeOrchestrations(state)[0];
+    expect(run?.agents).toHaveLength(1);
+    expect(run?.phases).toHaveLength(0);
+  });
+
+  it("a malformed workflow_progress leaves the run intact", () => {
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      taskProgressFrame("t1", { workflow_progress: SNAPSHOT_5_723 }),
+      2_000,
+    );
+    const before = activeOrchestrations(state)[0];
+
+    // Not an array at all: exactly like an absent key (D4) — the previous
+    // snapshot survives untouched.
+    const notArray = applyFrame(
+      state,
+      taskProgressFrame("t1", { workflow_progress: "nope" }),
+      3_000,
+    );
+    expect(activeOrchestrations(notArray)[0]?.agents).toEqual(before?.agents);
+    expect(activeOrchestrations(notArray)[0]?.phases).toEqual(before?.phases);
+
+    // An array whose elements are not records: each fails to parse, so the
+    // snapshot replaces with an empty phase/agent list rather than throwing.
+    const notRecords = applyFrame(
+      state,
+      taskProgressFrame("t1", { workflow_progress: [42, "x", null] }),
+      3_000,
+    );
+    expect(activeOrchestrations(notRecords)[0]?.agents).toEqual([]);
+    expect(activeOrchestrations(notRecords)[0]?.phases).toEqual([]);
+
+    // A `workflow_agent` with an unrecognised `state` string degrades to the
+    // documented default ("start") rather than propagating garbage.
+    const unknownState = applyFrame(
+      state,
+      taskProgressFrame("t1", {
+        workflow_progress: [
+          { type: "workflow_agent", index: 1, label: "red", state: "bogus" },
+        ],
+      }),
+      3_000,
+    );
+    expect(activeOrchestrations(unknownState)[0]?.agents[0]?.state).toBe("start");
+  });
+
+  it('orchestrationBadgeLabel returns "" for none, "M/K agents" for one, "N orchestrations" for several', () => {
+    expect(orchestrationBadgeLabel(emptyConversation())).toBe("");
+
+    let state = applyFrame(emptyConversation(), taskStartedFrame("t1"), 1_000);
+    state = applyFrame(
+      state,
+      taskProgressFrame("t1", {
+        workflow_progress: [
+          { type: "workflow_agent", index: 1, label: "red", state: "done" },
+          { type: "workflow_agent", index: 2, label: "blue", state: "start" },
+        ],
+      }),
+      2_000,
+    );
+    expect(orchestrationBadgeLabel(state)).toBe("1/2 agents");
+
+    state = applyFrame(state, taskStartedFrame("t2"), 3_000);
+    expect(orchestrationBadgeLabel(state)).toBe("2 orchestrations");
   });
 });
 

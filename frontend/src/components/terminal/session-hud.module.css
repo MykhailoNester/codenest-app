@@ -154,7 +154,7 @@
 
 /* Shared idiom for any clickable *live* cell — first used by the sub-agent
    cell below, and reused verbatim (with a different colour class) by the
-   companion multi-phase orchestration cell. */
+   companion multi-phase orchestration cell, which has since landed. */
 
 .cellBtn {
   display: inline-flex;
@@ -225,4 +225,53 @@
   color: var(--fg-3);
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* Orchestration detail panel — additive only, nothing above is edited. The
+   cell itself introduces no new classes at all (D7): it reuses .cell,
+   .cellBtn, .pulse, .acc, .cellLabel, .value, .muted verbatim. */
+
+.detailHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.detailPhase {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 2px;
+}
+
+.detailPhaseTitle {
+  color: var(--fg-2);
+  font-weight: 600;
+}
+
+.detailAgent {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-left: 10px;
+}
+
+/* Keeps a pathologically long agent label from stretching the panel — same
+   guard .cellLabel applies to the strip above. */
+.detailAgentLabel {
+  color: var(--fg-1);
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Geometry only — the red border/colour comes from `d3-btn d3-btn--sm` plus
+   the same two inline properties agent-run-row.tsx's Stop button sets. */
+.detailStop {
+  font: inherit;
+  padding: 2px 8px;
+  cursor: pointer;
 }

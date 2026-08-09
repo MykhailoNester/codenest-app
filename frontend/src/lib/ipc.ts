@@ -419,6 +419,23 @@ export async function agentSetPermissionMode(
   await invoke<void>("agent_set_permission_mode", { args: { paneId, mode } });
 }
 
+/**
+ * Stop one background task inside a live session — a `Workflow` orchestration —
+ * without killing the session. This is *not* `agentStop`, which SIGTERMs the
+ * pane's whole `claude` process group.
+ *
+ * Resolving means "the request reached the child's stdin", not "the run
+ * stopped": the CLI answers asynchronously with `task_updated`
+ * (`patch.status: "killed"`) and `task_notification` (`status: "stopped"`),
+ * which `lib/agent-conversation.ts` folds into the run's status. Safe to call
+ * for a task the CLI no longer knows — it answers success either way.
+ *
+ * Rejects synchronously on an empty `taskId` or a pane with no live session.
+ */
+export async function agentStopTask(paneId: string, taskId: string): Promise<void> {
+  await invoke<void>("agent_stop_task", { args: { paneId, taskId } });
+}
+
 /** Answer a `can_use_tool` permission request over the same stdin the
  * session already owns (C2 in the plan). */
 export async function agentRespondPermission(

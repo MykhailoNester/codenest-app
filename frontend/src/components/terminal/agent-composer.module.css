@@ -58,6 +58,16 @@
   border: 1px solid rgba(168, 85, 247, 0.45);
 }
 
+/* Accent-blue sibling of `.mbadgeSubagent`, same outlined idiom — distinct
+   colour so a live Task delegation and a live Workflow orchestration never
+   read as the same badge when both are showing (mirrors the HUD cell's own
+   `.acc` vs `.violet` split, D7). */
+.mbadgeOrchestration {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+}
+
 .mswap {
   margin-left: auto;
   flex: none;

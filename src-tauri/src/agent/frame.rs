@@ -385,6 +385,31 @@ pub fn encode_set_permission_mode(request_id: &str, mode: &str) -> Result<String
     encode_line(&value)
 }
 
+/// Encode a `control_request` asking `claude` to stop one background task —
+/// the mechanism behind `TaskStop` in the TUI, and the only way to end a
+/// `Workflow` orchestration without killing the whole session (contrast
+/// `AgentManager::stop`, which SIGTERMs the process group).
+///
+/// Verified live against CLI 2.1.226 in exactly `build_agent_argv`'s flag set:
+///
+/// ```jsonc
+/// // → {"type":"control_request","request_id":"codenest-3","request":{"subtype":"stop_task","task_id":"wek0ucptg"}}
+/// // ← {"type":"control_response","response":{"subtype":"success","request_id":"codenest-3","response":{}}}
+/// //   {"type":"system","subtype":"task_updated","task_id":"wek0ucptg","patch":{"status":"killed","end_time":…}}
+/// //   {"type":"system","subtype":"task_notification","task_id":"wek0ucptg","status":"stopped",…}
+/// ```
+///
+/// The CLI answers `{}` (not an error) for a task it does not know or that is
+/// already finished, so this is safe to send twice.
+pub fn encode_stop_task(request_id: &str, task_id: &str) -> Result<String, String> {
+    let value = serde_json::json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": { "subtype": "stop_task", "task_id": task_id },
+    });
+    encode_line(&value)
+}
+
 /// Encode a `control_response` answering a `can_use_tool` permission request.
 /// Both variants below were round-tripped against CLI 2.1.220 (the plan's
 /// Wire verification, runs B and C):
@@ -779,6 +804,24 @@ mod tests {
             "type": "control_request",
             "request_id": "req_2",
             "request": { "subtype": "set_model", "model": "claude-haiku-4-5-20251001" },
+        });
+        assert_eq!(value, expected);
+    }
+
+    /// Byte-for-byte against the line captured live in the wire evidence (a
+    /// `Workflow` orchestration's `stop_task` request) — exactly one line,
+    /// same reasoning as `encode_set_model_matches_the_verified_control_request`.
+    #[test]
+    fn encode_stop_task_matches_the_verified_control_request() {
+        let encoded = encode_stop_task("codenest-3", "wek0ucptg").expect("encode");
+        assert_eq!(encoded.matches('\n').count(), 1);
+        assert!(encoded.ends_with('\n'));
+
+        let value: Value = serde_json::from_str(encoded.trim_end()).expect("must parse");
+        let expected = serde_json::json!({
+            "type": "control_request",
+            "request_id": "codenest-3",
+            "request": { "subtype": "stop_task", "task_id": "wek0ucptg" },
         });
         assert_eq!(value, expected);
     }
