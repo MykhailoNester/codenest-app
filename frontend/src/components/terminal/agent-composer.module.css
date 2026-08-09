@@ -8,7 +8,11 @@
    .cedit .mention .gut .dropzone -> cedit mention gut dropzone
    .cact .fanout .hint .kbd .send .sendghost -> cact fanout hint kbd send
      sendGhost
-   .wire .chist .hpill .hpill.q -> wire chist hpill hpillQueued */
+   .chist .hpill .hpill.q -> chist hpill hpillQueued
+   The prototype's persistent wire row is gone — it's now a popover
+   (previewPanel previewHead previewLabel previewMeta previewClose
+   previewCode previewNote) behind the `{}` pill (pillWire) next to
+   `+ context`, sharing chrome with pickerPanel. */
 
 .composer {
   flex: 0 0 auto;
@@ -127,6 +131,20 @@
   font-family: var(--font-mono);
 }
 
+.pillWire {
+  border-style: dashed;
+  color: var(--fg-3);
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  padding: 2px 7px;
+}
+
+.pillWire:hover {
+  border-color: var(--accent-line);
+  color: var(--fg-1);
+}
+
 .pillDropped {
   border-color: var(--accent);
   color: var(--accent);
@@ -204,7 +222,7 @@
   caret-color: var(--fg-1);
   outline: none;
   min-height: 48px;
-  max-height: 240px;
+  max-height: 264px;
   overflow-y: auto;
 }
 
@@ -323,37 +341,6 @@
   cursor: not-allowed;
 }
 
-.wire {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 9px 7px;
-  border-top: 1px dashed var(--line-1);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--fg-4);
-  overflow: hidden;
-}
-
-.wireLabel {
-  color: var(--fg-3);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  flex: none;
-}
-
-.wireCode {
-  color: var(--ok);
-  background: rgba(34, 197, 94, 0.08);
-  padding: 1px 4px;
-  border-radius: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
 .chist {
   display: flex;
   align-items: center;
@@ -389,14 +376,11 @@
   cursor: default;
 }
 
-.pickerPanel {
+.pickerPanel,
+.previewPanel {
   position: absolute;
   left: 8px;
   bottom: calc(100% + 6px);
-  width: 320px;
-  /* Taller than the old 220px because the search row costs a line and the list
-     now holds every open task, not only the in-progress ones. */
-  max-height: 320px;
   overflow-y: auto;
   background: var(--bg-3);
   border: 1px solid var(--line-2);
@@ -405,6 +389,76 @@
   font-family: var(--font-mono);
   font-size: 10.5px;
   z-index: 10;
+}
+
+.pickerPanel {
+  width: 320px;
+  /* Taller than the old 220px because the search row costs a line and the list
+     now holds every open task, not only the in-progress ones. */
+  max-height: 320px;
+}
+
+.previewPanel {
+  /* Spans the editor box instead of a fixed 320px: a JSON envelope is wide and
+     an agent pane can be a third of the window. */
+  right: 8px;
+  max-height: 240px;
+  padding: 7px 9px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--fg-4);
+  font-size: 9.5px;
+}
+
+.previewHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.previewLabel {
+  color: var(--fg-3);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  flex: none;
+}
+
+.previewMeta {
+  color: var(--fg-4);
+}
+
+.previewClose {
+  margin-left: auto;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-3);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.previewClose:hover {
+  color: var(--fg-1);
+}
+
+.previewCode {
+  color: var(--ok);
+  background: rgba(34, 197, 94, 0.08);
+  padding: 1px 4px;
+  border-radius: 2px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-y: auto;
+  max-height: 170px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.previewNote {
+  color: var(--fg-4);
 }
 
 /* Sticky so the filter stays reachable while scrolling a long backlog. */
