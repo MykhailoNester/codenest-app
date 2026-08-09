@@ -22,6 +22,7 @@ import {
   type ReactElement,
 } from "react";
 import { fsBuildFileIndex, openInEditor, revealInFinder } from "../../lib/ipc";
+import { formatCount } from "../../lib/format-helpers";
 import {
   useExplorerStore,
   MAX_PANEL_WIDTH,
@@ -398,7 +399,7 @@ export function WorkspaceNavigator(): ReactElement {
               className={`${styles.dot} ${watch.degraded ? styles.dotWarn : ""}`}
             />
             watching {watch.rootCount} roots ·{" "}
-            {watch.indexedFileCount.toLocaleString()} files ·{" "}
+            {formatCount(watch.indexedFileCount)} files ·{" "}
             {backendLabel(watch.backend)}
             <br />
             excluded: {watch.excludedDirs.join(" · ")}
