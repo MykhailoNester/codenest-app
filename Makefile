@@ -6,9 +6,13 @@
 
 .PHONY: check-rust check-python test-python check-frontend test-frontend build-frontend check-all seed-demo
 
-# .venv's compiled extensions (mypy, pydantic_core, ...) are arm64-only; forcing
-# this slice keeps them loadable even when the invoking shell is running under
-# Rosetta, where a universal python3 binary would otherwise default to x86_64.
+# .venv's interpreter is a universal2 (arm64 + x86_64) binary, but its compiled
+# wheels (mypy, pydantic_core, ...) are arm64-only. Apple Silicon is the only
+# architecture this project ships for (see docs/faq.md), yet a parent shell
+# running under Rosetta steers that fat binary to its x86_64 slice, which then
+# cannot dlopen those wheels — so mypy and pytest fail on import rather than on
+# anything in the tree. "arch -arm64" pins execution to the native slice
+# regardless of the calling shell's translation state.
 PYTHON := arch -arm64 python3
 
 # Seed the demo database (data/codenest.demo.db) with synthetic data.

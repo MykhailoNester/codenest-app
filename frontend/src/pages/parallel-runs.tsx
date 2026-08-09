@@ -139,6 +139,12 @@ export function ParallelRunsPage(): ReactElement {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="e.g. add a /health endpoint and a smoke test"
+              // This one prompt is fanned out verbatim to N agents in N
+              // worktrees, so one substituted word is acted on N times.
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              autoComplete="off"
             />
           </div>
         </section>

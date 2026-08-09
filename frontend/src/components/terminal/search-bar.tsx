@@ -135,6 +135,9 @@ export function SearchBar({
         onKeyDown={handleKeyDown}
         placeholder="Search…"
         spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
+        autoComplete="off"
         aria-label="Search terminal"
       />
       <span className={styles.counter}>{counterText}</span>

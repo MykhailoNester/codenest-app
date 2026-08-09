@@ -533,6 +533,13 @@ export function OmniBar(): ReactElement {
         aria-activedescendant={
           open && rows.length ? `omni-row-${clampedIdx}` : undefined
         }
+        // The first character selects the grammar in classifyIntent
+        // (lib/prompt-intent.ts), and `@library:<slug>` is rejected by a
+        // lowercase-only regex, so an OS rewrite can change which branch
+        // runs or turn a valid slug into an error toast.
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
         autoComplete="off"
       />
       <span className={`${styles.kind ?? ""} ${KIND_CLASS[intent.kind] ?? ""}`}>

@@ -1083,6 +1083,13 @@ export function LaunchModal({
                         resize: "vertical",
                         lineHeight: 1.5,
                       }}
+                      // This text becomes `prompt` / `prompt_override` on the
+                      // launch request and is executed by the agent, so a
+                      // substituted word is acted on and never seen again.
+                      spellCheck={false}
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      autoComplete="off"
                     />
                     <div style={{ display: "flex", gap: 8 }}>
                       <button
