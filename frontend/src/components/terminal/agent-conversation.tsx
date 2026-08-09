@@ -10,9 +10,15 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   formatDuration,
+  groupTurnBlocks,
   splitInlineCode,
+  summarizeToolRun,
+  toolRunElapsedMs,
+  toolRunErrorCount,
+  toolRunHeadline,
   type ConversationState,
   type ConvBlock,
+  type ConvToolBlock,
   type ConvTurn,
 } from "../../lib/agent-conversation";
 import { AgentMarkdown } from "./agent-markdown";
@@ -112,14 +118,84 @@ function ToolBlockRow({
   );
 }
 
+/**
+ * A run of consecutive tool calls as one line — "Running 12 commands,
+ * reading 3 files" — with the still-running (or last finished) call named
+ * underneath, mirroring the CLI's own collapsed summary. Expanding swaps in
+ * the individual `ToolBlockRow`s, so nothing is lost, it is just not the
+ * default. Twenty separate rows per turn is what made the pane unreadable.
+ */
+function ToolRunRow({
+  blocks,
+  expanded,
+  onToggle,
+  expandedTools,
+  onToggleTool,
+}: {
+  blocks: ConvToolBlock[];
+  expanded: boolean;
+  onToggle: () => void;
+  expandedTools: Set<string>;
+  onToggleTool: (id: string) => void;
+}): ReactElement {
+  const elapsed = toolRunElapsedMs(blocks);
+  const running = elapsed === null;
+  const headline = toolRunHeadline(blocks);
+  const errors = toolRunErrorCount(blocks);
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        className={`${styles.tool} ${styles.toolRunGroup} ${running ? styles.toolRun : ""}`}
+        onClick={onToggle}
+      >
+        <span className={styles.toolTwisty}>{expanded ? "▾" : "▸"}</span>
+        <span className={styles.toolName}>{summarizeToolRun(blocks)}</span>
+        {errors > 0 ? (
+          <span className={styles.toolRunErrors}>
+            {errors} failed
+          </span>
+        ) : null}
+        <span className={styles.toolDur}>
+          {running ? "running" : formatDuration(elapsed)}
+        </span>
+      </button>
+      {!expanded && headline ? (
+        <div className={styles.toolRunHead}>
+          <span className={styles.toolRunHeadTick}>└</span>
+          <span className={styles.toolName}>{headline.name}</span>
+          <span className={styles.toolArgs}>{headline.argSummary}</span>
+        </div>
+      ) : null}
+      {expanded ? (
+        <div className={styles.toolRunList}>
+          {blocks.map((block) => (
+            <ToolBlockRow
+              key={block.id}
+              block={block}
+              expanded={expandedTools.has(block.id)}
+              onToggle={() => onToggleTool(block.id)}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Turn({
   turn,
   expandedTools,
   onToggleTool,
+  expandedRuns,
+  onToggleRun,
 }: {
   turn: ConvTurn;
   expandedTools: Set<string>;
   onToggleTool: (id: string) => void;
+  expandedRuns: Set<string>;
+  onToggleRun: (key: string) => void;
 }): ReactElement {
   const isUser = turn.role === "user";
   return (
@@ -130,14 +206,27 @@ function Turn({
         </span>
         <span className={styles.ln} />
       </div>
-      {turn.blocks.map((block, i) => {
+      {groupTurnBlocks(turn.blocks).map((group) => {
+        if (group.kind === "toolRun") {
+          return (
+            <ToolRunRow
+              key={group.key}
+              blocks={group.blocks}
+              expanded={expandedRuns.has(group.key)}
+              onToggle={() => onToggleRun(group.key)}
+              expandedTools={expandedTools}
+              onToggleTool={onToggleTool}
+            />
+          );
+        }
+        const block = group.block;
         if (block.type === "text") {
-          return <TextBlock key={i} text={block.text} muted={isUser} />;
+          return <TextBlock key={group.key} text={block.text} muted={isUser} />;
         }
         if (block.type === "tool") {
           return (
             <ToolBlockRow
-              key={block.id}
+              key={group.key}
               block={block}
               expanded={expandedTools.has(block.id)}
               onToggle={() => onToggleTool(block.id)}
@@ -145,7 +234,7 @@ function Turn({
           );
         }
         return (
-          <div key={i} className={styles.errorBlock}>
+          <div key={group.key} className={styles.errorBlock}>
             {block.text}
           </div>
         );
@@ -165,6 +254,7 @@ export function AgentConversation({
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
 
   function handleScroll(): void {
     const el = scrollRef.current;
@@ -178,6 +268,15 @@ export function AgentConversation({
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleRun(key: string): void {
+    setExpandedRuns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
@@ -214,6 +313,8 @@ export function AgentConversation({
           turn={turn}
           expandedTools={expandedTools}
           onToggleTool={toggleTool}
+          expandedRuns={expandedRuns}
+          onToggleRun={toggleRun}
         />
       ))}
 

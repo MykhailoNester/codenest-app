@@ -120,6 +120,56 @@
   flex: none;
 }
 
+/* A collapsed run of consecutive tool calls. The summary is prose, not a tool
+   name, so it takes the ordinary foreground rather than `.toolName`'s accent —
+   the run is a heading for the rows beneath it, not a call in its own right. */
+.toolRunGroup .toolName {
+  color: var(--fg-1);
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolRunErrors {
+  color: var(--danger);
+  flex: none;
+}
+
+/* The one call named under a collapsed run — indented under the summary to
+   read as its child, and muted so it never competes with the summary. */
+.toolRunHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 5px 9px;
+  padding: 0 9px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  min-width: 0;
+}
+
+.toolRunHeadTick {
+  color: var(--fg-4);
+  flex: none;
+}
+
+.toolRunHead .toolName {
+  color: var(--info);
+  flex: none;
+}
+
+/* Expanded: the individual rows, indented so the run they belong to stays
+   visible as their parent. */
+.toolRunList {
+  margin-left: 12px;
+  border-left: 1px solid var(--line-1);
+  padding-left: 6px;
+}
+
 .toolOut {
   margin: 0 0 6px 18px;
   padding: 5px 9px;

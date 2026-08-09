@@ -1331,3 +1331,131 @@ export function applyFrame(
       return state;
   }
 }
+
+// ── Transcript grouping (CLI-style tool-run summaries) ──────────────────────
+//
+// A turn that runs twenty bash commands used to render twenty full-width rows,
+// each with its own command line and duration, which buried the assistant's
+// actual prose and made a working session unreadable. The CLI collapses the
+// same activity into one live summary line with a count and an expand
+// affordance ("Reading 17 files, listing 2 directories…"), which is what
+// `groupTurnBlocks` reproduces here.
+//
+// Deliberately a pure function over blocks rather than state on the reducer:
+// grouping is a presentation concern, and keeping it out of `ConversationState`
+// means the wire format and the reducer stay untouched.
+
+/** Verb + noun for one tool name, singular and plural — the vocabulary the
+ *  summary line is built from. Anything unlisted falls back to "running N
+ *  <name> calls", so a new CLI tool degrades to something truthful rather
+ *  than being silently dropped from the count. */
+const TOOL_PHRASES: Record<string, { verb: string; one: string; many: string }> = {
+  Bash: { verb: "Running", one: "command", many: "commands" },
+  BashOutput: { verb: "Reading", one: "command output", many: "command outputs" },
+  Read: { verb: "Reading", one: "file", many: "files" },
+  Write: { verb: "Writing", one: "file", many: "files" },
+  Edit: { verb: "Editing", one: "file", many: "files" },
+  NotebookEdit: { verb: "Editing", one: "notebook", many: "notebooks" },
+  Glob: { verb: "Searching", one: "pattern", many: "patterns" },
+  Grep: { verb: "Searching", one: "pattern", many: "patterns" },
+  WebFetch: { verb: "Fetching", one: "page", many: "pages" },
+  WebSearch: { verb: "Searching", one: "the web", many: "the web" },
+  Task: { verb: "Delegating", one: "sub-agent", many: "sub-agents" },
+  TodoWrite: { verb: "Updating", one: "todo list", many: "todo lists" },
+};
+
+/** How many distinct tool kinds the summary names before it stops listing.
+ *  Three clauses is the most that stays readable on one line at pane width. */
+const SUMMARY_CLAUSE_LIMIT = 3;
+
+/** A run of consecutive tool calls, or a single non-tool block, in render
+ *  order. `groupTurnBlocks` never reorders — a summary always sits exactly
+ *  where its calls were, between the prose that preceded and followed them. */
+export type ConvRenderGroup =
+  | { kind: "block"; block: ConvBlock; key: string }
+  | { kind: "toolRun"; blocks: ConvToolBlock[]; key: string };
+
+/** Runs of two or more consecutive tool blocks collapse into one `toolRun`;
+ *  a lone tool call stays its own row, where its arguments are worth the
+ *  width and a summary would only add a layer to open. */
+export function groupTurnBlocks(blocks: ConvBlock[]): ConvRenderGroup[] {
+  const groups: ConvRenderGroup[] = [];
+  let run: ConvToolBlock[] = [];
+
+  const flush = (): void => {
+    if (run.length === 0) return;
+    if (run.length === 1) {
+      const only = run[0]!;
+      groups.push({ kind: "block", block: only, key: only.id });
+    } else {
+      groups.push({ kind: "toolRun", blocks: run, key: `run-${run[0]!.id}` });
+    }
+    run = [];
+  };
+
+  blocks.forEach((block, i) => {
+    if (block.type === "tool") {
+      run.push(block);
+      return;
+    }
+    flush();
+    groups.push({ kind: "block", block, key: `b${i}` });
+  });
+  flush();
+  return groups;
+}
+
+/** "Running 12 commands, reading 3 files" — counts per tool kind, in the order
+ *  the kinds first appear, so the phrase tracks what the agent actually did
+ *  first rather than an alphabetical or count ordering that would reshuffle
+ *  as the run grows. */
+export function summarizeToolRun(blocks: ConvToolBlock[]): string {
+  const counts = new Map<string, number>();
+  for (const b of blocks) counts.set(b.name, (counts.get(b.name) ?? 0) + 1);
+
+  const clauses: string[] = [];
+  let listed = 0;
+  let omitted = 0;
+  for (const [name, n] of counts) {
+    if (listed >= SUMMARY_CLAUSE_LIMIT) {
+      omitted += n;
+      continue;
+    }
+    const phrase = TOOL_PHRASES[name];
+    const noun = phrase ? (n === 1 ? phrase.one : phrase.many) : n === 1 ? "call" : "calls";
+    const verb = phrase ? phrase.verb : "Running";
+    clauses.push(
+      listed === 0
+        ? `${verb} ${n} ${phrase ? "" : name + " "}${noun}`
+        : `${verb.toLowerCase()} ${n} ${phrase ? "" : name + " "}${noun}`,
+    );
+    listed += 1;
+  }
+  if (omitted > 0) clauses.push(`and ${omitted} more`);
+  return clauses.join(", ");
+}
+
+/** Wall-clock span of the run: first start to last end, so parallel calls are
+ *  counted once rather than summed into a total that never elapsed. `null`
+ *  while anything is still running — the caller renders a live ticker instead
+ *  of a number that would be wrong the moment it was painted. */
+export function toolRunElapsedMs(blocks: ConvToolBlock[]): number | null {
+  if (blocks.length === 0) return null;
+  if (blocks.some((b) => b.endedAt === null)) return null;
+  const start = Math.min(...blocks.map((b) => b.startedAt));
+  const end = Math.max(...blocks.map((b) => b.endedAt ?? b.startedAt));
+  return Math.max(0, end - start);
+}
+
+/** The row a collapsed run shows underneath its summary: whatever is still
+ *  running (the useful answer to "what is it doing *now*"), else the last
+ *  call to have finished. */
+export function toolRunHeadline(blocks: ConvToolBlock[]): ConvToolBlock | null {
+  return blocks.find((b) => b.endedAt === null) ?? blocks[blocks.length - 1] ?? null;
+}
+
+/** How many calls in the run failed — surfaced on the collapsed summary so an
+ *  error inside a folded run cannot hide. */
+export function toolRunErrorCount(blocks: ConvToolBlock[]): number {
+  return blocks.filter((b) => b.isError).length;
+}
