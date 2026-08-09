@@ -79,6 +79,7 @@ import {
 import { caretAnchor } from "../../lib/caret-anchor";
 import { slashRowToSuggest, mentionRowToSuggest, type SuggestRow } from "../../lib/composer-menu";
 import { SuggestPanel, MentionSourceProbe } from "./composer-suggest";
+import { focusComposerAt, resizeComposerEditor } from "../../lib/composer-focus";
 import styles from "./agent-composer.module.css";
 
 interface AgentComposerProps {
@@ -96,11 +97,6 @@ interface AgentComposerProps {
 }
 
 const MAX_HISTORY_PILLS = 6;
-// Pairs with `.editorTextarea { max-height }` in agent-composer.module.css —
-// the two must move together. Raised 240 -> 264 to reclaim most of the ~26px
-// the deleted `.wire` strip used to cost (see the WirePreview popover below).
-const EDITOR_MAX_HEIGHT_PX = 264;
-
 // The mirror's inset inside `.editorStack` (matches `.editorMirror`'s
 // `top`/`left` in `agent-composer.module.css`), and the suggestion panel's
 // nominal width (`.suggest`'s `min-width`/`max-width` midpoint) — both feed
@@ -741,6 +737,34 @@ export function AgentComposer({
   const markerRef = useRef<HTMLSpanElement>(null);
   const stackRef = useRef<HTMLDivElement>(null);
 
+  // Seeded from the mount-time draft, not "": a composer that remounts with a
+  // surviving draft (session restart, a sibling pane closing — see
+  // `agent-pane.tsx`'s unmount cleanup) must not read as an external change
+  // and steal focus on mount.
+  const lastLocalDraftRef = useRef(draft);
+
+  // Default-on focus/caret restore for any draft change that did not come
+  // from this textarea's own `onChange` (`recall`, either drop path, and any
+  // future store mutator that inserts text) — so a new writer cannot
+  // silently ship without the restore, which is how this bug class started.
+  // It deliberately does not touch pane focus (`setFocusedLeaf`): which pane
+  // gets focus is the call site's business (`use-terminal-file-drop.ts`,
+  // `agent-pane.tsx`), this effect only restores the DOM caret/box once a
+  // pane's own composer is the thing that changed.
+  useEffect(() => {
+    if (draft === lastLocalDraftRef.current) return;
+    lastLocalDraftRef.current = draft;
+    // A clear is never an insertion whose caret the user needs, and `send`
+    // only clears *after* `await Promise.all(agentSend …)`
+    // (`composer-store.ts`), i.e. an unbounded time after the keystroke that
+    // triggered it — by which point the user may have clicked into a shell
+    // pane, a sibling composer, or a modal input. Restoring focus on that
+    // transition would yank it back mid-typing, which is exactly the class
+    // of bug this mechanism exists to remove, not reintroduce.
+    if (draft === "") return;
+    focusComposerAt(leafId);
+  }, [draft, leafId]);
+
   const messagePills = pills.map(pillToMessagePill);
   const composedText = buildUserMessageText(messagePills, draft);
   const wireLine = previewUserMessageLine(composedText);
@@ -866,33 +890,36 @@ export function AgentComposer({
     // the row count (and with it the panel's own height) changed.
   }, [menuOpen, trigger?.start, draft, menuRows.length]);
 
-  /** The auto-grow measurement, shared by typing and by a drop that inserts
-   *  text the user did not type. */
-  function resizeEditor(el: HTMLTextAreaElement): void {
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, EDITOR_MAX_HEIGHT_PX)}px`;
-  }
-
   /** Focuses the textarea and places the caret once the store's new draft has
-   *  reached the DOM — the same drop-caret pattern this file already used. */
+   *  reached the DOM. Every caller writes the draft through the store first and
+   *  then wants a *specific* caret, so the store value is claimed as locally
+   *  originated here: otherwise the external-draft effect's caret-less default
+   *  request races this one and lands the caret at end-of-text instead of just
+   *  past an accepted `/` or `@` completion. */
   function focusCaretAt(nextCaret: number): void {
+    lastLocalDraftRef.current = useComposerStore.getState().panes[leafId]?.draft ?? "";
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
       el.focus();
       el.setSelectionRange(nextCaret, nextCaret);
       setCaret(nextCaret);
-      resizeEditor(el);
+      resizeComposerEditor(el);
     });
   }
 
   function handleDraftChange(el: HTMLTextAreaElement): void {
+    // Marks this value as locally originated *before* the store write, so the
+    // effect above sees `draft === lastLocalDraftRef.current` and skips it.
+    // This is what keeps ordinary typing and native ⌘Z undo (both arrive
+    // through this same `onChange`) from jumping the caret to end-of-text.
+    lastLocalDraftRef.current = el.value;
     setDraft(leafId, el.value);
     setCaret(el.selectionStart);
     setDismissed(false);
     setHelpOpen(false);
     setNote(null);
-    resizeEditor(el);
+    resizeComposerEditor(el);
   }
 
   /** Built fresh at execution time (Design decision 12) — identity here is
@@ -1166,17 +1193,19 @@ export function AgentComposer({
     // is already the right offset.
     const dropCaret = el.selectionStart;
     const nextCaret = insertPathsIntoDraft(leafId, paths, dropCaret);
+    // This write is synchronous (`insertPathsIntoDraft`'s `set` has already
+    // run), so reading the store here — before the external-draft effect's
+    // passive-effect flush runs — marks this value as locally originated.
+    // Without this, the effect's caret-less default request could win a
+    // scheduling race against the specific caret requested below and land the
+    // caret at end-of-text instead of just past the insertion.
+    lastLocalDraftRef.current = useComposerStore.getState().panes[leafId]?.draft ?? "";
     // The store owns the value, so the DOM catches up on the next render —
-    // restore focus and place the caret past the insertion after it does, and
-    // update `caret` state so the trigger scanner tracks a dropped caret too.
-    requestAnimationFrame(() => {
-      const current = textareaRef.current;
-      if (!current) return;
-      current.focus();
-      current.setSelectionRange(nextCaret, nextCaret);
-      setCaret(nextCaret);
-      resizeEditor(current);
-    });
+    // `focusComposerAt` defers to a frame so it reads the post-update value.
+    focusComposerAt(leafId, nextCaret);
+    // Keeps the trigger scanner tracking a dropped caret, which the shared
+    // helper does not touch because it owns the DOM, not this component's state.
+    setCaret(nextCaret);
   }
 
   const wireWarningText =
@@ -1313,6 +1342,7 @@ export function AgentComposer({
           <textarea
             ref={textareaRef}
             data-agent-composer
+            data-composer-pane-id={leafId}
             className={styles.editorTextarea}
             value={draft}
             onChange={(e) => handleDraftChange(e.currentTarget)}
@@ -1422,7 +1452,14 @@ export function AgentComposer({
             type="button"
             className={styles.hpill}
             title={entry}
-            onClick={() => recall(i, leafId)}
+            onClick={() => {
+              recall(i, leafId);
+              // Explicit, not redundant with the effect above: recalling text
+              // identical to what is already in the draft leaves `draft`
+              // unchanged, so the effect never fires and this call is the
+              // only thing that returns focus to the editor.
+              focusComposerAt(leafId);
+            }}
           >
             ↺ {entry}
           </button>
