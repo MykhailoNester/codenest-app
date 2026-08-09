@@ -1,9 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   CODENEST_PATHS_MIME,
   writePathDragPayload,
   readPathDragPayload,
 } from "../drag-payload";
+import { clearPathDrag, consumePathDrag } from "../active-path-drag";
+
+// `writePathDragPayload` now also records the drag in the module-private
+// `active-path-drag` state (see the test below). Clearing it before every
+// test keeps that new side effect from making any assertion here order-
+// dependent on a record an earlier test left behind.
+beforeEach(clearPathDrag);
 
 // jsdom 29 does not implement `DataTransfer` (absent from
 // `node_modules/.pnpm/jsdom@29.1.1/.../living/interfaces.js`), so
@@ -56,6 +63,12 @@ describe("writePathDragPayload", () => {
     const dt = fakeDataTransfer();
     writePathDragPayload(dt, ["/a/solo.ts"]);
     expect(dt.getData("text/plain")).toBe("/a/solo.ts");
+  });
+
+  it("records the drag for the drop resolvers", () => {
+    const dt = fakeDataTransfer();
+    writePathDragPayload(dt, ["/w/x.ts"]);
+    expect(consumePathDrag()).toEqual(["/w/x.ts"]);
   });
 });
 

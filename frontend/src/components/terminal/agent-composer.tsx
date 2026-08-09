@@ -52,6 +52,7 @@ import {
   type ContextPill,
 } from "../../stores/composer-store";
 import { readPathDragPayload } from "../../lib/explorer/drag-payload";
+import { logDnd } from "../../lib/drop-diagnostics";
 import { useAgentSessionStore } from "../../stores/agent-session-store";
 import { useTerminalStore } from "../../stores/terminal-store";
 import { collectLeaves, paneKind } from "../../lib/layout-tree";
@@ -1165,6 +1166,15 @@ export function AgentComposer({
     if (!acceptsEditorDrag(e.dataTransfer)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
+    // Logged only on the dragCount === null -> non-null transition, so a
+    // drag held over the editor does not emit at the dragover repeat rate.
+    if (dragCount === null) {
+      logDnd("composer.dragover", {
+        types: [...e.dataTransfer.types],
+        items: e.dataTransfer.items.length,
+        leafId,
+      });
+    }
     // `items.length` is readable during dragover (unlike `getData`, which
     // browsers withhold until drop) — a real count, not a placeholder.
     setDragCount(e.dataTransfer.items.length);
@@ -1186,12 +1196,20 @@ export function AgentComposer({
     e.stopPropagation();
     setDragCount(null);
     const paths = pathsFromDrag(e.dataTransfer);
-    if (paths.length === 0) return;
     const el = e.currentTarget;
     // Where the pointer landed, not where the caret was last left: the browser
     // moves the caret to the drop point before `drop` fires, so `selectionStart`
     // is already the right offset.
     const dropCaret = el.selectionStart;
+    // Logged before the empty-paths bail: a drop that arrives carrying nothing
+    // is the signal that wry claimed the drag, which is what this trace is for.
+    logDnd("composer.drop", {
+      types: [...e.dataTransfer.types],
+      pathCount: paths.length,
+      caret: dropCaret,
+      leafId,
+    });
+    if (paths.length === 0) return;
     const nextCaret = insertPathsIntoDraft(leafId, paths, dropCaret);
     // This write is synchronous (`insertPathsIntoDraft`'s `set` has already
     // run), so reading the store here — before the external-draft effect's
