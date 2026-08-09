@@ -8,7 +8,18 @@
    .cedit .mention .gut .dropzone -> cedit mention gut dropzone
    .cact .fanout .hint .kbd .send .sendghost -> cact fanout hint kbd send
      sendGhost
-   .wire .chist .hpill .hpill.q -> wire chist hpill hpillQueued */
+   .wire .chist .hpill .hpill.q -> wire chist hpill hpillQueued
+
+   Composer slash-command / @-mention menu additions (composer-slash-commands
+   plan, Changes 8/9):
+   .editorMirror .mirrorMark -> the hidden caret-coordinate mirror (decision 8)
+   .suggest .suggestGroup .suggestRow(.Active) .suggestLabel .suggestMeta
+     .suggestFooter -> the shared slash/mention suggestion panel
+   .helpPanel .helpPanelHeader .helpRow .helpName .helpSummary .helpClose ->
+     the read-only `/help` panel (decision 12)
+   .cnote(.Error) -> the command-outcome note row
+   .wireRunLabel .wireWarn -> the RUNS disposition label and the
+     unregistered-command warning (decision 4) */
 
 .composer {
   flex: 0 0 auto;
@@ -168,7 +179,8 @@
 }
 
 .editorOverlay,
-.editorTextarea {
+.editorTextarea,
+.editorMirror {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
@@ -185,6 +197,25 @@
   color: var(--fg-1);
   pointer-events: none;
   overflow: hidden;
+}
+
+/* Caret-coordinate mirror (Design decision 8) — same font metrics and
+   wrapping as `.editorOverlay`/`.editorTextarea` by construction (the shared
+   rule above), but never visible and never the measuring surface for
+   `.mention`'s own drift. Width is set inline from `textarea.clientWidth`,
+   not from a `right` inset, so a scrollbar past `.editorTextarea`'s
+   `max-height` cannot narrow one without the other. */
+.editorMirror {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.mirrorMark {
+  padding: 0;
+  background: none;
 }
 
 .mention {
@@ -342,6 +373,16 @@
   flex: none;
 }
 
+/* The RUNS counterpart to `.wireLabel`, in the accent colour — a command
+   line writes nothing to stdin, so it earns its own colour rather than
+   reusing `.wireLabel`'s neutral one. */
+.wireRunLabel {
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  flex: none;
+}
+
 .wireCode {
   color: var(--ok);
   background: rgba(34, 197, 94, 0.08);
@@ -352,6 +393,16 @@
   white-space: nowrap;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* The unregistered-command warning (Design decision 4) — a full-width line
+   under `.wire` rather than squeezed into its flex row, since the message
+   itself is the point. */
+.wireWarn {
+  padding: 0 9px 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--warn);
 }
 
 .chist {
@@ -492,6 +543,153 @@
 .pickerEmpty {
   padding: 8px 9px;
   color: var(--fg-4);
+}
+
+/* ── slash/mention suggestion panel (Design decision 8/9) ────────────────────
+   Anchored by the inline `left`/`bottom` the component computes from the
+   caret's mirror position, always opening upward — the same reasoning as
+   `.pickerPanel` above, reused rather than re-derived. */
+.suggest {
+  position: absolute;
+  min-width: 260px;
+  max-width: 420px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  z-index: 10;
+}
+
+.suggestGroup {
+  padding: 4px 9px;
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-2);
+}
+
+.suggestRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 9px;
+  color: var(--fg-2);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.suggestRow:hover,
+.suggestRowActive {
+  background: var(--accent-soft);
+  color: var(--fg-0);
+}
+
+.suggestLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestMeta {
+  flex: 0 0 auto;
+  color: var(--fg-4);
+  font-size: 9px;
+}
+
+.suggestFooter {
+  position: sticky;
+  bottom: 0;
+  padding: 4px 9px;
+  color: var(--fg-4);
+  font-size: 9px;
+  background: var(--bg-2);
+  border-top: 1px solid var(--line-1);
+}
+
+/* ── `/help` panel (Design decision 12) — same chrome as `.pickerPanel`, but
+   static: nothing in it is selectable, so it never gets a hover/active
+   state. */
+.helpPanel {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 6px);
+  width: 320px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  z-index: 10;
+}
+
+.helpPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 9px;
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-2);
+}
+
+.helpClose {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.helpRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.helpRow:last-child {
+  border-bottom: 0;
+}
+
+.helpName {
+  color: var(--accent);
+}
+
+.helpSummary {
+  color: var(--fg-3);
+  font-size: 9.5px;
+}
+
+/* ── command outcome note (between the actions row and the wire row) ────── */
+.cnote {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  padding: 0 10px 4px;
+}
+
+.cnoteError {
+  color: var(--err);
 }
 
 /* ── provider + model selectors (mode row) ──────────────────────────────────

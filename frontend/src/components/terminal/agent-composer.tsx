@@ -4,18 +4,32 @@
  * send transmits, and re-runnable prompt-history pills. Structure mirrors
  * `prototype:737-768` top to bottom. Every element here is bound to real
  * state — nothing renders from a literal (see the plan's "NO MOCK UI" rule).
+ *
+ * On top of that: a leading `/` opens a caret-anchored command menu
+ * (`/model`, `/mode`, `/clear`, `/compact`, `/help` — a mirror of the CLI
+ * TUI's own menu, restored because the composer replaced a raw PTY running
+ * that CLI), and a typed `@` opens a caret-anchored mention menu over
+ * Codenest agents, open tasks and library snippets. See the plan's Design
+ * decisions 1-12 for the reasoning behind each choice below.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useEscapeKey } from "../../hooks/use-escape-key";
-import type { DragEvent, KeyboardEvent, ReactElement } from "react";
-import { useLibraryItems, useTasks, type Task, type LibraryItem } from "../../lib/api";
+import type { DragEvent, KeyboardEvent, ReactElement, Ref } from "react";
+import {
+  useLibraryItems,
+  useTasks,
+  fetchLibraryItemBySlug,
+  type Task,
+  type LibraryItem,
+} from "../../lib/api";
 import {
   agentInterrupt,
+  agentSend,
   agentSetModel,
   agentSetPermissionMode,
 } from "../../lib/ipc";
-import { useAgentCatalogStore } from "../../stores/agent-catalog-store";
+import { useAgentCatalogStore, type CatalogProvider } from "../../stores/agent-catalog-store";
 import {
   buildUserMessageText,
   previewUserMessageLine,
@@ -32,6 +46,30 @@ import { readPathDragPayload } from "../../lib/explorer/drag-payload";
 import { useAgentSessionStore } from "../../stores/agent-session-store";
 import { useTerminalStore } from "../../stores/terminal-store";
 import { collectLeaves, paneKind } from "../../lib/layout-tree";
+import { recordAgentExited } from "../../lib/agent-run-telemetry";
+import { detectTrigger, parseCommandLine } from "../../lib/prompt-intent";
+import {
+  findCommand,
+  buildSlashRows,
+  runCommandLine,
+  helpRows,
+  type CommandData,
+  type CommandOption,
+  type CommandOutcome,
+  type SlashCommandEffects,
+  type SlashRow,
+} from "../../lib/composer-commands";
+import {
+  buildMentionRows,
+  replaceRange,
+  PICKABLE_TASK_STATUSES,
+  taskRank,
+  type MentionSources,
+  type MentionRow,
+} from "../../lib/composer-mentions";
+import { caretAnchor } from "../../lib/caret-anchor";
+import { slashRowToSuggest, mentionRowToSuggest, type SuggestRow } from "../../lib/composer-menu";
+import { SuggestPanel, MentionSourceProbe } from "./composer-suggest";
 import styles from "./agent-composer.module.css";
 
 interface AgentComposerProps {
@@ -50,6 +88,15 @@ interface AgentComposerProps {
 
 const MAX_HISTORY_PILLS = 6;
 const EDITOR_MAX_HEIGHT_PX = 240;
+
+// The mirror's inset inside `.editorStack` (matches `.editorMirror`'s
+// `top`/`left` in `agent-composer.module.css`), and the suggestion panel's
+// nominal width (`.suggest`'s `min-width`/`max-width` midpoint) — both feed
+// `caretAnchor` (Design decision 8/9).
+const MIRROR_PAD_LEFT_PX = 10;
+const MIRROR_PAD_TOP_PX = 8;
+const SUGGEST_PANEL_WIDTH_PX = 320;
+const SUGGEST_GAP_PX = 6;
 
 function pillToMessagePill(pill: ContextPill): UserMessagePill {
   switch (pill.kind) {
@@ -119,25 +166,39 @@ function renderMentionOverlay(text: string): ReactElement {
 }
 
 /**
- * Statuses a task can be attached from, most actionable first.
- *
- * The picker used to ask the API for `status: "in-progress"` alone, which is why
- * a workspace with real work in it still showed "No tasks": a task is `todo`
- * until you start it, and attaching one as context is usually how you start it.
- * `done` is left out — the list exists to point the agent at work that remains.
+ * `head` + a marker span wrapping the sigil-to-caret token + `tail`, used
+ * only to measure where the caret currently is (Design decision 8). The span
+ * always wraps at least the sigil character (`start` is the `/` or `@`'s own
+ * index, `end` is the caret), so its rect is never degenerate — including at
+ * the start of a wrapped or freshly-newlined line. Rendered into a hidden
+ * mirror div that shares `.editorOverlay`/`.editorTextarea`'s font metrics
+ * and wrapping by construction (same CSS rule group), so no
+ * `getComputedStyle` copying is needed.
  */
-const PICKABLE_TASK_STATUSES = [
-  "in-progress",
-  "blocked",
-  "todo",
-  "backlog",
-] as const;
-
-function taskRank(status: string): number {
-  const i = PICKABLE_TASK_STATUSES.indexOf(
-    status as (typeof PICKABLE_TASK_STATUSES)[number],
+function renderMirror(
+  text: string,
+  start: number,
+  end: number,
+  markerRef: Ref<HTMLSpanElement>,
+): ReactElement {
+  return (
+    <>
+      {text.slice(0, start)}
+      <span ref={markerRef} className={styles.mirrorMark}>
+        {text.slice(start, end)}
+      </span>
+      {text.slice(end)}
+    </>
   );
-  return i === -1 ? PICKABLE_TASK_STATUSES.length : i;
+}
+
+/** `providers.find(p => p.id === providerId) ?? providers[0] ?? null` —
+ *  narrows on `null`, so callers never need a `!`. */
+function activeProvider(
+  providers: CatalogProvider[],
+  providerId: number | null,
+): CatalogProvider | null {
+  return providers.find((p) => p.id === providerId) ?? providers[0] ?? null;
 }
 
 function ContextPicker({
@@ -157,7 +218,7 @@ function ContextPicker({
   // Dismiss on a click anywhere else — the same `mousedown` + Escape pairing the
   // app's other popovers use (`notification-bell.tsx:65-81`). The trigger button
   // stops its own `mousedown` from reaching this listener, so clicking it while
-  // open closes via its toggle instead of closing here and immediately
+  // open closes it once via its toggle instead of closing here and immediately
   // reopening.
   useEffect(() => {
     const handler = (e: MouseEvent): void => {
@@ -317,6 +378,15 @@ function modeSelectValue(applied: string | null): string {
   return LIVE_PERMISSION_MODES.some((m) => m.value === applied) ? applied : "";
 }
 
+/** `LIVE_PERMISSION_MODES` as the slash registry's `CommandOption[]` — built
+ *  once, module scope, so `/mode`'s menu and cycle order are always exactly
+ *  the mode `<select>`'s own order. */
+const MODE_OPTIONS: readonly CommandOption[] = LIVE_PERMISSION_MODES.map((m) => ({
+  value: m.value,
+  label: m.label,
+  hint: m.title,
+}));
+
 /**
  * The provider + model + permission-mode row. The provider and model lists come
  * from Settings → Providers (the `providers` / `provider_models` tables), so
@@ -378,9 +448,14 @@ function ProviderModelRow({
 
   // No catalog (sidecar unreachable, or no provider registered yet) — render
   // nothing rather than an empty dropdown that implies a choice exists.
-  if (providers.length === 0) return null;
+  const active = activeProvider(providers, providerId);
+  if (active === null) return null;
+  // Re-bound to a plain, never-null local: TS does not carry the narrowing
+  // above into the nested `handleProviderChange`/`handleModelChange`
+  // declarations below, since a closure could in principle run after
+  // `active` (however `const`) went out of scope's control-flow analysis.
+  const activeId = active.id;
 
-  const active = providers.find((p) => p.id === providerId) ?? providers[0]!;
   const models = active.models;
 
   /**
@@ -399,7 +474,7 @@ function ProviderModelRow({
   const unapplied = live && providerId === null;
 
   function handleProviderChange(nextId: number): void {
-    if (nextId === active.id) return;
+    if (nextId === activeId) return;
     if (
       live &&
       turnCount > 0 &&
@@ -422,7 +497,7 @@ function ProviderModelRow({
   function handleModelChange(nextModel: string): void {
     if (nextModel === model) return;
     setLeafAgentConfig(leafId, { model: nextModel });
-    rememberSelection({ providerId: active.id, model: nextModel });
+    rememberSelection({ providerId: activeId, model: nextModel });
     setModelError(null);
     if (!live) return;
     void agentSetModel(leafId, nextModel).catch((err: unknown) => {
@@ -557,26 +632,158 @@ export function AgentComposer({
   const recall = useComposerStore((s) => s.recall);
 
   const splitPane = useTerminalStore((s) => s.splitPane);
+  const setLeafAgentConfig = useTerminalStore((s) => s.setLeafAgentConfig);
   const agentPaneCount = useTerminalStore((s) => {
     const tab = s.tabs.find((t) => t.id === s.activeTabId);
     if (!tab) return 1;
     return collectLeaves(tab.layout).filter((l) => paneKind(l) === "agent").length;
   });
 
+  const providers = useAgentCatalogStore((s) => s.providers);
+  const rememberSelection = useAgentCatalogStore((s) => s.rememberSelection);
+  // The CLI's own answer, not the optimistic pick — see `modeSelectValue`.
+  const appliedMode = useAgentSessionStore(
+    (s) => s.panes[leafId]?.permissionMode ?? null,
+  );
+
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dragCount, setDragCount] = useState<number | null>(null);
+  const [caret, setCaret] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [note, setNote] = useState<CommandOutcome | null>(null);
+  const [sources, setSources] = useState<MentionSources | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [anchor, setAnchor] = useState({ left: 0, bottom: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
+  const markerRef = useRef<HTMLSpanElement>(null);
+  const stackRef = useRef<HTMLDivElement>(null);
 
   const messagePills = pills.map(pillToMessagePill);
   const composedText = buildUserMessageText(messagePills, draft);
   // An exited session has no stdin to write to, so Send is refused rather than
   // failing silently in `agentSend` — the pane's status bar carries the
   // Restart button. Typing itself stays enabled: the draft survives the
-  // restart, which is the point of keeping the composer mounted.
+  // restart, which is the point of keeping the composer mounted. A *command*
+  // is exempt (`sendDisabled` below) — `/clear` on an exited session is
+  // exactly when it is wanted.
   const sessionEnded = status === "exited";
-  const sendDisabled = composedText.trim().length === 0 || sessionEnded;
+  const live = !sessionEnded;
   const lineCount = draft.length === 0 ? 0 : draft.split("\n").length;
+
+  // ── Slash-command / `@`-mention detection ────────────────────────────────
+  const trigger = useMemo(() => detectTrigger(draft, caret), [draft, caret]);
+
+  const models = useMemo<CommandOption[]>(() => {
+    const active = activeProvider(providers, providerId);
+    return active?.models.map((m) => ({ value: m.model_name, label: m.display_name })) ?? [];
+  }, [providers, providerId]);
+
+  const currentMode = modeSelectValue(appliedMode) || modeSelectValue(permissionMode);
+
+  // Pure data only (Design decision 12) — this is what lets `commandRows`,
+  // and with it `menuRows`, keep a stable identity across renders that don't
+  // actually change anything, which is what lets arrow-key navigation survive
+  // a re-render at all.
+  const data: CommandData = useMemo(
+    () => ({ models, modes: MODE_OPTIONS, currentMode, live }),
+    [models, currentMode, live],
+  );
+
+  const commandRows: SlashRow[] = useMemo(
+    () => (trigger?.kind === "slash" ? buildSlashRows(trigger.query, data) : []),
+    [trigger, data],
+  );
+  const mentionRows: MentionRow[] = useMemo(
+    () =>
+      trigger?.kind === "mention" && sources !== null
+        ? buildMentionRows(sources, trigger.query)
+        : [],
+    [trigger, sources],
+  );
+  const menuRows: SuggestRow[] = useMemo(
+    () =>
+      commandRows.length > 0
+        ? commandRows.map(slashRowToSuggest)
+        : mentionRows.map((_row, i) => mentionRowToSuggest(mentionRows, i)),
+    [commandRows, mentionRows],
+  );
+  // The last `menuRows` identity `activeIndex` was reset for. Initialised to
+  // the same reference `menuRows` already has on this very render (rather
+  // than a fresh `[]`), so mounting never causes a spurious extra render.
+  const [prevMenuRows, setPrevMenuRows] = useState<SuggestRow[]>(menuRows);
+  // `helpOpen` deliberately does not participate — the help panel is a
+  // read-only surface that never consumes a key (Design decision 12).
+  const menuOpen = !dismissed && menuRows.length > 0;
+
+  const parsed = parseCommandLine(draft);
+  const command = parsed !== null ? findCommand(parsed.name) : undefined;
+  // Bundled together (rather than narrowing `parsed` from a `command !==
+  // undefined` check at each use site) so the disposition row below reads
+  // without a non-null assertion.
+  const runInfo =
+    parsed !== null && command !== undefined ? { parsed, command } : null;
+  const unregisteredName =
+    parsed !== null && command === undefined ? parsed.name : null;
+  // Suppressed while the menu is actually visible and offering candidates —
+  // "not a Codenest command" on the same frame as a menu row reading
+  // `/model` is noise, not information (Design decision 4). Once the menu is
+  // dismissed (Escape) the warning is exactly what a bare `/` needs, even
+  // though `commandRows` itself still lists every command by name.
+  const showUnregisteredWarning =
+    unregisteredName !== null && (dismissed || commandRows.length === 0);
+
+  const sendDisabled =
+    command === undefined ? composedText.trim().length === 0 || sessionEnded : false;
+
+  // Resets (and thereby clamps) the highlight whenever the row set changes —
+  // adjusted during render (react.dev's "Adjusting state when a prop
+  // changes"), not in an effect: a `useEffect` here would fire one render
+  // late and a ref cannot be read during render, either. Sound only because
+  // `menuRows` has a stable identity across renders that change nothing else
+  // (Design decision 12); arrow keys mutate `activeIndex` alone and so never
+  // retrigger this.
+  if (prevMenuRows !== menuRows) {
+    setPrevMenuRows(menuRows);
+    if (activeIndex !== 0) setActiveIndex(0);
+  }
+
+  // Caret-coordinate mirror (Design decision 8/9): measured only while a menu
+  // is open, so it costs nothing in the normal case.
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const textarea = textareaRef.current;
+    const mirror = mirrorRef.current;
+    const marker = markerRef.current;
+    const stack = stackRef.current;
+    if (!textarea || !mirror || !marker || !stack) return;
+    // Width-matched to `clientWidth`, not to the overlay's `left`/`right`
+    // insets: past 240px `.editorTextarea` grows a scrollbar that narrows its
+    // own line box but would not narrow an inset-positioned mirror's, which
+    // would make long-draft wrapping (and the caret line with it) diverge.
+    mirror.style.width = `${textarea.clientWidth}px`;
+    const markerRect = marker.getBoundingClientRect();
+    const stackRect = stack.getBoundingClientRect();
+    setAnchor(
+      caretAnchor({
+        markerLeft: markerRect.left - stackRect.left,
+        markerTop: markerRect.top - stackRect.top,
+        scrollTop: textarea.scrollTop,
+        hostWidth: stack.clientWidth,
+        hostHeight: stack.clientHeight,
+        padLeft: MIRROR_PAD_LEFT_PX,
+        padTop: MIRROR_PAD_TOP_PX,
+        panelWidth: SUGGEST_PANEL_WIDTH_PX,
+        gapPx: SUGGEST_GAP_PX,
+      }),
+    );
+    // Deliberately curated deps, in the same style as `agent-pane.tsx`'s own
+    // boot effect: re-measure exactly when the menu opens/closes, the
+    // command line's sigil moves, the draft's layout could have changed, or
+    // the row count (and with it the panel's own height) changed.
+  }, [menuOpen, trigger?.start, draft, menuRows.length]);
 
   /** The auto-grow measurement, shared by typing and by a drop that inserts
    *  text the user did not type. */
@@ -585,12 +792,187 @@ export function AgentComposer({
     el.style.height = `${Math.min(el.scrollHeight, EDITOR_MAX_HEIGHT_PX)}px`;
   }
 
+  /** Focuses the textarea and places the caret once the store's new draft has
+   *  reached the DOM — the same drop-caret pattern this file already used. */
+  function focusCaretAt(nextCaret: number): void {
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextCaret, nextCaret);
+      setCaret(nextCaret);
+      resizeEditor(el);
+    });
+  }
+
   function handleDraftChange(el: HTMLTextAreaElement): void {
     setDraft(leafId, el.value);
+    setCaret(el.selectionStart);
+    setDismissed(false);
+    setHelpOpen(false);
+    setNote(null);
     resizeEditor(el);
   }
 
+  /** Built fresh at execution time (Design decision 12) — identity here is
+   *  irrelevant, since nothing memoizes on it. */
+  function commandEffects(): SlashCommandEffects {
+    return {
+      setModel: async (nextModel) => {
+        const active = activeProvider(providers, providerId);
+        setLeafAgentConfig(leafId, { model: nextModel });
+        rememberSelection({ providerId: active?.id ?? null, model: nextModel });
+        if (live) await agentSetModel(leafId, nextModel);
+      },
+      setPermissionMode: async (nextMode) => {
+        setLeafAgentConfig(leafId, { permissionMode: nextMode });
+        if (live) await agentSetPermissionMode(leafId, nextMode);
+      },
+      // Reads the session id *before* dropping any state — the pane's own
+      // teardown reports the exit under `panes[leafId]?.sessionId` after the
+      // restart is requested, so resetting first would make that report
+      // unnamed and unsafe across the replacement session (Design decision 6).
+      clearSession: () => {
+        const sessionId = useAgentSessionStore.getState().panes[leafId]?.sessionId ?? null;
+        useComposerStore.getState().clearPane(leafId);
+        if (sessionId !== null) recordAgentExited(leafId, null, sessionId);
+        useAgentSessionStore.getState().reset(leafId);
+        onRequestRestart();
+      },
+      sendRaw: async (text) => {
+        useAgentSessionStore.getState().markSendStart(leafId, text);
+        await agentSend(leafId, text);
+        setDraft(leafId, "");
+      },
+      showHelp: () => {
+        setHelpOpen(true);
+        setDraft(leafId, "");
+      },
+    };
+  }
+
+  /** Runs `text` as a command line, records the outcome, and — only on
+   *  success — clears the draft (an error leaves the line in place so it can
+   *  be fixed). Never called with text that isn't a registered command line
+   *  (callers check `command !== undefined`/`runsBare` first), so the
+   *  `"unregistered"`/`null` results are unreachable in practice. */
+  async function executeCommandLine(text: string): Promise<void> {
+    const result = await runCommandLine(text, { ...data, ...commandEffects() });
+    if (result === null || result.kind === "unregistered") return;
+    setNote(result.outcome);
+    if (result.outcome.kind === "ok") {
+      setDraft(leafId, "");
+      setCaret(0);
+      const el = textareaRef.current;
+      if (el) el.style.height = "auto";
+    }
+  }
+
+  function setDraftAndRun(text: string): void {
+    setDraft(leafId, text);
+    void executeCommandLine(text);
+  }
+
+  function placeDraftWithCaretAtEnd(text: string): void {
+    setDraft(leafId, text);
+    focusCaretAt(text.length);
+  }
+
+  /** Accepting a `/`-menu row: a bare `runsBare` command runs immediately; a
+   *  `runsBare: false` command (only `/model` today) completes to `"/name "`
+   *  and leaves the arg menu open, since picking `/model` is not yet a
+   *  choice of *which* model. An `arg` row always runs immediately. */
+  function acceptSlashRow(row: SlashRow): void {
+    if (row.kind === "command") {
+      if (row.command.runsBare) {
+        setDraftAndRun(`/${row.command.name}`);
+      } else {
+        placeDraftWithCaretAtEnd(`/${row.command.name} `);
+      }
+      return;
+    }
+    setDraftAndRun(`/${row.command.name} ${row.option.value}`);
+  }
+
+  /** Accepting an `@`-menu row (Design decision 7): an agent inserts text at
+   *  the token; a task or library row deletes the token and attaches the
+   *  existing pill kind instead; a `library-ref` fetches the item first. */
+  async function acceptMentionRow(row: MentionRow): Promise<void> {
+    if (trigger === null || trigger.kind !== "mention") return;
+    const { start } = trigger;
+    if (row.kind === "agent") {
+      const edit = replaceRange(draft, start, caret, row.insertText);
+      setDraft(leafId, edit.text);
+      focusCaretAt(edit.caret);
+      return;
+    }
+    if (row.kind === "task") {
+      const edit = replaceRange(draft, start, caret, "");
+      setDraft(leafId, edit.text);
+      focusCaretAt(edit.caret);
+      useComposerStore.getState().addPills(leafId, [
+        {
+          id: crypto.randomUUID(),
+          kind: "task",
+          taskId: row.taskId,
+          title: row.title,
+          description: row.description,
+        },
+      ]);
+      return;
+    }
+    if (row.kind === "library") {
+      const edit = replaceRange(draft, start, caret, "");
+      setDraft(leafId, edit.text);
+      focusCaretAt(edit.caret);
+      useComposerStore.getState().addPills(leafId, [
+        { id: crypto.randomUUID(), kind: "template", slug: row.slug, title: row.title, body: row.body },
+      ]);
+      return;
+    }
+    // `library-ref`: a syntactically valid slug with no match in the loaded
+    // page — the shared resolver is what makes this genuinely work rather
+    // than just naming the slug.
+    try {
+      const item = await fetchLibraryItemBySlug(row.slug);
+      if (item === null) {
+        setNote({ kind: "error", note: `No library item @library:${row.slug}` });
+        return;
+      }
+      const edit = replaceRange(draft, start, caret, "");
+      setDraft(leafId, edit.text);
+      focusCaretAt(edit.caret);
+      useComposerStore.getState().addPills(leafId, [
+        { id: crypto.randomUUID(), kind: "template", slug: item.slug, title: item.title, body: item.body },
+      ]);
+    } catch (err) {
+      setNote({
+        kind: "error",
+        note: `Library lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  /** Indexes back into `commandRows`/`mentionRows` by position — `menuRows`
+   *  is presentational only and carries no reference back to the row it
+   *  came from. */
+  async function acceptMenuRow(index: number): Promise<void> {
+    if (commandRows.length > 0) {
+      const row = commandRows[index];
+      if (row) acceptSlashRow(row);
+      return;
+    }
+    const row = mentionRows[index];
+    if (row) await acceptMentionRow(row);
+  }
+
   function handleSend(): void {
+    // A command never reaches `agentSend` — this is the whole regression the
+    // task exists to fix.
+    if (command !== undefined) {
+      void executeCommandLine(draft);
+      return;
+    }
     if (sendDisabled) return;
     // The optimistic user turn is wired here, at the component layer, not
     // inside `composer-store.send()` — `composer-store.ts` never imports
@@ -606,6 +988,29 @@ export function AgentComposer({
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (menuOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      e.preventDefault();
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((i) => (i + delta + menuRows.length) % menuRows.length);
+      return;
+    }
+    if (menuOpen && (e.key === "Enter" || e.key === "Tab")) {
+      e.preventDefault();
+      void acceptMenuRow(activeIndex);
+      return;
+    }
+    if (menuOpen && e.key === "Escape") {
+      // The menu owns this Escape — a running turn must not be interrupted by
+      // a menu dismissal.
+      e.preventDefault();
+      setDismissed(true);
+      return;
+    }
+    if (helpOpen && e.key === "Escape") {
+      e.preventDefault();
+      setHelpOpen(false);
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -669,18 +1074,25 @@ export function AgentComposer({
     // Where the pointer landed, not where the caret was last left: the browser
     // moves the caret to the drop point before `drop` fires, so `selectionStart`
     // is already the right offset.
-    const caret = el.selectionStart;
-    const nextCaret = insertPathsIntoDraft(leafId, paths, caret);
+    const dropCaret = el.selectionStart;
+    const nextCaret = insertPathsIntoDraft(leafId, paths, dropCaret);
     // The store owns the value, so the DOM catches up on the next render —
-    // restore focus and place the caret past the insertion after it does.
+    // restore focus and place the caret past the insertion after it does, and
+    // update `caret` state so the trigger scanner tracks a dropped caret too.
     requestAnimationFrame(() => {
       const current = textareaRef.current;
       if (!current) return;
       current.focus();
       current.setSelectionRange(nextCaret, nextCaret);
+      setCaret(nextCaret);
       resizeEditor(current);
     });
   }
+
+  const wireWarningText =
+    unregisteredName !== null
+      ? `/${unregisteredName} is not a Codenest command — Enter sends it to claude as text`
+      : null;
 
   return (
     <div className={styles.composer} data-agent-composer>
@@ -691,7 +1103,7 @@ export function AgentComposer({
           providerId={providerId}
           model={model}
           permissionMode={permissionMode}
-          live={status !== "exited"}
+          live={live}
           onRequestRestart={onRequestRestart}
         />
         <button
@@ -739,7 +1151,31 @@ export function AgentComposer({
             onClose={() => setPickerOpen(false)}
           />
         ) : null}
-        <div className={styles.editorStack}>
+        {helpOpen ? (
+          <div className={styles.helpPanel} role="note">
+            <div className={styles.helpPanelHeader}>
+              Commands
+              <button
+                type="button"
+                className={styles.helpClose}
+                aria-label="Close command help"
+                onClick={() => setHelpOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            {helpRows().map((row) => (
+              <div key={row.name} className={styles.helpRow}>
+                <span className={styles.helpName}>
+                  /{row.name}
+                  {row.argHint ? ` ${row.argHint}` : ""}
+                </span>
+                <span className={styles.helpSummary}>{row.summary}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className={styles.editorStack} ref={stackRef}>
           <div
             className={styles.editorOverlay}
             aria-hidden="true"
@@ -747,12 +1183,18 @@ export function AgentComposer({
           >
             {renderMentionOverlay(draft)}
           </div>
+          {menuOpen && trigger !== null ? (
+            <div className={styles.editorMirror} aria-hidden="true" ref={mirrorRef}>
+              {renderMirror(draft, trigger.start, caret, markerRef)}
+            </div>
+          ) : null}
           <textarea
             ref={textareaRef}
             data-agent-composer
             className={styles.editorTextarea}
             value={draft}
             onChange={(e) => handleDraftChange(e.currentTarget)}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={handleKeyDown}
             onScroll={(e) => {
               if (overlayRef.current) {
@@ -774,6 +1216,23 @@ export function AgentComposer({
                 {dragCount} {dragCount === 1 ? "path" : "paths"}
               </b>
             </div>
+          ) : null}
+          {menuOpen ? (
+            <SuggestPanel
+              rows={menuRows}
+              activeIndex={activeIndex}
+              anchor={anchor}
+              onPick={(i) => void acceptMenuRow(i)}
+              onHover={setActiveIndex}
+              footer={
+                commandRows.length > 0
+                  ? "↩ select · ⇥ complete · esc dismiss"
+                  : "↩ insert · esc dismiss"
+              }
+            />
+          ) : null}
+          {trigger?.kind === "mention" && !dismissed ? (
+            <MentionSourceProbe onSources={setSources} />
           ) : null}
         </div>
       </div>
@@ -800,6 +1259,8 @@ export function AgentComposer({
             "session ended · Restart to send"
           ) : (
             <>
+              <span className={styles.kbd}>/</span> commands ·{" "}
+              <span className={styles.kbd}>@</span> mention ·{" "}
               <span className={styles.kbd}>⇧↩</span> newline ·{" "}
               <span className={styles.kbd}>esc</span> interrupt ·{" "}
               <span className={styles.kbd}>⌘Z</span> undo
@@ -809,21 +1270,53 @@ export function AgentComposer({
         <button
           type="button"
           className={styles.sendGhost}
-          disabled={status !== "running"}
+          disabled={status !== "running" || command !== undefined}
           onClick={() => queue(leafId)}
         >
           ⌛ Queue
         </button>
         <button type="button" className={styles.send} disabled={sendDisabled} onClick={handleSend}>
-          Send <span className={styles.kbd}>⌘↩</span>
+          {command ? "Run" : "Send"} <span className={styles.kbd}>⌘↩</span>
         </button>
       </div>
 
-      <div className={styles.wire} title={previewUserMessageLine(composedText)}>
-        <span className={styles.wireLabel}>WRITES</span>
-        <code className={styles.wireCode}>{previewUserMessageLine(composedText)}</code>
-        <span>→ claude --print --input-format stream-json · one JSON line on stdin</span>
+      {note !== null ? (
+        <div
+          className={`${styles.cnote} ${note.kind === "error" ? styles.cnoteError : ""}`}
+          role="status"
+        >
+          {note.note}
+        </div>
+      ) : null}
+
+      <div
+        className={styles.wire}
+        title={
+          runInfo !== null
+            ? `${runInfo.command.name} → ${runInfo.command.summary}`
+            : previewUserMessageLine(composedText)
+        }
+      >
+        {runInfo !== null ? (
+          <>
+            <span className={styles.wireRunLabel}>RUNS</span>
+            <code className={styles.wireCode}>
+              /{runInfo.parsed.name}
+              {runInfo.parsed.arg ? ` ${runInfo.parsed.arg}` : ""}
+            </code>
+            <span>→ {runInfo.command.summary}</span>
+          </>
+        ) : (
+          <>
+            <span className={styles.wireLabel}>WRITES</span>
+            <code className={styles.wireCode}>{previewUserMessageLine(composedText)}</code>
+            <span>→ claude --print --input-format stream-json · one JSON line on stdin</span>
+          </>
+        )}
       </div>
+      {showUnregisteredWarning && wireWarningText !== null ? (
+        <div className={styles.wireWarn}>{wireWarningText}</div>
+      ) : null}
 
       <div className={styles.chist}>
         {history.slice(0, MAX_HISTORY_PILLS).map((entry, i) => (

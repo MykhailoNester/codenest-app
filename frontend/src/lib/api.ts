@@ -1907,39 +1907,6 @@ export function useSetScheduleRetention(): UseMutationResult<
   });
 }
 
-// ─── Omni-Bar Intent Classifier ──────────────────────────────────────────────
-
-export type IntentKind =
-  "command-palette" | "slash" | "reference" | "search" | "prompt";
-
-export interface IntentResult {
-  kind: IntentKind;
-  payload: string;
-}
-
-export function classifyIntent(query: string): IntentResult {
-  // Mirror app/services/intent_service.classify so the bar can render a live
-  // preview without a server round-trip. The backend endpoint is still
-  // available for tests / future server-side enrichment.
-  const s = query.trim();
-  if (!s) return { kind: "command-palette", payload: "" };
-  if (s.startsWith("/"))
-    return { kind: "slash", payload: s.slice(1).trimStart() };
-  if (s.startsWith("@"))
-    return { kind: "reference", payload: s.slice(1).trimStart() };
-  const hasSpace = s.includes(" ");
-  const endsQuestion = s.endsWith("?");
-  if (s.length >= 4 && (hasSpace || endsQuestion)) {
-    return { kind: "prompt", payload: s };
-  }
-  return { kind: "search", payload: s };
-}
-
-// The `POST /api/v1/intent/classify` endpoint mirrors `classifyIntent`
-// above; it exists for tests and future LLM-backed enrichment but the
-// omni-bar uses the client-side mirror for the live preview round-trip
-// to stay snappy. Re-add `useClassifyIntent` here if a caller needs it.
-
 export function useCreateInboxItem(): UseMutationResult<
   { id: number },
   SidecarError,
@@ -2118,21 +2085,28 @@ export function useLibraryItems(
   });
 }
 
+/** One library item by slug, or null when there is none. The shared resolver
+ *  for `@library:<slug>` — the list endpoint returns only the newest 50.
+ *  Rejects (does not swallow) on any non-404 failure. */
+export async function fetchLibraryItemBySlug(
+  slug: string,
+): Promise<LibraryItem | null> {
+  try {
+    return await fetchSidecar<LibraryItem>(
+      `/api/v1/library/by-slug/${encodeURIComponent(slug)}`,
+    );
+  } catch (err) {
+    if (err instanceof SidecarError && err.status === 404) return null;
+    throw err;
+  }
+}
+
 export function useLibraryItemBySlug(
   slug: string | undefined,
 ): UseQueryResult<LibraryItem | null, SidecarError> {
   return useQuery<LibraryItem | null, SidecarError>({
     queryKey: ["library-by-slug", slug ?? ""],
-    queryFn: async () => {
-      try {
-        return await fetchSidecar<LibraryItem>(
-          `/api/v1/library/by-slug/${encodeURIComponent(slug ?? "")}`,
-        );
-      } catch (err) {
-        if (err instanceof SidecarError && err.status === 404) return null;
-        throw err;
-      }
-    },
+    queryFn: () => fetchLibraryItemBySlug(slug ?? ""),
     enabled: typeof slug === "string" && slug.length > 0,
     staleTime: 30_000,
   });

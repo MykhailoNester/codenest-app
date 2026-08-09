@@ -8,16 +8,17 @@ import {
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  classifyIntent,
-  fetchSidecar,
-  SidecarError,
+  fetchLibraryItemBySlug,
   useCreateAttachment,
   useCreateInboxItem,
   useProjects,
   useTeamMembers,
-  type IntentResult,
-  type LibraryItem,
 } from "../lib/api";
+import {
+  classifyIntent,
+  parseLibraryRef,
+  type IntentResult,
+} from "../lib/prompt-intent";
 import { useVoiceDictation } from "../lib/use-voice-dictation";
 import styles from "./omni-bar.module.css";
 
@@ -43,8 +44,6 @@ function fileToBase64(file: File): Promise<string> {
 // Global event the App-level Cmd+K handler subscribes to so Shell consumers
 // don't have to plumb a callback down through every page.
 const PALETTE_OPEN_EVENT = "omni:open-palette";
-
-const LIBRARY_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,127}$/;
 
 function dispatchPaletteOpen(): void {
   document.dispatchEvent(new CustomEvent(PALETTE_OPEN_EVENT));
@@ -199,23 +198,25 @@ export function OmniBar(): ReactElement {
         // don't reimplement the slash registry.
         dispatchPaletteOpen();
         return;
-      case "reference":
-        if (intent.payload.toLowerCase().startsWith("library:")) {
-          const rest = intent.payload.slice("library:".length);
-          const slug = rest.split(/\s/, 1)[0]?.toLowerCase() ?? "";
-          if (!slug) {
-            toast.error("Empty @library:<slug>");
+      case "reference": {
+        const ref = parseLibraryRef(intent.payload);
+        if (ref !== null) {
+          if (!ref.ok) {
+            toast.error(
+              ref.reason === "empty"
+                ? "Empty @library:<slug>"
+                : `Invalid @library:${ref.slug}`,
+            );
             return;
           }
-          if (!LIBRARY_SLUG_RE.test(slug)) {
-            toast.error(`Invalid @library:${slug}`);
-            return;
-          }
+          const slug = ref.slug;
           void (async () => {
             try {
-              const item = await fetchSidecar<LibraryItem>(
-                `/api/v1/library/by-slug/${encodeURIComponent(slug)}`,
-              );
+              const item = await fetchLibraryItemBySlug(slug);
+              if (item === null) {
+                toast.error(`No library item @library:${slug}`);
+                return;
+              }
               setQuery((current) => {
                 const match = current.match(/@library:/i);
                 const idx = match?.index ?? -1;
@@ -224,13 +225,9 @@ export function OmniBar(): ReactElement {
               });
               toast.success(`Inserted @library:${slug}`);
             } catch (err) {
-              if (err instanceof SidecarError && err.status === 404) {
-                toast.error(`No library item @library:${slug}`);
-              } else {
-                toast.error(
-                  `Library lookup failed: ${err instanceof Error ? err.message : String(err)}`,
-                );
-              }
+              toast.error(
+                `Library lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
           })();
           return;
@@ -242,6 +239,7 @@ export function OmniBar(): ReactElement {
         }
         toast.error(`No match for @${intent.payload}`);
         return;
+      }
       case "search":
         // Route to the docs page with a search hash — that page already
         // wires a search box; it just consumes the hash and filters.
