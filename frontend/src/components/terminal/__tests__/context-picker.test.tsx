@@ -19,10 +19,21 @@ const { useTasksMock, useLibraryItemsMock } = vi.hoisted(() => ({
 vi.mock("../../../lib/api", () => ({
   useTasks: (filters?: unknown) => useTasksMock(filters),
   useLibraryItems: () => useLibraryItemsMock(),
+  // Not exercised by any test in this file — listed because a `vi.mock`
+  // factory replaces the module wholesale, and once `agent-composer.tsx`
+  // statically imports `composer-suggest.tsx` (the mention menu's data
+  // probe) the mocked namespace is asked for these on any render path that
+  // reaches them. Vitest's proxy throws on *access*, not on link, so this
+  // suite would very likely pass without them too — they are added so its
+  // correctness does not depend on which branches happen to render.
+  useTeamMembers: () => ({ data: [] }),
+  fetchLibraryItemBySlug: vi.fn(async () => null),
+  fetchSidecar: vi.fn(async () => []),
 }));
 
 vi.mock("../../../lib/ipc", () => ({
   agentInterrupt: vi.fn(async () => undefined),
+  agentSend: vi.fn(async () => undefined),
   agentSetModel: vi.fn(async () => undefined),
   agentSetPermissionMode: vi.fn(async () => undefined),
 }));
