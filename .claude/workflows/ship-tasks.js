@@ -228,6 +228,19 @@ const FINAL_SCHEMA = {
 /* ---- Stage 1: worktree ------------------------------------------------- */
 
 async function setup(_prev, t) {
+  /* A task escalated out of /ship's SIMPLE lane arrives with its worktree
+     already created — right branch, symlinks in place, node_modules installed,
+     and usually uncommitted work in it. Re-running the bootstrap would call
+     `git worktree add -b <branch>` and correctly hard-stop on "branch already
+     exists", failing a task whose only problem was being mis-triaged.
+     Short-circuiting costs one agent invocation less and keeps that hard stop
+     intact for every other caller: the only way past it is a carry the command
+     layer has to set deliberately. */
+  if (t.carry && t.carry.worktree) {
+    log(`setup:${t.slug} — reusing escalated worktree (${t.carry.escalatedBy || 'escalated'})`)
+    return { task: t, setup: { ok: true, head: t.branch, reused: true } }
+  }
+
   const r = await agent(
     `Create and bootstrap the isolated worktree for one Codenest task. Shell work only — write no code.
 
@@ -291,11 +304,23 @@ instruction — it documents an earlier state of the codebase. Where it disagree
 code you read, the code wins and you note the divergence.\n\n${t.docRow}\n`
     : ''
 
+  /* An escalated task is partly done. Say so, or the planner writes a
+     from-scratch plan and the coder rewrites working code over the top of it. */
+  const carried = t.carry
+    ? `\nThis task was ESCALATED out of the SIMPLE lane (${t.carry.escalatedBy || 'unspecified'}),
+so the worktree ALREADY CONTAINS uncommitted work. Read it before planning:
+${(t.carry.priorFiles || []).map((f) => `  - ${f}`).join('\n') || '  (no file list carried)'}
+${t.carry.priorFailure ? `\nThe last gate run failed with:\n${t.carry.priorFailure}\n` : ''}
+Plan the COMPLETION, not the task from scratch: keep what already satisfies the intent, and
+say per file whether it is finished, wrong, or missing. A plan that ignores the existing diff
+gets it thrown away for no reason.\n`
+    : ''
+
   let plan = await agent(
     `Produce the implementation plan for one Codenest task. Write it to ${artOf(t)}/plan.md.
 
 TASK: ${t.statement}
-${docRow}${envFor(t)}${RULES}
+${docRow}${carried}${envFor(t)}${RULES}
 
 Ground every claim by reading the actual files in the worktree and citing file.py:line.
 Name the layers this touches (sidecar / frontend / shell); if it crosses layers, write the
