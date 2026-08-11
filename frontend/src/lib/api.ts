@@ -651,6 +651,33 @@ export function changeTaskStatus(
   });
 }
 
+export function deleteTask(id: number): Promise<{ ok: true }> {
+  return fetchSidecar<{ ok: true }>(`/api/v1/tasks/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function addTaskBlocker(
+  taskId: number,
+  blockingTaskId: number,
+): Promise<{ ok: true }> {
+  return fetchSidecar<{ ok: true }>(`/api/v1/tasks/${taskId}/blockers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ blocking_task_id: blockingTaskId }),
+  });
+}
+
+export function removeTaskBlocker(
+  taskId: number,
+  blockerId: number,
+): Promise<{ ok: true }> {
+  return fetchSidecar<{ ok: true }>(
+    `/api/v1/tasks/${taskId}/blockers/${blockerId}`,
+    { method: "DELETE" },
+  );
+}
+
 /**
  * Builds the next `board_wip_limits` map from `current` (delete the key when
  * `limit` is null, else set it) and writes it through the existing settings
