@@ -275,3 +275,11 @@
   padding: 2px 8px;
   cursor: pointer;
 }
+
+/* The strip as the dock's metrics line: the dock's own `.groups` (or the
+   composer's top border) provides the rule beneath it, so the strip's own
+   bottom border would double it. `<SessionHud/>` (shell panes) never sets
+   this and is untouched. */
+.stripDocked {
+  border-bottom: 0;
+}

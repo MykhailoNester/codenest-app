@@ -1,0 +1,129 @@
+/* Chrome for Zone B — the activity dock — new for this ticket. The dock is a
+   *sibling* of `.viewport` inside `agent-pane.module.css`'s `.body`, pinned
+   directly above the composer; see `agent-activity-dock.tsx`'s module doc for
+   the zone model this is half of.
+
+   `.dock` and `.groups` are the two flex layers that make "the composer never
+   moves" true even in a busy session:
+
+   - `.dock` is `flex: 0 1 auto; min-height: 0` — it sizes to its own content
+     and *can* shrink, but never grows to fight `.viewport` (`flex: 1 1 auto`)
+     for the pane's height.
+   - `.groups` caps at `max-height: 220px` (roughly 8-10 mono rows — enough for
+     a couple of collapsed groups plus one expanded phase tree, not a whole
+     30-agent workflow) and scrolls internally past that, with
+     `overscroll-behavior: contain` so the wheel never chains into the
+     transcript once the cap is hit.
+
+   Together: a pane too short even for the capped dock shrinks the dock first
+   (`.dock`'s own `flex-shrink`), never the composer, which stays
+   `flex: 0 0 auto` in `agent-composer.module.css` and is therefore never
+   asked to give up any space at all. */
+
+.dock {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-2);
+  border-top: 1px solid var(--line-1);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  /* No `position`, no `z-index` (D10): the composer's upward popovers
+     (`agent-composer.module.css`'s `@`/`/` suggestion panel and `{}`
+     preview) must keep painting over this element exactly as they used to
+     paint over the transcript — adding either property here would risk
+     putting the dock in its own stacking context above them. */
+}
+
+.groups {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--line-1);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.group + .group {
+  border-top: 1px solid var(--line-1);
+}
+
+.groupHead {
+  appearance: none;
+  background: none;
+  border: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.groupHead:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.groupTwisty {
+  color: var(--fg-4);
+  font-size: 8px;
+  width: 9px;
+  flex: none;
+}
+
+/* The `.key` idiom (`session-hud.module.css`) — uppercase, dim, small — so a
+   group header reads as a label first and a sentence second. */
+.groupLabel {
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: none;
+}
+
+.groupSummary {
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.groupMeta {
+  color: var(--fg-3);
+  flex: none;
+  white-space: nowrap;
+}
+
+.groupBody {
+  padding: 0 9px 7px;
+}
+
+/* The Tools group's "what now" row — mirrors `agent-conversation.module.css`'s
+   `.toolRunHead`/`.toolRunHeadTick` (a separate CSS module, so a separate pair
+   of classes rather than an import: the dock and the transcript agree on the
+   wording via `toolRunHeadline`, not on the CSS). */
+.toolHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-3);
+  min-width: 0;
+}
+
+.toolHeadTick {
+  color: var(--fg-4);
+  flex: none;
+}
