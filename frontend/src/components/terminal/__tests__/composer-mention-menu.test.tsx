@@ -4,7 +4,7 @@
 // costs nothing until an `@` token actually exists.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AgentComposer } from "../agent-composer";
 import { useComposerStore } from "../../../stores/composer-store";
 import { useAgentSessionStore } from "../../../stores/agent-session-store";
@@ -44,6 +44,43 @@ vi.mock("../../../lib/api", () => ({
   fetchLibraryItemBySlug: (slug: string) => fetchLibraryItemBySlugMock(slug),
   fetchSidecar: vi.fn(async () => []),
 }));
+
+// jsdom implements no layout and so ships no `ResizeObserver`; the composer
+// constructs one over `.editorStack` to re-anchor an open suggestion panel.
+// Unlike the no-op stubs elsewhere in this directory, this one keeps the live
+// callbacks so a resize can be driven deliberately — the re-anchor is the
+// behaviour under test, not incidental setup.
+const resizeCallbacks = new Set<ResizeObserverCallback>();
+
+class StubResizeObserver {
+  // Assigned in the body rather than as a constructor parameter property:
+  // `erasableSyntaxOnly` in tsconfig.app.json rejects the shorthand.
+  private readonly cb: ResizeObserverCallback;
+
+  constructor(cb: ResizeObserverCallback) {
+    this.cb = cb;
+  }
+
+  observe(): void {
+    resizeCallbacks.add(this.cb);
+  }
+  unobserve(): void {
+    resizeCallbacks.delete(this.cb);
+  }
+  disconnect(): void {
+    resizeCallbacks.delete(this.cb);
+  }
+}
+(globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
+  StubResizeObserver as unknown as typeof ResizeObserver;
+
+/** Runs every observer the composer has attached, as the browser would after
+ *  `.editorStack` has been re-laid-out. */
+function fireStackResize(): void {
+  act(() => {
+    for (const cb of [...resizeCallbacks]) cb([], {} as ResizeObserver);
+  });
+}
 
 const LEAF = "leaf-1";
 
@@ -222,5 +259,38 @@ describe("@ mention menu", () => {
 
     typeDraft("@ali");
     expect(useTeamMembersMock).toHaveBeenCalled();
+  });
+
+  // The bug: picking a mention attaches a context pill, the pill row grows (a
+  // chip can wrap to a second line), and `.editorStack` gets taller — but the
+  // measuring effect depends only on the draft, the trigger and the row count,
+  // so nothing re-ran and the next menu opened against the pre-pill geometry.
+  // `caretAnchor` derives `bottom` from the stack's height, so a stale height
+  // is exactly a vertically offset panel.
+  it("re-anchors an open menu when the editor stack changes height", async () => {
+    let stackHeight = 120;
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => stackHeight,
+    });
+    try {
+      renderComposer();
+      typeDraft("@ali");
+      const before = (await screen.findByRole("listbox")).style.bottom;
+      expect(parseFloat(before)).toBeGreaterThan(0);
+
+      // One wrapped pill line taller. Nothing the measuring effect depends on
+      // has changed — only the box.
+      stackHeight = 160;
+      fireStackResize();
+
+      expect(parseFloat(screen.getByRole("listbox").style.bottom)).toBe(
+        parseFloat(before) + 40,
+      );
+    } finally {
+      // `clientHeight` is readonly in lib.dom, so `delete` is a type error;
+      // removing the own property restores jsdom's inherited getter all the same.
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    }
   });
 });
