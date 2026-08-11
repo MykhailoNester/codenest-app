@@ -100,12 +100,26 @@
   color: var(--fg-1);
 }
 
-/* Body: conversation above, composer (or the disabled/ended bar) below. */
+/* Body: one scroll viewport above, composer (or the disabled/ended bar)
+   below. */
 .body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* The pane's one scroll viewport. Every body view — the transcript, a
+   sub-agent panel, a workflow panel — renders inside this element, which
+   owns filling the flex line and scrolling on behalf of all of them. A view
+   that declared no `flex` used to collapse the line and drag the composer
+   up under itself; owning it here means no view can opt out. It is also the
+   element `<AgentConversation/>` measures for stick-to-bottom (`scrollRef`):
+   the scroller and the measured node must be the same one. */
+.viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* "Session ended (exit N) · Restart" bar replacing the composer once the

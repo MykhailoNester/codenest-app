@@ -4,10 +4,14 @@
  * an inline diffstat), foldable tool output, and a streaming/thinking
  * indicator. `permissions[0]` renders `<AgentPermissionDialog/>` — the
  * clearest thing this surface does better than a redraw-heavy TUI.
+ *
+ * The scroll box is the pane's single viewport (`<AgentPane/>`'s
+ * `.viewport`), passed in as `scrollRef` rather than owned here — see that
+ * prop's doc comment for why.
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, RefObject } from "react";
 import {
   formatDuration,
   groupTurnBlocks,
@@ -27,6 +31,14 @@ import styles from "./agent-conversation.module.css";
 
 interface AgentConversationProps {
   state: ConversationState;
+  /** The element that actually scrolls: the pane's single view viewport
+   *  (`agent-pane.module.css` `.viewport`), rendered by `<AgentPane/>` and
+   *  shared by all three body views. Passed in rather than created here
+   *  because the transcript div below is plain content with no overflow of
+   *  its own — measuring it would measure a non-scrolling element and
+   *  stick-to-bottom would silently stop working with nothing in
+   *  `make check-all` to notice. */
+  scrollRef: RefObject<HTMLDivElement | null>;
   isFocusedPane: boolean;
   onAllowPermission: () => void;
   onAllowPermissionSession: () => void;
@@ -245,23 +257,28 @@ function Turn({
 
 export function AgentConversation({
   state,
+  scrollRef,
   isFocusedPane,
   onAllowPermission,
   onAllowPermissionSession,
   onDenyPermission,
   lastControlNote,
 }: AgentConversationProps): ReactElement {
-  const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
 
-  function handleScroll(): void {
+  useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distanceFromBottom < 40;
-  }
+    const onScroll = (): void => {
+      stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, [scrollRef]);
 
   function toggleTool(id: string): void {
     setExpandedTools((prev) => {
@@ -306,7 +323,7 @@ export function AgentConversation({
   }, [permission]);
 
   return (
-    <div className={styles.conv} ref={scrollRef} onScroll={handleScroll}>
+    <div className={styles.conv} data-testid="agent-conversation">
       {state.turns.map((turn) => (
         <Turn
           key={turn.id}

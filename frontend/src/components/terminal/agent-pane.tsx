@@ -237,6 +237,13 @@ export function AgentPane({
    * state, because it must be readable in the same commit that sets it.
    */
   const restartRef = useRef(false);
+  /**
+   * The pane's single scroll viewport (`.viewport`, agent-pane.module.css),
+   * shared by all three body views below. `<AgentConversation/>` measures
+   * and scrolls this element rather than owning a scroller of its own — see
+   * its `scrollRef` prop's doc comment.
+   */
+  const viewportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // See the doc comment on `startedPanes` above (review round 1, F1) —
@@ -566,24 +573,31 @@ export function AgentPane({
       <AgentSessionHud state={conv} cwd={cwd} paneId={leafId} />
 
       <div className={styles.body}>
-        {effectiveView.kind === "main" ? (
-          <AgentConversation
-            state={conv}
-            isFocusedPane={isFocused && active}
-            onAllowPermission={handleAllow}
-            onAllowPermissionSession={handleAllowSession}
-            onDenyPermission={handleDeny}
-            lastControlNote={lastControlNote}
-          />
-        ) : viewedSubagent !== null ? (
-          <AgentViewPanel
-            kind="subagent"
-            block={viewedSubagent}
-            sessionExited={conv.status === "exited"}
-          />
-        ) : viewedRun !== null ? (
-          <AgentViewPanel kind="workflow" run={viewedRun} />
-        ) : null}
+        <div
+          className={styles.viewport}
+          ref={viewportRef}
+          data-testid="agent-pane-viewport"
+        >
+          {effectiveView.kind === "main" ? (
+            <AgentConversation
+              state={conv}
+              scrollRef={viewportRef}
+              isFocusedPane={isFocused && active}
+              onAllowPermission={handleAllow}
+              onAllowPermissionSession={handleAllowSession}
+              onDenyPermission={handleDeny}
+              lastControlNote={lastControlNote}
+            />
+          ) : viewedSubagent !== null ? (
+            <AgentViewPanel
+              kind="subagent"
+              block={viewedSubagent}
+              sessionExited={conv.status === "exited"}
+            />
+          ) : viewedRun !== null ? (
+            <AgentViewPanel kind="workflow" run={viewedRun} />
+          ) : null}
+        </div>
 
         {/*
           A dead session shows its status bar *above* a still-mounted composer

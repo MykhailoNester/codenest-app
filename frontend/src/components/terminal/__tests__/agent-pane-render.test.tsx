@@ -847,4 +847,206 @@ describe("agent pane render", () => {
       screen.getByTestId("agent-session-hud").querySelector('[data-cell="orchestration"]'),
     ).toBeNull();
   });
+
+  it("renders every view kind inside the pane's single viewport, with the composer outside it", async () => {
+    seedCatalog();
+    seedTab(makeAgentTab("agent-viewport"), "agent-viewport");
+
+    render(<TerminalsLayout />);
+    await waitFor(() => expect(agentStartMock).toHaveBeenCalledTimes(1));
+    const feed = subscribeAgentFramesMock.mock.calls[0]?.[1] as (
+      frame: AgentFrame,
+    ) => void;
+    expect(feed).toBeTypeOf("function");
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-viewport",
+        session_id: "session-1",
+        kind: "init",
+        raw: { type: "system", subtype: "init", model: "claude-opus-5" },
+      });
+    });
+
+    // Enough to make a sub-agent selectable — deliberately not fed the
+    // completion (`tool_result`), which would drop it back out of the picker.
+    await act(async () => {
+      feed({
+        pane_id: "agent-viewport",
+        session_id: "session-1",
+        kind: "tool_use",
+        raw: {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_task_1",
+                name: "Task",
+                input: { description: "Review the diff", subagent_type: "reviewer" },
+              },
+            ],
+          },
+        },
+      });
+    });
+
+    // Same for the workflow — started and progressing, never notified done.
+    await act(async () => {
+      feed({
+        pane_id: "agent-viewport",
+        session_id: "session-1",
+        kind: "system",
+        raw: {
+          type: "system",
+          subtype: "task_started",
+          task_id: "wt8nboga7",
+          tool_use_id: "toolu_01As1tHX8yBzfjZ8DS1Sdpyp",
+          description: "Two-phase probe",
+          task_type: "local_workflow",
+          workflow_name: "wire-probe",
+        },
+      });
+    });
+    await act(async () => {
+      feed({
+        pane_id: "agent-viewport",
+        session_id: "session-1",
+        kind: "system",
+        raw: {
+          type: "system",
+          subtype: "task_progress",
+          task_id: "wt8nboga7",
+          description: "Alpha: blue",
+          usage: { total_tokens: 0, tool_uses: 0, duration_ms: 54 },
+          workflow_progress: [
+            { type: "workflow_phase", index: 1, title: "Alpha" },
+            { type: "workflow_phase", index: 2, title: "Beta" },
+            {
+              type: "workflow_agent",
+              index: 1,
+              label: "red",
+              phaseIndex: 1,
+              phaseTitle: "Alpha",
+              state: "start",
+            },
+            {
+              type: "workflow_agent",
+              index: 2,
+              label: "blue",
+              phaseIndex: 1,
+              phaseTitle: "Alpha",
+              state: "start",
+            },
+          ],
+        },
+      });
+    });
+
+    // `getBy*` throws on a second match, which is what pins exactly one
+    // viewport — the whole point of hoisting the contract out of the views.
+    const viewport = screen.getByTestId("agent-pane-viewport");
+
+    expect(
+      viewport.contains(screen.getByTestId("agent-conversation")),
+    ).toBe(true);
+
+    const picker = screen.getByTestId("composer-view-picker");
+    // jsdom silently assigns "" when the requested option is absent, which is
+    // the flake the model-switch test above already documents — wait for the
+    // option to exist rather than racing the picker's own re-render.
+    await waitFor(() =>
+      expect(
+        picker.querySelector('option[value="sub:toolu_task_1"]'),
+      ).not.toBeNull(),
+    );
+    await act(async () => {
+      fireEvent.change(picker, { target: { value: "sub:toolu_task_1" } });
+    });
+
+    let panel = screen.getByTestId("agent-view-panel");
+    expect(panel.dataset.viewKind).toBe("subagent");
+    expect(viewport.contains(panel)).toBe(true);
+    expect(screen.queryByTestId("agent-conversation")).toBeNull();
+    expect(screen.getByTestId("agent-pane-viewport")).toBe(viewport);
+
+    await waitFor(() =>
+      expect(
+        picker.querySelector('option[value="wf:wt8nboga7"]'),
+      ).not.toBeNull(),
+    );
+    await act(async () => {
+      fireEvent.change(picker, { target: { value: "wf:wt8nboga7" } });
+    });
+
+    panel = screen.getByTestId("agent-view-panel");
+    expect(panel.dataset.viewKind).toBe("workflow");
+    expect(viewport.contains(panel)).toBe(true);
+    expect(screen.queryByTestId("agent-conversation")).toBeNull();
+    expect(screen.getByTestId("agent-pane-viewport")).toBe(viewport);
+
+    // The composer is a *sibling* of the viewport under `.body`, which is the
+    // structural reason it cannot move when the view changes — layout itself
+    // is unobservable in jsdom, so siblinghood plus the CSS rule is the
+    // checkable half of that guarantee.
+    const composer = document.querySelector("[data-agent-composer]");
+    expect(composer).not.toBeNull();
+    expect(viewport.contains(composer)).toBe(false);
+    expect(composer!.parentElement).toBe(viewport.parentElement);
+  });
+
+  it("auto-scroll measures the viewport — the element that actually scrolls", async () => {
+    seedCatalog();
+    seedTab(makeAgentTab("agent-scroll-viewport"), "agent-scroll-viewport");
+
+    render(<TerminalsLayout />);
+    await waitFor(() => expect(agentStartMock).toHaveBeenCalledTimes(1));
+    const feed = subscribeAgentFramesMock.mock.calls[0]?.[1] as (
+      frame: AgentFrame,
+    ) => void;
+    expect(feed).toBeTypeOf("function");
+
+    const viewport = screen.getByTestId("agent-pane-viewport");
+
+    // jsdom has no layout — its own `scrollTop` setter is a no-op without a
+    // real box — so the geometry `<AgentConversation/>`'s stick-to-bottom
+    // effect reads and writes has to be stubbed onto this exact instance.
+    Object.defineProperty(viewport, "scrollHeight", {
+      configurable: true,
+      value: 4000,
+    });
+    Object.defineProperty(viewport, "clientHeight", {
+      configurable: true,
+      value: 300,
+    });
+    let scrollTop = 0;
+    Object.defineProperty(viewport, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = v;
+      },
+    });
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-scroll-viewport",
+        session_id: "session-1",
+        kind: "assistant",
+        raw: {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "hello" }],
+          },
+        },
+      });
+    });
+
+    // If `scrollRef` were ever pointed back at the (now non-scrolling)
+    // transcript div, this stays 0 and the regression is caught here instead
+    // of silently in production.
+    expect(scrollTop).toBe(4000);
+  });
 });

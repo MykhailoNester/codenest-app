@@ -1,14 +1,13 @@
 /* The non-main pane body: one sub-agent's task, or one orchestration's
-   phases. Shares the conversation area's scroll and padding rhythm so
-   switching views does not shift the surrounding chrome. */
+   phases. Plain content — the pane's single `.viewport`
+   (agent-pane.module.css) owns the scroll for every view, this one included,
+   so switching views does not shift the surrounding chrome. */
 
 .panel {
   padding: 10px 12px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--fg-2);
-  overflow-y: auto;
-  min-height: 0;
 }
 
 .head {
