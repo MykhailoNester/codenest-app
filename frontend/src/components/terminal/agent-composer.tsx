@@ -876,8 +876,11 @@ export function AgentComposer({
 
   // Caret-coordinate mirror (Design decision 8/9): measured only while a menu
   // is open, so it costs nothing in the normal case.
-  useLayoutEffect(() => {
-    if (!menuOpen) return;
+  //
+  // `caretAnchor` derives `bottom` from `hostHeight`, so the result is only
+  // valid for the `.editorStack` box it was measured against. Every caller
+  // below re-runs the whole measurement rather than patching the anchor.
+  const measureAnchor = useCallback((): void => {
     const textarea = textareaRef.current;
     const mirror = mirrorRef.current;
     const marker = markerRef.current;
@@ -903,11 +906,42 @@ export function AgentComposer({
         gapPx: SUGGEST_GAP_PX,
       }),
     );
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    measureAnchor();
     // Deliberately curated deps, in the same style as `agent-pane.tsx`'s own
     // boot effect: re-measure exactly when the menu opens/closes, the
     // command line's sigil moves, the draft's layout could have changed, or
-    // the row count (and with it the panel's own height) changed.
-  }, [menuOpen, trigger?.start, draft, menuRows.length]);
+    // the row count (and with it the panel's own height) changed. Changes
+    // that alter `.editorStack`'s own box are covered by the observer below
+    // instead — this effect cannot see them, since they originate in state it
+    // does not depend on.
+  }, [menuOpen, trigger?.start, draft, menuRows.length, measureAnchor]);
+
+  // Re-anchor on any change to `.editorStack`'s box while a menu is open.
+  //
+  // The deps above are all *inputs* to the caret's position within the stack;
+  // none of them describe the stack's own height. Attaching a context pill
+  // grows the pill row (a chip can wrap to a second line), which moves the
+  // stack's bottom edge without touching `draft`, `trigger` or `menuRows` —
+  // so the anchor kept its pre-pill geometry and the panel opened offset from
+  // the caret. Observing the element covers that, the mirror-image case of a
+  // pill being removed, and the textarea auto-growing under a multi-line
+  // draft, without any of them having to be enumerated as a dependency.
+  //
+  // It also closes the second failure mode in the same bug: a `ResizeObserver`
+  // callback runs after layout, so the measurement it drives can never read a
+  // box the browser has not finished computing.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const stack = stackRef.current;
+    if (!stack) return;
+    const ro = new ResizeObserver(() => measureAnchor());
+    ro.observe(stack);
+    return () => ro.disconnect();
+  }, [menuOpen, measureAnchor]);
 
   /** Focuses the textarea and places the caret once the store's new draft has
    *  reached the DOM. Every caller writes the draft through the store first and

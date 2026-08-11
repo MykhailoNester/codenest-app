@@ -14,6 +14,24 @@ import { useAgentSessionStore } from "../../../stores/agent-session-store";
 import { useAgentCatalogStore } from "../../../stores/agent-catalog-store";
 import { emptyConversation, type ConversationState } from "../../../lib/agent-conversation";
 
+// jsdom ships no `ResizeObserver`; the composer constructs one over
+// `.editorStack` to re-anchor the open command menu. Nothing here asserts on
+// the anchor, so a no-op is enough — see `composer-mention-menu.test.tsx` for
+// the stub that actually drives a resize.
+class StubResizeObserver {
+  observe(): void {
+    /* no-op */
+  }
+  unobserve(): void {
+    /* no-op */
+  }
+  disconnect(): void {
+    /* no-op */
+  }
+}
+(globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
+  StubResizeObserver as unknown as typeof ResizeObserver;
+
 const {
   agentInterruptMock,
   agentSendMock,
