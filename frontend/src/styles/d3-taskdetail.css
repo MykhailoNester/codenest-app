@@ -18,16 +18,17 @@
  *
  * Deliberate deviations from the source file:
  *
- * - NOT PORTED — the design file also styles five sections this app does not
+ * - NOT PORTED — the design file also styles four sections this app does not
  *   build yet, all needing schema or data this app does not have:
  *   `.td-prog`, `.td-subs`, `.td-check`, `.td-addsub` (subtasks),
- *   `.td-runs`/`.td-run*` (agent runs), `.td-files`/`.td-file*` (changed
- *   files), `.td-branch*` (branch card), `.td-comment`/`.td-para`
- *   (comments/rich description body). `.td-tabs` (section tabs) and
- *   `.td-feed*` (activity feed) are no longer on this list — they were
- *   ported (see below) once `GET /api/v1/tasks/{id}/activity` gave the
- *   Activity tab something to read; the tab strip still renders only that
- *   one tab, since Changed files and Comments still have no data source.
+ *   `.td-files`/`.td-file*` (changed files), `.td-branch*` (branch card),
+ *   `.td-comment`/`.td-para` (comments/rich description body). `.td-tabs`
+ *   (section tabs), `.td-feed*` (activity feed) and `.td-runs`/`.td-run*`
+ *   (agent runs) are no longer on this list — they were ported (see below)
+ *   once `GET /api/v1/tasks/{id}/activity` gave the Activity tab something
+ *   to read and `GET /api/v1/tasks/{id}/runs` gave the runs card something
+ *   to read; the tab strip still renders only that one tab, since Changed
+ *   files and Comments still have no data source.
  *   `.td-btn*` (including `.td-btn--sm`) is not ported either — the action
  *   bar reuses `.d3-btn`/`.d3-btn--primary`/`.d3-btn--ghost` from
  *   d3-creative.css, which already carry the same gradient/border/shadow
@@ -55,10 +56,17 @@
  *   (migrations/000_baseline_schema.sql), and the row also needs a "clear"
  *   cell — 3 values + None = 4, not the mockup's 5. Widening this back to 5
  *   is a one-line follow-up once a migration widens the CHECK.
+ * - MONO — `.td-run__meta` gains `font-family: var(--font-mono)`, the one
+ *   declaration the Runs port adds to the source rule: the ticket specifies
+ *   a monospace meta line, and the neighbouring ported `.td-feed__w` already
+ *   uses that exact token for the same kind of dense metadata.
  * - ADDITIONS — `.td-desc__ta` (re-homed from the source's
- *   `.td-comment textarea`, which is not ported) and `.td-blockers*` (the
+ *   `.td-comment textarea`, which is not ported), `.td-blockers*` (the
  *   source's Blockers card shows only the empty state, so it has no row
- *   styling to port) are new, grouped at the end of this file.
+ *   styling to port) and `.td-run__body` (the source has no class for the
+ *   run row's column-2 wrapper, and the grid track needs `min-width: 0` for
+ *   `.td-run__top span`'s ellipsis to work) are new, grouped at the end of
+ *   this file.
  */
 
 .td-main {
@@ -288,6 +296,52 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* Runs */
+.td-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.td-run {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 11px;
+  align-items: center;
+  padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+}
+.td-run:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.td-run__top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.td-run__top b {
+  font-size: 12.5px;
+  color: var(--fg-0);
+}
+.td-run__top span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.td-run__meta {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  margin-top: 2px;
+  font-family: var(--font-mono);
+}
+.td-run__cost {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
 }
 
 /* Tabs */
@@ -611,7 +665,9 @@
 /* ── Additions — not in the design file ──────────────────────────────────
    The source mockup's description is a static array (no editor) and its
    Blockers card shows only the empty state (no row styling), so both need
-   new rules rather than a port. */
+   new rules rather than a port. `.td-run__body` is likewise new: the source
+   has no class for the run row's column-2 wrapper, and the grid track needs
+   `min-width: 0` for `.td-run__top span`'s ellipsis to work. */
 
 .td-desc__ta {
   width: 100%;
@@ -659,4 +715,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.td-run__body {
+  min-width: 0;
 }
