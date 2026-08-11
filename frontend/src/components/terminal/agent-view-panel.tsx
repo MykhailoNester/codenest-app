@@ -36,7 +36,11 @@ function SubagentView({
   const running = block.endedAt === null && !sessionExited;
   const elapsed = block.endedAt === null ? null : block.endedAt - block.startedAt;
   return (
-    <div className={styles.panel}>
+    <div
+      className={styles.panel}
+      data-testid="agent-view-panel"
+      data-view-kind="subagent"
+    >
       <header className={styles.head}>
         <span className={styles.title}>{subagentLabel(block)}</span>
         <span className={styles.kind}>sub-agent</span>
@@ -82,7 +86,11 @@ function WorkflowView({ run }: { run: OrchestrationRun }): ReactElement {
   const elapsed = run.endedAt === null ? null : run.endedAt - run.startedAt;
   const tree = orchestrationPhaseTree(run);
   return (
-    <div className={styles.panel}>
+    <div
+      className={styles.panel}
+      data-testid="agent-view-panel"
+      data-view-kind="workflow"
+    >
       <header className={styles.head}>
         <span className={styles.title}>{run.name ?? "Workflow"}</span>
         <span className={styles.kind}>{run.status}</span>

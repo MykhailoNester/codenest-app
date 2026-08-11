@@ -5,10 +5,9 @@
    toolTwisty toolName toolArgs toolDur toolOut diffChip; .streaming ->
    streaming. */
 
+/* Plain content now — filling the pane and scrolling belong to the pane's
+   single `.viewport` (agent-pane.module.css), which this renders inside. */
 .conv {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
   padding: 12px 14px;
 }
 
