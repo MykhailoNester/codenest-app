@@ -1,460 +1,689 @@
-import { useState, useRef, useLayoutEffect, type ReactElement } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+/**
+ * Task detail — a read-first document, not a row editor.
+ *
+ * A sticky `.td-bar` action row sits above a two-column `.td-grid`: a
+ * document column (inline-editable title, read-first Description card with
+ * an Edit toggle) and a 300px properties sidebar (`PropertiesCard` +
+ * Blockers + Timestamps + Delete). Status / priority / effort / assignee /
+ * project / labels write the moment a popover item is chosen — there is no
+ * "Save Changes" button for those fields, matching the Work Board
+ * (`pages/tasks.tsx`). Title commits on Enter or blur; description commits
+ * on an explicit Save. The `.td-saved` indicator is never optimistic: it
+ * appears only after the write **and** its `["task", id]` refetch have both
+ * settled (`runWrite` below), and never after a failed write.
+ *
+ * Four deliberate divergences from the design mockup, all forced by schema
+ * the sidecar does not have (never "fix" these without a migration):
+ *   - `#<id>`, not a per-project ticket key like "CN-9" — `tasks` has no
+ *     ticket-key column.
+ *   - Exactly high/medium/low priority — the `task_priority` taxonomy seed
+ *     has no "urgent".
+ *   - Exactly None/Small/Medium/Large effort — `tasks.effort`'s
+ *     `CHECK(effort IN ('small','medium','large'))` rejects a fourth value.
+ *   - "Copy ref" (copies `#<id> — <title>`), not "Copy link" — there is no
+ *     URL bar or registered URL scheme in this Tauri webview.
+ */
 import {
-  useTask,
-  useTeamMembers,
-  useTasks,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+} from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  addTaskBlocker,
+  addTaskLabel,
+  changeTaskStatus,
+  deleteTask,
+  removeTaskBlocker,
+  removeTaskLabel,
+  updateTask,
   useLookups,
-  fetchSidecar,
+  useProjects,
+  useTask,
+  useTasks,
+  useTaxonomy,
+  useTeamMembers,
+  type Project,
+  type Task,
+  type Taxonomy,
+  type TeamMember,
+  type WorkflowVocabEntry,
 } from "../lib/api";
+import { relativeTime } from "../lib/format-helpers";
 import { Shell } from "../components/layout/shell";
-import { DetailHeader } from "../components/layout/detail-header";
 import { LaunchFromSourceButton } from "../components/launch/launch-from-source-button";
+import { AgentMarkdown } from "../components/terminal/agent-markdown";
+import { hashHue, initialsOf } from "../components/task-detail/avatar";
+import { PropertiesCard } from "../components/task-detail/properties-card";
+import { TdPopover } from "../components/task-detail/td-popover";
 
-const PRIORITIES = ["high", "medium", "low"] as const;
+// Module-level sentinels so a not-yet-resolved query never hands a fresh
+// array/object reference into a memo dependency (`tasks.tsx`'s NO_* idiom).
+const NO_MEMBERS: TeamMember[] = [];
+const NO_PROJECTS: Project[] = [];
+const NO_TASKS: Task[] = [];
+const NO_VOCAB: WorkflowVocabEntry[] = [];
+const NO_TAXONOMY: Taxonomy[] = [];
+const NO_STATUS_COLORS: Record<string, string> = {};
+
+const AVATAR_PX = 20;
+const AVATAR_FONT_PX = 9;
+
+type SavePhase = "idle" | "saving" | "saved";
+const SAVED_INDICATOR_MS = 2_500;
+
+/** The sidecar returns naive UTC with no trailing "Z" — `relativeTime` does
+ * not normalise on its own, so every caller appends it (mirrors
+ * `task-card.tsx`'s `cardDate`). */
+function withZ(iso: string): string {
+  return iso.endsWith("Z") ? iso : `${iso}Z`;
+}
 
 export function TaskDetailPage(): ReactElement {
   const { id } = useParams<{ id: string }>();
-  const taskId = parseInt(id ?? "0");
+  const taskId = parseInt(id ?? "0", 10);
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  const { data: task } = useTask(taskId);
-  const { data: members = [] } = useTeamMembers();
-  const { data: allTasks = [] } = useTasks();
+  const { data: task, isLoading, isError, error, refetch } = useTask(taskId);
+  const { data: members = NO_MEMBERS } = useTeamMembers();
+  const { data: projects = NO_PROJECTS } = useProjects();
+  const { data: allTasks = NO_TASKS } = useTasks();
   const { data: lookups } = useLookups();
-  const statuses = lookups?.statuses ?? [];
-  const statusColors = lookups?.status_colors ?? {};
-  const statusLabels: Record<string, string> = {};
-  for (const e of lookups?.workflow_task_statuses ?? [])
-    statusLabels[e.slug] = e.label;
-  const priorityOptions =
-    lookups?.workflow_task_priorities?.map((e) => ({
-      value: e.slug,
-      label: e.label,
-    })) ?? PRIORITIES.map((p) => ({ value: p, label: p }));
+  const { data: labelTaxonomy = NO_TAXONOMY } = useTaxonomy("task_label");
 
-  const [edits, setEdits] = useState<Partial<Record<string, string>>>({});
-  const [saving, setSaving] = useState(false);
-  const [blockerTaskId, setBlockerTaskId] = useState("");
+  const priorityVocab = lookups?.workflow_task_priorities ?? NO_VOCAB;
 
-  // Derived form: local edits take precedence, fall back to loaded task data
-  const form = {
-    title: edits.title ?? task?.title ?? "",
-    description: edits.description ?? task?.description ?? "",
-    status: edits.status ?? task?.status ?? "todo",
-    priority: edits.priority ?? task?.priority ?? "medium",
-    effort: edits.effort ?? task?.effort ?? "",
-    assignee_id:
-      edits.assignee_id ?? (task?.assignee_id ? String(task.assignee_id) : ""),
-  };
-  const setForm = (updates: Partial<Record<string, string>>) =>
-    setEdits((prev) => ({ ...prev, ...updates }));
+  // Status vocab, fallback-merged with `lookups.status_colors` for any row
+  // whose taxonomy colour is unset — the same two-source colour resolution
+  // `pages/tasks.tsx` already does for the board.
+  const statusVocab = useMemo<WorkflowVocabEntry[]>(() => {
+    const list = lookups?.workflow_task_statuses ?? NO_VOCAB;
+    const colors = lookups?.status_colors ?? NO_STATUS_COLORS;
+    return list.map((e) =>
+      e.color ? e : { ...e, color: colors[e.slug] ?? null },
+    );
+  }, [lookups]);
 
-  const handleSave = async () => {
-    setSaving(true);
-    await fetchSidecar(`/api/v1/tasks/${taskId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: form.title,
-        description: form.description || null,
-        status: form.status,
-        priority: form.priority,
-        effort: form.effort || null,
-        assignee_id: form.assignee_id ? parseInt(form.assignee_id) : null,
-      }),
-    });
-    void qc.invalidateQueries({ queryKey: ["task", taskId] });
-    void qc.invalidateQueries({ queryKey: ["tasks"] });
-    setSaving(false);
-  };
+  // ── Save indicator ────────────────────────────────────────────────────
+  const [savePhase, setSavePhase] = useState<SavePhase>("idle");
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleDelete = async () => {
-    if (!confirm("Delete this task?")) return;
-    await fetchSidecar(`/api/v1/tasks/${taskId}`, { method: "DELETE" });
-    void navigate("/tasks");
-  };
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
-  const handleAddBlocker = async () => {
-    const parsed = parseInt(blockerTaskId, 10);
-    if (!Number.isInteger(parsed) || parsed <= 0) return;
-    await fetchSidecar(`/api/v1/tasks/${taskId}/blockers`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ blocking_task_id: parsed }),
-    });
-    void qc.invalidateQueries({ queryKey: ["task", taskId] });
-    setBlockerTaskId("");
-  };
+  // D10 — awaits the write AND the refetch before showing "Saved"; never
+  // optimistic. `["tasks"]`/`["dashboard"]` invalidate fire-and-forget,
+  // matching `tasks.tsx`'s `invalidateTasks`.
+  const runWrite = useCallback(
+    async (label: string, fn: () => Promise<unknown>): Promise<void> => {
+      setSavePhase("saving");
+      try {
+        await fn();
+        await qc.invalidateQueries({ queryKey: ["task", taskId] });
+        void qc.invalidateQueries({ queryKey: ["tasks"] });
+        void qc.invalidateQueries({ queryKey: ["dashboard"] });
+        setSavePhase("saved");
+        if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+        savedTimerRef.current = setTimeout(
+          () => setSavePhase("idle"),
+          SAVED_INDICATOR_MS,
+        );
+      } catch (err) {
+        toast.error(`Failed to ${label}: ${(err as Error).message}`);
+        setSavePhase("idle");
+      }
+    },
+    [qc, taskId],
+  );
 
-  const handleRemoveBlocker = async (blockerId: number) => {
-    await fetchSidecar(`/api/v1/tasks/${taskId}/blockers/${blockerId}`, {
-      method: "DELETE",
-    });
-    void qc.invalidateQueries({ queryKey: ["task", taskId] });
-  };
+  // ── Property writes — one popover selection each, immediate (D7/D9) ────
+  const handleStatus = useCallback(
+    (slug: string) => {
+      void runWrite("change status", () => changeTaskStatus(taskId, slug));
+    },
+    [runWrite, taskId],
+  );
+  const handlePriority = useCallback(
+    (slug: string) => {
+      void runWrite("change priority", () =>
+        updateTask(taskId, { priority: slug }),
+      );
+    },
+    [runWrite, taskId],
+  );
+  const handleAssignee = useCallback(
+    (memberId: number | null) => {
+      void runWrite("change assignee", () =>
+        updateTask(taskId, { assignee_id: memberId }),
+      );
+    },
+    [runWrite, taskId],
+  );
+  const handleEffort = useCallback(
+    (effort: "small" | "medium" | "large" | null) => {
+      void runWrite("change effort", () => updateTask(taskId, { effort }));
+    },
+    [runWrite, taskId],
+  );
+  const handleProject = useCallback(
+    (projectId: number) => {
+      void runWrite("change project", () =>
+        updateTask(taskId, { project_id: projectId }),
+      );
+    },
+    [runWrite, taskId],
+  );
+  const handleToggleLabel = useCallback(
+    (labelId: number, next: boolean) => {
+      void runWrite("update labels", () =>
+        next ? addTaskLabel(taskId, labelId) : removeTaskLabel(taskId, labelId),
+      );
+    },
+    [runWrite, taskId],
+  );
+  const handleAddBlocker = useCallback(
+    (blockingTaskId: number) => {
+      void runWrite("add blocker", () =>
+        addTaskBlocker(taskId, blockingTaskId),
+      );
+    },
+    [runWrite, taskId],
+  );
+  const handleRemoveBlocker = useCallback(
+    (blockerId: number) => {
+      void runWrite("remove blocker", () =>
+        removeTaskBlocker(taskId, blockerId),
+      );
+    },
+    [runWrite, taskId],
+  );
 
-  const inputStyle = {
-    width: "100%",
-    padding: "6px 10px",
-    background: "var(--bg-3)",
-    border: "1px solid var(--line-2)",
-    color: "var(--fg-0)",
-    borderRadius: 6,
-    fontSize: 13,
-    boxSizing: "border-box" as const,
-  };
+  // ── Title — inline edit, Enter commits, Escape cancels ──────────────────
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+  // Some engines fire a native `blur` when React removes the still-focused
+  // textarea from the DOM (e.g. right after Enter commits it) — jsdom does
+  // not reproduce this, so it can't be pinned by a test, but a real WebKit
+  // webview can. This ref makes `closeTitleEdit`/`commitTitle` idempotent
+  // per edit session, so that stray blur can never re-commit (or, worse,
+  // commit an already-discarded Escape draft) a second time.
+  const titleClosedRef = useRef(false);
 
-  const descRef = useRef<HTMLTextAreaElement>(null);
-
-  // Grow the description textarea to fit its content whenever the value changes.
-  // useLayoutEffect fires synchronously after DOM update, so the initial server
-  // value (which arrives after first render) expands the field without a flash.
   useLayoutEffect(() => {
-    if (descRef.current) {
-      descRef.current.style.height = "auto";
-      descRef.current.style.height = `${descRef.current.scrollHeight}px`;
-    }
-  }, [form.description]);
+    if (!editingTitle || !titleRef.current) return;
+    titleRef.current.style.height = "auto";
+    titleRef.current.style.height = `${titleRef.current.scrollHeight}px`;
+  }, [editingTitle, titleDraft]);
 
-  if (!task) {
+  function startEditTitle(): void {
+    if (!task) return;
+    titleClosedRef.current = false;
+    setTitleDraft(task.title);
+    setEditingTitle(true);
+  }
+
+  function closeTitleEdit(): void {
+    titleClosedRef.current = true;
+    setEditingTitle(false);
+  }
+
+  function commitTitle(): void {
+    if (titleClosedRef.current) return;
+    closeTitleEdit();
+    if (!task) return;
+    const trimmed = titleDraft.trim();
+    // `tasks.title` is NOT NULL — a blank title would make the row
+    // unfindable everywhere else, so an empty draft is a no-op, not a write.
+    if (trimmed === "" || trimmed === task.title) return;
+    void runWrite("update title", () => updateTask(taskId, { title: trimmed }));
+  }
+
+  function handleTitleKeyDown(
+    e: ReactKeyboardEvent<HTMLTextAreaElement>,
+  ): void {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      commitTitle();
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      closeTitleEdit();
+    }
+  }
+
+  // ── Description — read-first card, explicit Save ───────────────────────
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState("");
+
+  function startEditDesc(): void {
+    if (!task) return;
+    setDescDraft(task.description ?? "");
+    setEditingDesc(true);
+  }
+
+  function commitDesc(): void {
+    if (!task) return;
+    setEditingDesc(false);
+    const next = descDraft.trim() === "" ? null : descDraft;
+    if (next === (task.description ?? null)) return;
+    void runWrite("update description", () =>
+      updateTask(taskId, { description: next }),
+    );
+  }
+
+  function handleDescKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>): void {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setEditingDesc(false);
+    } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      commitDesc();
+    }
+  }
+
+  // ── Add-blocker popover ─────────────────────────────────────────────────
+  const [blockerPopoverOpen, setBlockerPopoverOpen] = useState(false);
+
+  // `useTasks()` with no filters/sort defaults to `t.created_at DESC`
+  // (`task_service.get_all_tasks`) — already newest-first, so no client
+  // re-sort is needed.
+  const blockerCandidates = useMemo(() => {
+    if (!task) return NO_TASKS;
+    const blocked = new Set(
+      (task.blockers ?? []).map((b) => b.blocking_task_id),
+    );
+    return allTasks.filter((t) => t.id !== task.id && !blocked.has(t.id));
+  }, [allTasks, task]);
+
+  async function handleDelete(): Promise<void> {
+    if (!confirm("Delete this task?")) return;
+    await deleteTask(taskId);
+    void navigate("/tasks");
+  }
+
+  function handleCopyRef(): void {
+    if (!task) return;
+    void navigator.clipboard.writeText(`#${task.id} — ${task.title}`);
+    toast.success("Copied reference");
+  }
+
+  // ── Render states ────────────────────────────────────────────────────────
+
+  if (isLoading) {
     return (
-      <Shell>
-        <div
-          style={{ padding: "0 24px 24px", color: "var(--fg-3)", fontSize: 13 }}
-        >
-          Loading task…
+      <Shell scrollable={false}>
+        <div className="td-main">
+          <div style={{ padding: "24px 28px" }}>
+            <span className="td-dim td-sm">Loading task…</span>
+          </div>
         </div>
       </Shell>
     );
   }
 
-  return (
-    <Shell>
-      <div style={{ padding: "0 24px 24px" }}>
-        <DetailHeader
-          crumbs={`Workspace · Tasks · #${taskId}`}
-          title={`Task #${taskId}`}
-          fallbackRoute="/tasks"
-          actions={
-            <>
-              <LaunchFromSourceButton
-                kind="task"
-                id={taskId}
-                label="Launch agent"
-                variant="primary"
-              />
-              <button
-                className="d3-btn d3-btn--ghost"
-                type="button"
-                style={{ color: "#ef4444" }}
-                onClick={() => void handleDelete()}
-              >
-                Delete
-              </button>
-            </>
-          }
-        />
-
-        {/* Edit form */}
-        <div
-          className="d3-card"
-          style={{ padding: "16px 20px", marginBottom: 16 }}
-        >
-          <div style={{ marginBottom: 10 }}>
-            <label
-              style={{
-                fontSize: 11,
-                color: "var(--fg-3)",
-                display: "block",
-                marginBottom: 4,
-              }}
-            >
-              Title
-            </label>
-            <input
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              style={inputStyle}
-            />
+  if (isError || !task) {
+    // `!task` with no error covers the disabled-query case (`useTask`'s
+    // `enabled: taskId > 0`) — an invalid route param never fires the
+    // fetch, so `isError` never resolves either. Same not-found copy.
+    const notFound = !task || error?.status === 404;
+    return (
+      <Shell scrollable={false}>
+        <div className="td-main">
+          <div style={{ padding: "24px 28px" }}>
+            {notFound ? (
+              <>
+                <p className="td-dim">Task #{taskId} no longer exists.</p>
+                <Link className="td-back" to="/tasks">
+                  ← Work Board
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="td-dim">
+                  {error?.message ?? "Failed to load task."}
+                </p>
+                <button
+                  type="button"
+                  className="d3-btn d3-btn--ghost"
+                  onClick={() => void refetch()}
+                >
+                  Retry
+                </button>
+              </>
+            )}
           </div>
-          <div style={{ marginBottom: 10 }}>
-            <label
-              style={{
-                fontSize: 11,
-                color: "var(--fg-3)",
-                display: "block",
-                marginBottom: 4,
-              }}
-            >
-              Description
-            </label>
-            <textarea
-              ref={descRef}
-              value={form.description}
-              onChange={(e) => {
-                setForm({ ...form, description: e.target.value });
-                e.target.style.height = "auto";
-                e.target.style.height = `${e.target.scrollHeight}px`;
-              }}
-              style={{
-                ...inputStyle,
-                minHeight: "calc(3 * 1.4em + 12px)",
-                overflow: "hidden",
-                resize: "none",
-              }}
-            />
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 10,
-              marginBottom: 10,
-            }}
-          >
-            <div>
-              <label
-                style={{
-                  fontSize: 11,
-                  color: "var(--fg-3)",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Status
-              </label>
-              <select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-                style={inputStyle}
-              >
-                {statuses.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabels[s] ?? s}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label
-                style={{
-                  fontSize: 11,
-                  color: "var(--fg-3)",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Priority
-              </label>
-              <select
-                value={form.priority}
-                onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                style={inputStyle}
-              >
-                {priorityOptions.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label
-                style={{
-                  fontSize: 11,
-                  color: "var(--fg-3)",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Effort
-              </label>
-              <select
-                value={form.effort}
-                onChange={(e) => setForm({ ...form, effort: e.target.value })}
-                style={inputStyle}
-              >
-                <option value="">—</option>
-                <option value="small">Small</option>
-                <option value="medium">Medium</option>
-                <option value="large">Large</option>
-              </select>
-            </div>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <label
-              style={{
-                fontSize: 11,
-                color: "var(--fg-3)",
-                display: "block",
-                marginBottom: 4,
-              }}
-            >
-              Assignee
-            </label>
-            <select
-              value={form.assignee_id}
-              onChange={(e) =>
-                setForm({ ...form, assignee_id: e.target.value })
-              }
-              style={inputStyle}
-            >
-              <option value="">—</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            className="d3-btn d3-btn--primary"
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={saving}
-          >
-            {saving ? "Saving…" : "Save Changes"}
-          </button>
         </div>
+      </Shell>
+    );
+  }
 
-        {/* Blockers */}
-        <div
-          className="d3-card"
-          style={{ padding: "16px 20px", marginBottom: 16 }}
-        >
-          <span className="d3-h" style={{ display: "block", marginBottom: 12 }}>
-            Blockers
-          </span>
-          {(task.blockers ?? []).length === 0 ? (
-            <p style={{ fontSize: 13, color: "var(--fg-3)", marginBottom: 12 }}>
-              No blockers.
-            </p>
-          ) : (
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                marginBottom: 12,
-              }}
+  const statusEntry = statusVocab.find((e) => e.slug === task.status);
+  const statusLabel = statusEntry?.label ?? task.status;
+  const statusColor = statusEntry?.color ?? "var(--fg-4)";
+  const assigneeMember =
+    task.assignee_id != null
+      ? members.find((m) => m.id === task.assignee_id)
+      : undefined;
+  const blockers = task.blockers ?? [];
+
+  return (
+    <Shell scrollable={false}>
+      <div className="td-main">
+        <div className="td-bar">
+          <div className="td-bar__l">
+            <Link className="td-back" to="/tasks">
+              ← Work Board
+            </Link>
+            <span className="td-bar__sep">/</span>
+            <span className="td-bar__ref">#{taskId}</span>
+            <span
+              className="td-badge"
+              style={{ ["--c" as string]: statusColor }}
             >
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--line-2)" }}>
-                  {["Blocking Task", "Status", ""].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        padding: "6px 8px",
-                        fontSize: 11,
-                        color: "var(--fg-3)",
-                        textAlign: "left",
-                        fontWeight: 600,
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(task.blockers ?? []).map((b) => (
-                  <tr
-                    key={b.id}
-                    style={{ borderBottom: "1px solid var(--line-1)" }}
-                  >
-                    <td style={{ padding: "6px 8px" }}>
-                      <button
-                        type="button"
-                        style={{
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          color: "var(--accent)",
-                          fontSize: 13,
-                          padding: 0,
-                        }}
-                        onClick={() =>
-                          void navigate(`/tasks/${b.blocking_task_id}`)
-                        }
-                      >
-                        #{b.blocking_task_id} — {b.blocking_title}
-                      </button>
-                    </td>
-                    <td style={{ padding: "6px 8px" }}>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          padding: "2px 6px",
-                          borderRadius: 3,
-                          border: `1px solid ${statusColors[b.blocking_status] ?? "var(--line-2)"}50`,
-                          color:
-                            statusColors[b.blocking_status] ?? "var(--fg-3)",
-                        }}
-                      >
-                        {b.blocking_status}
-                      </span>
-                    </td>
-                    <td style={{ padding: "6px 8px" }}>
-                      <button
-                        className="d3-btn d3-btn--ghost"
-                        type="button"
-                        style={{ fontSize: 12, color: "#ef4444" }}
-                        onClick={() => void handleRemoveBlocker(b.id)}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            <div style={{ flex: 1 }}>
-              <label
-                style={{
-                  fontSize: 11,
-                  color: "var(--fg-3)",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Add Blocker
-              </label>
-              <select
-                value={blockerTaskId}
-                onChange={(e) => setBlockerTaskId(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">Select task…</option>
-                {allTasks
-                  .filter((t) => t.id !== taskId)
-                  .map((t) => (
-                    <option key={t.id} value={t.id}>
-                      #{t.id} — {t.title}
-                    </option>
-                  ))}
-              </select>
-            </div>
+              <span className="td-badge__dot" />
+              {statusLabel}
+            </span>
+          </div>
+          <div className="td-bar__r">
+            {savePhase === "saving" ? (
+              <span className="td-saved td-dim">Saving…</span>
+            ) : null}
+            {savePhase === "saved" ? (
+              <span className="td-saved">✓ Saved</span>
+            ) : null}
             <button
-              className="d3-btn d3-btn--primary"
               type="button"
-              style={{ marginBottom: 0 }}
-              onClick={() => void handleAddBlocker()}
+              className="d3-btn d3-btn--ghost"
+              onClick={handleCopyRef}
             >
-              Add
+              Copy ref
+            </button>
+            <LaunchFromSourceButton
+              kind="task"
+              id={taskId}
+              label="Launch agent"
+              variant="primary"
+            />
+            <button
+              type="button"
+              className="d3-btn d3-btn--ghost"
+              style={{ color: "var(--err)" }}
+              onClick={() => void handleDelete()}
+            >
+              Delete
             </button>
           </div>
         </div>
 
-        {/* Metadata */}
-        <div style={{ fontSize: 12, color: "var(--fg-4)", marginTop: 8 }}>
-          Created: {task.created_at?.slice(0, 16)}
-          {task.started_date && ` | Started: ${task.started_date}`}
-          {task.completed_date && ` | Completed: ${task.completed_date}`} |
-          Updated: {task.updated_at?.slice(0, 16)}
+        <div className="td-grid">
+          <div className="td-doc">
+            {editingTitle ? (
+              <textarea
+                ref={titleRef}
+                className="td-title td-title--edit"
+                autoFocus
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={handleTitleKeyDown}
+                onBlur={commitTitle}
+              />
+            ) : (
+              <h1
+                className="td-title"
+                role="button"
+                tabIndex={0}
+                onClick={startEditTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    startEditTitle();
+                  }
+                }}
+              >
+                {task.title}
+              </h1>
+            )}
+
+            <div className="td-quickmeta">
+              {task.assignee_name ? (
+                <span
+                  className="td-av"
+                  style={{
+                    width: AVATAR_PX,
+                    height: AVATAR_PX,
+                    fontSize: AVATAR_FONT_PX,
+                    background: hashHue(task.assignee_name),
+                  }}
+                >
+                  {initialsOf(task.assignee_name)}
+                </span>
+              ) : (
+                <span
+                  className="td-av td-av--none"
+                  style={{ width: AVATAR_PX, height: AVATAR_PX }}
+                />
+              )}
+              <b>{task.assignee_name ?? "Unassigned"}</b>
+              {assigneeMember ? (
+                <span className="td-dim td-sm">{assigneeMember.role}</span>
+              ) : null}
+              <span className="td-dot-sep" />
+              <span>{task.project_name ?? "—"}</span>
+              <span className="td-dot-sep" />
+              <span>Updated {relativeTime(withZ(task.updated_at))}</span>
+            </div>
+
+            <div className="td-card">
+              <div className="td-card__head">
+                <h2 className="td-h">Description</h2>
+                {!editingDesc ? (
+                  <button
+                    type="button"
+                    className="td-ghost"
+                    onClick={startEditDesc}
+                  >
+                    Edit
+                  </button>
+                ) : null}
+              </div>
+              {editingDesc ? (
+                <>
+                  <textarea
+                    className="td-desc__ta"
+                    autoFocus
+                    rows={6}
+                    value={descDraft}
+                    onChange={(e) => setDescDraft(e.target.value)}
+                    onKeyDown={handleDescKeyDown}
+                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="d3-btn d3-btn--primary"
+                      onClick={commitDesc}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="td-ghost"
+                      onClick={() => setEditingDesc(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="td-body">
+                  {task.description ? (
+                    <AgentMarkdown text={task.description} />
+                  ) : (
+                    <span className="td-dim td-sm">No description yet.</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="td-side">
+            <PropertiesCard
+              task={task}
+              members={members}
+              projects={projects}
+              statusVocab={statusVocab}
+              priorityVocab={priorityVocab}
+              labelTaxonomy={labelTaxonomy}
+              onStatus={handleStatus}
+              onPriority={handlePriority}
+              onAssignee={handleAssignee}
+              onEffort={handleEffort}
+              onProject={handleProject}
+              onToggleLabel={handleToggleLabel}
+            />
+
+            <div className="td-card">
+              <div className="td-card__head">
+                <h2 className="td-h td-h--side">
+                  Blockers <span className="td-count">{blockers.length}</span>
+                </h2>
+                <TdPopover
+                  label="Add blocker"
+                  open={blockerPopoverOpen}
+                  onOpenChange={setBlockerPopoverOpen}
+                  renderTrigger={({ ref, open, onClick }) => (
+                    <button
+                      ref={ref}
+                      type="button"
+                      className="td-ghost"
+                      aria-haspopup="listbox"
+                      aria-expanded={open}
+                      onClick={onClick}
+                    >
+                      + Add
+                    </button>
+                  )}
+                >
+                  {({ close }) => (
+                    <>
+                      <div className="td-pop__h">Add blocker</div>
+                      {blockerCandidates.length === 0 ? (
+                        <button type="button" className="td-pop__i" disabled>
+                          No other tasks to add
+                        </button>
+                      ) : (
+                        blockerCandidates.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            role="option"
+                            aria-selected={false}
+                            className="td-pop__i"
+                            onClick={() => {
+                              handleAddBlocker(t.id);
+                              close();
+                            }}
+                          >
+                            #{t.id} {t.title}
+                          </button>
+                        ))
+                      )}
+                    </>
+                  )}
+                </TdPopover>
+              </div>
+              {blockers.length === 0 ? (
+                <div className="td-noblock">✓ Not blocked</div>
+              ) : (
+                <div className="td-blockers">
+                  {blockers.map((b) => {
+                    const blockingStatus = statusVocab.find(
+                      (e) => e.slug === b.blocking_status,
+                    );
+                    return (
+                      <div key={b.id} className="td-blocker">
+                        <button
+                          type="button"
+                          className="td-blocker__link"
+                          onClick={() =>
+                            void navigate(`/tasks/${b.blocking_task_id}`)
+                          }
+                        >
+                          #{b.blocking_task_id} — {b.blocking_title}
+                        </button>
+                        <span
+                          className="td-label"
+                          style={{
+                            color: blockingStatus?.color ?? "var(--fg-4)",
+                          }}
+                        >
+                          {blockingStatus?.label ?? b.blocking_status}
+                        </span>
+                        <button
+                          type="button"
+                          className="td-ghost"
+                          style={{ color: "var(--err)" }}
+                          onClick={() => handleRemoveBlocker(b.id)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="td-card">
+              <h2 className="td-h td-h--side">Timestamps</h2>
+              <div className="td-times">
+                <div>
+                  <span>Created</span>
+                  <b title={task.created_at}>
+                    {relativeTime(withZ(task.created_at))}
+                  </b>
+                </div>
+                <div>
+                  <span>Started</span>
+                  <b>{task.started_date ?? "—"}</b>
+                </div>
+                <div>
+                  <span>Completed</span>
+                  <b>{task.completed_date ?? "—"}</b>
+                </div>
+                <div>
+                  <span>Updated</span>
+                  <b title={task.updated_at}>
+                    {relativeTime(withZ(task.updated_at))}
+                  </b>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="td-danger"
+              onClick={() => void handleDelete()}
+            >
+              Delete task
+            </button>
+          </div>
         </div>
       </div>
     </Shell>

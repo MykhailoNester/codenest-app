@@ -1,0 +1,591 @@
+/**
+ * d3-taskdetail.css — presentation layer for the read-first task detail
+ * document: the sticky `.td-bar` action row, the two-column `.td-grid`
+ * (document + properties sidebar), the inline-editable `.td-title`, the
+ * `.td-card` document/properties cards, and the `.td-pop__menu` popovers
+ * used by every property row.
+ *
+ * Design source: ported from the Claude Design project "Dashboard"
+ * (019df8b6-803e-7526-b556-a0921b935a79), file `d3-taskdetail.css`, fetched
+ * 2026-08-11 — a transcription, not a derivation (contrast `d3-taskboard.css`
+ * above, which could not fetch its source and was derived from the ticket
+ * instead). Rules keep their source declarations verbatim except for the
+ * deviations below.
+ *
+ * Every rule reads only existing tokens.css custom properties: no new
+ * token, no @import, no remote url(), no @font-face, no colour literal
+ * that isn't a token reference (or an rgba()/color-mix() derived from one).
+ *
+ * Deliberate deviations from the source file:
+ *
+ * - NOT PORTED — the design file also styles six sections this app does not
+ *   build yet (four need schema, two need a read endpoint that doesn't
+ *   exist): `.td-prog`, `.td-subs`, `.td-check`, `.td-addsub` (subtasks),
+ *   `.td-runs`/`.td-run*` (agent runs), `.td-tabs` (section tabs),
+ *   `.td-feed*` (activity feed), `.td-files`/`.td-file*` (changed files),
+ *   `.td-branch*` (branch card), `.td-comment`/`.td-para` (comments/rich
+ *   description body). `.td-btn*` (including `.td-btn--sm`) is not ported
+ *   either — the action bar reuses `.d3-btn`/`.d3-btn--primary`/
+ *   `.d3-btn--ghost` from d3-creative.css, which already carry the same
+ *   gradient/border/shadow declarations, so the primary button
+ *   (`<LaunchFromSourceButton>`, which hardcodes those classes) stays
+ *   visually consistent with its neighbours. `.td-ghost` IS ported — it is
+ *   a distinct, borderless affordance with no `d3-` equivalent.
+ * - COLOUR — the source's two opaque hex literals are replaced with the
+ *   nearest existing token so this file, like `d3-taskboard.css`, carries no
+ *   raw hex at all: the dark-navy popover background (`.td-pop__menu`,
+ *   `.td-pop__h`) becomes `var(--bg-3)` (differs by ~1% luminance from the
+ *   source value), and the near-white selected-item text
+ *   (`.td-pop__i.is-sel`) becomes `var(--fg-0)` — same near-white intent,
+ *   same discipline. The `rgba(255,255,255,…)` overlays and the
+ *   `color-mix(in oklch, …)` badge tint are kept verbatim; both are already
+ *   the house idiom elsewhere in this codebase.
+ * - STRUCTURE — `.td-main` gains `flex: 1 1 auto; min-height: 0`. In the
+ *   source mockup `.td-main` *was* the app shell's main column; here it is a
+ *   child of `.d3-main` (a `flex-direction:column;overflow:hidden` column
+ *   that gives children `min-height:0` but no flex-grow), so without this
+ *   pair `.td-grid`'s own `overflow-y:auto` would have no height to scroll
+ *   in and the page would be clipped instead of scrolling.
+ * - TRACK COUNT — `.td-eff` gets `repeat(4,1fr)`, not `repeat(5,1fr)`.
+ *   `tasks.effort`'s CHECK constraint allows exactly small|medium|large
+ *   (migrations/000_baseline_schema.sql), and the row also needs a "clear"
+ *   cell — 3 values + None = 4, not the mockup's 5. Widening this back to 5
+ *   is a one-line follow-up once a migration widens the CHECK.
+ * - ADDITIONS — `.td-desc__ta` (re-homed from the source's
+ *   `.td-comment textarea`, which is not ported) and `.td-blockers*` (the
+ *   source's Blockers card shows only the empty state, so it has no row
+ *   styling to port) are new, grouped at the end of this file.
+ */
+
+.td-main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Sticky action bar */
+.td-bar {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 28px;
+  border-bottom: 1px solid var(--line-1);
+  background: rgba(8, 10, 18, 0.72);
+  backdrop-filter: blur(20px);
+  flex: none;
+}
+.td-bar__l {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.td-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  text-decoration: none;
+  padding: 4px 8px 4px 5px;
+  border-radius: 7px;
+}
+.td-back:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-0);
+}
+.td-bar__sep {
+  color: var(--fg-4);
+}
+.td-bar__ref {
+  font-size: 12px;
+  color: var(--fg-2);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-1);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+.td-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--c);
+  background: color-mix(in oklch, var(--c) 14%, transparent);
+  border: 1px solid color-mix(in oklch, var(--c) 32%, transparent);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.td-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.td-bar__r {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.td-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--ok);
+  margin-right: 4px;
+}
+
+.td-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+.td-ghost:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-0);
+}
+
+/* Layout */
+.td-grid {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px;
+  padding: 20px 28px 32px;
+  overflow-y: auto;
+  align-items: start;
+}
+.td-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  max-width: 820px;
+}
+.td-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: sticky;
+  top: 0;
+}
+
+/* Title */
+.td-title {
+  font-size: 26px;
+  line-height: 1.28;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--fg-0);
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: text;
+  text-wrap: pretty;
+}
+.td-title:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--line-1);
+}
+.td-title--edit {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(59, 130, 246, 0.45);
+  outline: none;
+  resize: none;
+  font-family: inherit;
+}
+
+.td-quickmeta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  padding: 0 8px 4px;
+}
+.td-quickmeta b {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+.td-dim {
+  color: var(--fg-3);
+}
+.td-sm {
+  font-size: 11.5px;
+}
+.td-dot-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--fg-4);
+}
+
+/* Cards */
+.td-card {
+  background: rgba(11, 14, 24, 0.55);
+  border: 1px solid var(--line-1);
+  border-radius: 14px;
+  padding: 16px 18px;
+  backdrop-filter: blur(20px);
+}
+.td-card--props {
+  padding: 13px 14px;
+}
+.td-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 11px;
+}
+.td-h {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-weight: 600;
+  color: var(--fg-3);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.td-h--side {
+  margin-bottom: 10px;
+}
+.td-count {
+  font-size: 11px;
+  color: var(--fg-2);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 1px 8px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Description */
+.td-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Properties */
+.td-prop {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 3px 0;
+}
+.td-prop__l {
+  font-size: 11.5px;
+  color: var(--fg-4);
+}
+.td-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--fg-1);
+  font-size: 12.5px;
+  text-align: left;
+}
+.td-val:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--line-1);
+}
+.td-val.is-open {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+.td-caret {
+  margin-left: auto;
+  opacity: 0.45;
+}
+.td-sw {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.td-prio {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  flex: none;
+}
+.td-prio span {
+  width: 2.5px;
+  border-radius: 1px;
+  display: block;
+}
+.td-av {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 600;
+  flex: none;
+}
+.td-av--none {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg-4);
+  border: 1px dashed var(--line-2);
+}
+
+.td-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.td-label {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line-1);
+  color: var(--fg-2);
+}
+.td-label--add {
+  display: inline-grid;
+  place-items: center;
+  color: var(--fg-4);
+  padding: 2px 7px;
+}
+.td-label--add:hover {
+  color: var(--fg-0);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.td-noblock {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--ok);
+  padding: 2px 0;
+}
+
+.td-times {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.td-times > div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+.td-times span {
+  color: var(--fg-4);
+}
+.td-times b {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+
+.td-danger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  border-radius: 9px;
+  color: var(--err);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.td-danger:hover {
+  background: var(--err-soft);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* Popover */
+.td-pop {
+  position: relative;
+  z-index: 0;
+}
+.td-pop:has(.td-pop__menu) {
+  z-index: 200;
+}
+.td-pop__menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 300;
+  background: var(--bg-3);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 5px;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.75),
+    0 2px 8px rgba(0, 0, 0, 0.5);
+  max-height: min(60vh, 380px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.td-pop__menu.is-up {
+  top: auto;
+  bottom: calc(100% + 5px);
+}
+.td-pop__menu.is-right {
+  left: auto;
+  right: 0;
+}
+.td-pop__h {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--fg-3);
+  font-weight: 600;
+  padding: 6px 8px 5px;
+  position: sticky;
+  top: -5px;
+  background: var(--bg-3);
+}
+.td-pop__i {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--fg-1);
+  font-size: 12.5px;
+  text-align: left;
+}
+.td-pop__i:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+.td-pop__i.is-sel {
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--fg-0);
+}
+.td-pop__c {
+  margin-left: auto;
+  color: var(--accent);
+}
+.td-pop__role {
+  display: block;
+  font-size: 10.5px;
+  color: var(--fg-4);
+  margin-top: 1px;
+}
+/* D4: 4 tracks, not the source's 5 — see header comment. */
+.td-eff {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 2px;
+}
+.td-eff__b {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 2px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  color: var(--fg-2);
+}
+.td-eff__b b {
+  font-size: 12px;
+  color: var(--fg-1);
+}
+.td-eff__b span {
+  font-size: 8.5px;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+.td-eff__b.is-sel {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+@media (max-width: 1180px) {
+  .td-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .td-side {
+    position: static;
+  }
+}
+
+/* ── Additions — not in the design file ──────────────────────────────────
+   The source mockup's description is a static array (no editor) and its
+   Blockers card shows only the empty state (no row styling), so both need
+   new rules rather than a port. */
+
+.td-desc__ta {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-1);
+  border-radius: 9px;
+  padding: 9px 11px;
+  color: var(--fg-1);
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+.td-desc__ta:focus {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.04);
+}
+
+.td-blockers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.td-blocker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 2px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--line-1);
+}
+.td-blocker:last-child {
+  border-bottom: none;
+}
+.td-blocker__link {
+  min-width: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12.5px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
