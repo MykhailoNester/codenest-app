@@ -730,7 +730,14 @@ describe("agent pane render", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("composer-subagent-badge")).toBeNull(),
     );
-    expect(screen.queryByTestId("dock-group-agents")).toBeNull();
+    // The composer badge disappears — it reads `activeSubagents`, live-only —
+    // but the dock's row for this delegation survives: the most useful
+    // moment to read a sub-agent's result is right after it ends.
+    expect(screen.getByTestId("dock-group-agents")).not.toBeNull();
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    expect(screen.getByTestId("dock-agent-rows").textContent).toContain("reviewer");
   });
 
   it("a Workflow run shows the Workflows group in the dock and a badge in the composer", async () => {
@@ -837,7 +844,14 @@ describe("agent pane render", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("composer-orchestration-badge")).toBeNull(),
     );
-    expect(screen.queryByTestId("dock-group-workflows")).toBeNull();
+    // The composer badge disappears — it reads `activeOrchestrations`,
+    // live-only — but the dock's row for this run survives, with the
+    // wire-probe fixture's own name still on it.
+    expect(screen.getByTestId("dock-group-workflows")).not.toBeNull();
+    fireEvent.click(
+      screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
+    );
+    expect(screen.getByTestId("dock-workflow-rows").textContent).toContain("wire-probe");
   });
 
   it("renders every view kind inside the pane's single viewport, with the composer outside it", async () => {
@@ -1007,6 +1021,64 @@ describe("agent pane render", () => {
     expect(
       dock.compareDocumentPosition(composer!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("clicking a dock row moves Zone A and the composer picker together", async () => {
+    seedCatalog();
+    seedTab(makeAgentTab("agent-dock-select"), "agent-dock-select");
+
+    render(<TerminalsLayout />);
+    await waitFor(() => expect(agentStartMock).toHaveBeenCalledTimes(1));
+    const feed = subscribeAgentFramesMock.mock.calls[0]?.[1] as (
+      frame: AgentFrame,
+    ) => void;
+    expect(feed).toBeTypeOf("function");
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-dock-select",
+        session_id: "session-1",
+        kind: "init",
+        raw: { type: "system", subtype: "init", model: "claude-opus-5" },
+      });
+    });
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-dock-select",
+        session_id: "session-1",
+        kind: "tool_use",
+        raw: {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_task_1",
+                name: "Task",
+                input: { description: "Review the diff", subagent_type: "reviewer" },
+              },
+            ],
+          },
+        },
+      });
+    });
+
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement,
+    );
+
+    // "One selection state, not two": a second `useState` in the dock would
+    // leave the picker on `main` and fail the second assertion here even
+    // though the panel switched.
+    expect(screen.getByTestId("agent-view-panel").dataset.viewKind).toBe("subagent");
+    expect(
+      (screen.getByTestId("composer-view-picker") as HTMLSelectElement).value,
+    ).toBe("sub:toolu_task_1");
   });
 
   it("auto-scroll measures the viewport — the element that actually scrolls", async () => {

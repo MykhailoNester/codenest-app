@@ -3,7 +3,13 @@
 // `ConversationState` directly, same discipline as `conversation-grouping.test.ts`.
 
 import { describe, it, expect } from "vitest";
-import { dockHasContent, liveToolRun, toolRunStartedAt } from "../agent-dock";
+import {
+  dockAgentRows,
+  dockHasContent,
+  dockWorkflowRows,
+  liveToolRun,
+  toolRunStartedAt,
+} from "../agent-dock";
 import {
   applyFrame,
   emptyConversation,
@@ -11,6 +17,8 @@ import {
   type ConvBlock,
   type ConvToolBlock,
   type ConvTurn,
+  type OrchestrationAgent,
+  type OrchestrationRun,
 } from "../agent-conversation";
 import type { AgentFrame, AgentFrameKind } from "../ipc";
 
@@ -28,6 +36,7 @@ function tool(over: Partial<ConvToolBlock> = {}): ConvToolBlock {
     startedAt: 0,
     endedAt: 100,
     isError: false,
+    childTurns: [],
     ...over,
   } as ConvToolBlock;
 }
@@ -48,6 +57,45 @@ function state(turns: ConvTurn[], over: Partial<ConversationState> = {}): Conver
 
 function frame(kind: AgentFrameKind, raw: unknown): AgentFrame {
   return { pane_id: "p1", session_id: "s1", kind, raw };
+}
+
+// Same idiom, for the Workflows-group fixtures below — a plain object cast
+// through `Partial<...>` overrides, same as `tool()`/`turn()` above.
+function agent(over: Partial<OrchestrationAgent> = {}): OrchestrationAgent {
+  return {
+    index: 1,
+    label: "red",
+    phaseIndex: null,
+    phaseTitle: null,
+    agentType: null,
+    model: null,
+    state: "start",
+    tokens: null,
+    toolCalls: null,
+    durationMs: null,
+    error: null,
+    cached: false,
+    promptPreview: null,
+    resultPreview: null,
+    ...over,
+  };
+}
+
+function run(over: Partial<OrchestrationRun> = {}): OrchestrationRun {
+  return {
+    taskId: "wf1",
+    toolUseId: null,
+    name: "wire-probe",
+    description: null,
+    status: "running",
+    activity: null,
+    totalTokens: null,
+    startedAt: 1_000,
+    endedAt: null,
+    phases: [],
+    agents: [],
+    ...over,
+  };
 }
 
 describe("liveToolRun", () => {
@@ -146,4 +194,122 @@ describe("dockHasContent", () => {
   // make "renders nothing for an idle fresh session" unreachable in any repo
   // that has one, so the property under test elsewhere in this suite (a
   // fresh conversation is content-less) already covers this by construction.
+});
+
+describe("dockAgentRows", () => {
+  it("lists finished delegations alongside running ones, oldest first", () => {
+    const blocks = [
+      tool({ id: "a", name: "Task", startedAt: 0, endedAt: 100, isError: false }),
+      tool({ id: "b", name: "Task", startedAt: 200, endedAt: 300, isError: true }),
+      tool({ id: "c", name: "Task", startedAt: 400, endedAt: null }),
+    ];
+    const rows = dockAgentRows(state([turn(blocks)]));
+    expect(rows.map((r) => r.view)).toEqual([
+      { kind: "subagent", id: "a" },
+      { kind: "subagent", id: "b" },
+      { kind: "subagent", id: "c" },
+    ]);
+    expect(rows.map((r) => r.status)).toEqual(["done", "failed", "running"]);
+  });
+
+  it("carries the agent name and the task description as two separate fields", () => {
+    // The ticket's actual defect: two rows of one type are told apart by the
+    // description field, never by inventing a second label.
+    const block = tool({
+      id: "a",
+      name: "Task",
+      input: { subagent_type: "general-purpose", description: "Scan temperature for Kyiv" },
+    });
+    const [row] = dockAgentRows(state([turn([block])]));
+    expect(row?.label).toBe("general-purpose");
+    expect(row?.description).toBe("Scan temperature for Kyiv");
+  });
+
+  it("falls back to the tool name when subagent_type is absent, never a placeholder", () => {
+    const block = tool({ id: "a", name: "Task", input: {} });
+    const [row] = dockAgentRows(state([turn([block])]));
+    expect(row?.label).toBe("Task");
+  });
+
+  it("reports an exact elapsed only once both ends are known", () => {
+    const open = tool({ id: "a", name: "Task", startedAt: 1_000, endedAt: null });
+    const ended = tool({ id: "b", name: "Task", startedAt: 1_000, endedAt: 1_500 });
+    const rows = dockAgentRows(state([turn([open, ended])]));
+    expect(rows[0]?.elapsedMs).toBeNull();
+    expect(rows[0]?.running).toBe(true);
+    expect(rows[1]?.elapsedMs).toBe(500);
+    expect(rows[1]?.running).toBe(false);
+  });
+
+  it("a call still open on an exited session is 'ended', never 'running' or 'done'", () => {
+    const block = tool({ id: "a", name: "Task", endedAt: null });
+    const s = state([turn([block])], { status: "exited" });
+    const [row] = dockAgentRows(s);
+    expect(row?.status).toBe("ended");
+    expect(row?.running).toBe(false);
+  });
+
+  it("counts the sub-agent's own tool calls", () => {
+    const block = tool({
+      id: "a",
+      name: "Task",
+      childTurns: [turn([tool({ id: "child1" }), tool({ id: "child2" })])],
+    });
+    const [row] = dockAgentRows(state([turn([block])]));
+    expect(row?.toolCount).toBe(2);
+  });
+});
+
+describe("dockWorkflowRows", () => {
+  it("lists terminal runs, not just live ones", () => {
+    const s = state([], {
+      orchestrations: [run({ taskId: "a", status: "completed" }), run({ taskId: "b", status: "running" })],
+    });
+    const rows = dockWorkflowRows(s);
+    expect(rows.map((r) => r.taskId)).toEqual(["a", "b"]);
+  });
+
+  it("nests the phase tree and each phase's agents", () => {
+    const r = run({
+      phases: [
+        { index: 1, title: "Alpha" },
+        { index: 2, title: "Beta" },
+      ],
+      agents: [
+        agent({ index: 1, label: "red", phaseIndex: 1 }),
+        agent({ index: 2, label: "blue", phaseIndex: 1 }),
+        agent({ index: 3, label: "green", phaseIndex: 2 }),
+      ],
+    });
+    const [row] = dockWorkflowRows(state([], { orchestrations: [r] }));
+    expect(row?.phases.map((p) => p.title)).toEqual(["Alpha", "Beta"]);
+    expect(row?.phases[0]?.agents.map((a) => a.label)).toEqual(["red", "blue"]);
+    expect(row?.phases[1]?.agents.map((a) => a.label)).toEqual(["green"]);
+  });
+
+  it("degrades the counts label honestly", () => {
+    const phaseless = run({ phases: [], agents: [agent({ index: 1 })] });
+    const [row] = dockWorkflowRows(state([], { orchestrations: [phaseless] }));
+    expect(row?.counts).not.toContain("phase");
+    expect(row?.counts).not.toContain("%");
+
+    const agentless = run({ phases: [{ index: 1, title: "Alpha" }], agents: [] });
+    const [row2] = dockWorkflowRows(state([], { orchestrations: [agentless] }));
+    expect(row2?.counts).not.toContain("0/0");
+    expect(row2?.counts).not.toContain("%");
+  });
+
+  it("a run the wire still calls running is 'ended' on an exited session", () => {
+    const s = state([], { status: "exited", orchestrations: [run({ status: "running" })] });
+    const [row] = dockWorkflowRows(s);
+    expect(row?.status).toBe("ended");
+    expect(row?.running).toBe(false);
+  });
+
+  it("an errored workflow agent is warn, not failed", () => {
+    const r = run({ agents: [agent({ index: 1, state: "error", error: "boom" })] });
+    const [row] = dockWorkflowRows(state([], { orchestrations: [r] }));
+    const [phase] = row?.phases ?? [];
+    expect(phase?.agents[0]?.status).toBe("warn");
+  });
 });
