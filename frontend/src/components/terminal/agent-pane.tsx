@@ -47,7 +47,7 @@ import {
   resolveView,
   type AgentViewId,
 } from "../../lib/agent-views";
-import { AgentSessionHud } from "./agent-session-hud";
+import { AgentActivityDock } from "./agent-activity-dock";
 import { Icon } from "../icon";
 import styles from "./agent-pane.module.css";
 
@@ -567,11 +567,6 @@ export function AgentPane({
         </div>
       ) : null}
 
-      {/* Status strip — between the header and the conversation, exactly where
-          the prototype puts `.hud`, and where `<TerminalPane/>` puts its own.
-          Rendered outside `.body` so it never scrolls with the conversation. */}
-      <AgentSessionHud state={conv} cwd={cwd} paneId={leafId} />
-
       <div className={styles.body}>
         <div
           className={styles.viewport}
@@ -599,6 +594,12 @@ export function AgentPane({
             <AgentViewPanel kind="workflow" run={viewedRun} />
           ) : null}
         </div>
+
+        {/* Zone B — the activity dock. A *sibling* of `.viewport`, never a
+            child: inside it, it would scroll away with the transcript.
+            Mounted unconditionally so its collapse state survives the phases
+            where it has nothing to report and renders null. */}
+        <AgentActivityDock state={conv} cwd={cwd} paneId={leafId} />
 
         {/*
           A dead session shows its status bar *above* a still-mounted composer

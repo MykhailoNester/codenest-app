@@ -650,7 +650,7 @@ describe("agent pane render", () => {
     expect(select.value).toBe("manual");
   });
 
-  it("a Task in flight shows the sub-agent cell in the HUD and a badge in the composer", async () => {
+  it("a Task in flight shows the Agents group in the dock and a badge in the composer", async () => {
     seedCatalog();
     seedTab(makeAgentTab("agent-subagent"), "agent-subagent");
 
@@ -701,8 +701,7 @@ describe("agent pane render", () => {
     expect(screen.getByTestId("composer-subagent-badge").textContent).toContain(
       "1 sub-agent",
     );
-    const strip = screen.getByTestId("agent-session-hud");
-    expect(strip.querySelector('[data-cell="subagent"]')?.textContent).toContain(
+    expect(screen.getByTestId("dock-group-agents").textContent).toContain(
       "reviewer",
     );
 
@@ -731,12 +730,10 @@ describe("agent pane render", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("composer-subagent-badge")).toBeNull(),
     );
-    expect(
-      screen.getByTestId("agent-session-hud").querySelector('[data-cell="subagent"]'),
-    ).toBeNull();
+    expect(screen.queryByTestId("dock-group-agents")).toBeNull();
   });
 
-  it("a Workflow run shows the orchestration cell in the HUD and a badge in the composer", async () => {
+  it("a Workflow run shows the Workflows group in the dock and a badge in the composer", async () => {
     seedCatalog();
     seedTab(makeAgentTab("agent-orchestration"), "agent-orchestration");
 
@@ -758,9 +755,7 @@ describe("agent pane render", () => {
 
     // Nothing orchestrating yet — neither surface should exist.
     expect(screen.queryByTestId("composer-orchestration-badge")).toBeNull();
-    expect(
-      screen.getByTestId("agent-session-hud").querySelector('[data-cell="orchestration"]'),
-    ).toBeNull();
+    expect(screen.queryByTestId("dock-group-workflows")).toBeNull();
 
     await act(async () => {
       feed({
@@ -820,8 +815,7 @@ describe("agent pane render", () => {
     expect(screen.getByTestId("composer-orchestration-badge").textContent).toContain(
       "0/2 agents",
     );
-    const strip = screen.getByTestId("agent-session-hud");
-    expect(strip.querySelector('[data-cell="orchestration"]')?.textContent).toContain(
+    expect(screen.getByTestId("dock-group-workflows").textContent).toContain(
       "wire-probe",
     );
 
@@ -843,9 +837,7 @@ describe("agent pane render", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("composer-orchestration-badge")).toBeNull(),
     );
-    expect(
-      screen.getByTestId("agent-session-hud").querySelector('[data-cell="orchestration"]'),
-    ).toBeNull();
+    expect(screen.queryByTestId("dock-group-workflows")).toBeNull();
   });
 
   it("renders every view kind inside the pane's single viewport, with the composer outside it", async () => {
@@ -952,6 +944,11 @@ describe("agent pane render", () => {
       viewport.contains(screen.getByTestId("agent-conversation")),
     ).toBe(true);
 
+    // The dock (Zone B) already has something to report — the in-flight
+    // Task and Workflow fed above — so it exists from here on; captured now
+    // so the two view switches below can prove it never remounts.
+    const dock = screen.getByTestId("agent-activity-dock");
+
     const picker = screen.getByTestId("composer-view-picker");
     // jsdom silently assigns "" when the requested option is absent, which is
     // the flake the model-switch test above already documents — wait for the
@@ -970,6 +967,8 @@ describe("agent pane render", () => {
     expect(viewport.contains(panel)).toBe(true);
     expect(screen.queryByTestId("agent-conversation")).toBeNull();
     expect(screen.getByTestId("agent-pane-viewport")).toBe(viewport);
+    // Zone B did not remount or move when Zone A switched to the sub-agent view.
+    expect(screen.getByTestId("agent-activity-dock")).toBe(dock);
 
     await waitFor(() =>
       expect(
@@ -985,6 +984,8 @@ describe("agent pane render", () => {
     expect(viewport.contains(panel)).toBe(true);
     expect(screen.queryByTestId("agent-conversation")).toBeNull();
     expect(screen.getByTestId("agent-pane-viewport")).toBe(viewport);
+    // Nor when it switched again to the workflow view.
+    expect(screen.getByTestId("agent-activity-dock")).toBe(dock);
 
     // The composer is a *sibling* of the viewport under `.body`, which is the
     // structural reason it cannot move when the view changes — layout itself
@@ -994,6 +995,18 @@ describe("agent pane render", () => {
     expect(composer).not.toBeNull();
     expect(viewport.contains(composer)).toBe(false);
     expect(composer!.parentElement).toBe(viewport.parentElement);
+
+    // The ticket's core structural guarantee: the dock is a sibling of the
+    // viewport, never its child, and sits between it and the composer —
+    // A → B → C, in that order, inside `.body`.
+    expect(viewport.contains(dock)).toBe(false);
+    expect(dock.parentElement).toBe(viewport.parentElement);
+    expect(
+      viewport.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      dock.compareDocumentPosition(composer!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("auto-scroll measures the viewport — the element that actually scrolls", async () => {
