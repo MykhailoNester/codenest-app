@@ -77,6 +77,27 @@ describe("groupTurnBlocks", () => {
     const keys = groups.map((g) => g.key);
     expect(new Set(keys).size).toBe(keys.length);
   });
+
+  it("a Task block is never folded into a neighbouring tool run", () => {
+    const between = groupTurnBlocks([
+      tool({ id: "a" }),
+      tool({ id: "d", name: "Task" }),
+      tool({ id: "b" }),
+    ]);
+    expect(between.map((g) => g.kind)).toEqual(["block", "delegation", "block"]);
+
+    const trailing = groupTurnBlocks([
+      tool({ id: "a" }),
+      tool({ id: "b" }),
+      tool({ id: "d", name: "Task" }),
+    ]);
+    expect(trailing.map((g) => g.kind)).toEqual(["toolRun", "delegation"]);
+  });
+
+  it("an Agent-named block groups as a delegation too — the wire's real name", () => {
+    const groups = groupTurnBlocks([tool({ id: "a" }), tool({ id: "d", name: "Agent" })]);
+    expect(groups.map((g) => g.kind)).toEqual(["block", "delegation"]);
+  });
 });
 
 describe("summarizeToolRun", () => {

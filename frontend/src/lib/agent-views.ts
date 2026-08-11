@@ -89,7 +89,13 @@ export function sameView(a: AgentViewId, b: AgentViewId): boolean {
 /** Every `Task`/`Agent` tool block in the transcript, finished or not —
  *  unlike `activeSubagents`, which is deliberately in-flight only because its
  *  consumers are live indicators. The picker needs the finished ones too: the
- *  most useful moment to read a sub-agent's result is right after it ends. */
+ *  most useful moment to read a sub-agent's result is right after it ends.
+ *
+ *  Top-level only, deliberately: a depth-2 delegation now lives inside its
+ *  parent block's `childTurns` rather than as a sibling of the main agent's
+ *  own (that sibling placement was the bug this walk used to have). Listing
+ *  a nested delegation here would be a dead row until the child stream gets
+ *  its own renderer — a later ticket. */
 export function subagentBlocks(state: ConversationState): ConvToolBlock[] {
   const blocks: ConvToolBlock[] = [];
   for (const turn of state.turns) {
@@ -109,7 +115,11 @@ export function subagentLabel(block: ConvToolBlock): string {
   return type.length > 0 ? type : block.name;
 }
 
-function subagentDescription(block: ConvToolBlock): string | null {
+/** The picker's second line, and `<DelegationCard/>`'s one-line task: the
+ *  call's own declared description, else its `argSummary` — exported so the
+ *  card reads the identical fallback rather than a second copy that could
+ *  drift from the picker's. */
+export function subagentDescription(block: ConvToolBlock): string | null {
   const input = block.input as Record<string, unknown> | null | undefined;
   const desc = typeof input?.["description"] === "string" ? input["description"] : "";
   return desc.length > 0 ? desc : (block.argSummary || null);
