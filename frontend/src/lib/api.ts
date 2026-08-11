@@ -463,7 +463,10 @@ export interface ActivityEntry {
   action: string;
   old_value: string | null;
   new_value: string | null;
-  actor: string;
+  // `activity_log.actor` is a nullable column; `log_activity` defaults it to
+  // "system" so it is populated in practice, but a caller must still handle
+  // null rather than assume it.
+  actor: string | null;
   created_at: string;
 }
 
@@ -599,6 +602,20 @@ export function useTask(taskId: number): UseQueryResult<Task, SidecarError> {
   return useQuery<Task, SidecarError>({
     queryKey: ["task", taskId],
     queryFn: () => fetchSidecar<Task>(`/api/v1/tasks/${taskId}`),
+    enabled: taskId > 0,
+  });
+}
+
+export function useTaskActivity(
+  taskId: number,
+  limit = 50, // mirrors activity_service.DEFAULT_ENTITY_LIMIT
+): UseQueryResult<ActivityEntry[], SidecarError> {
+  return useQuery<ActivityEntry[], SidecarError>({
+    queryKey: ["task-activity", taskId, limit],
+    queryFn: () =>
+      fetchSidecar<ActivityEntry[]>(
+        `/api/v1/tasks/${taskId}/activity?limit=${limit}`,
+      ),
     enabled: taskId > 0,
   });
 }

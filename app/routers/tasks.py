@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
+from app.services import activity_service
 from app.services.task_service import (
     add_blocker,
     add_task_label,
@@ -13,6 +14,7 @@ from app.services.task_service import (
     get_all_tasks,
     get_task,
     get_task_blockers,
+    list_task_activity,
     list_task_labels,
     remove_blocker,
     remove_task_label,
@@ -58,6 +60,15 @@ async def api_get_task(task_id: int):
         return JSONResponse({"error": "not found"}, status_code=404)
     blockers = await get_task_blockers(db, task_id)
     return JSONResponse({**dict(task), "blockers": [dict(b) for b in blockers]})
+
+
+@router.get("/api/v1/tasks/{task_id}/activity")
+async def api_task_activity(
+    task_id: int, limit: int = activity_service.DEFAULT_ENTITY_LIMIT
+) -> JSONResponse:
+    db = await get_db()
+    entries = await list_task_activity(db, task_id, limit)
+    return JSONResponse(entries)
 
 
 @router.post("/api/v1/tasks")

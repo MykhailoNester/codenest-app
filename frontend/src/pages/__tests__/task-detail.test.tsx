@@ -11,6 +11,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TaskDetailPage } from "../task-detail";
 import type {
+  ActivityEntry,
   LookupsOut,
   Project,
   Task,
@@ -25,6 +26,7 @@ const {
   mockUseTasks,
   mockUseLookups,
   mockUseTaxonomy,
+  mockUseTaskActivity,
   mockUpdateTask,
   mockChangeTaskStatus,
   mockDeleteTask,
@@ -41,6 +43,7 @@ const {
   mockUseTasks: vi.fn(),
   mockUseLookups: vi.fn(),
   mockUseTaxonomy: vi.fn(),
+  mockUseTaskActivity: vi.fn(),
   mockUpdateTask: vi.fn(),
   mockChangeTaskStatus: vi.fn(),
   mockDeleteTask: vi.fn(),
@@ -59,6 +62,7 @@ vi.mock("../../lib/api", () => ({
   useTasks: (...args: unknown[]) => mockUseTasks(...args),
   useLookups: () => mockUseLookups(),
   useTaxonomy: (...args: unknown[]) => mockUseTaxonomy(...args),
+  useTaskActivity: (...args: unknown[]) => mockUseTaskActivity(...args),
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
   changeTaskStatus: (...args: unknown[]) => mockChangeTaskStatus(...args),
   deleteTask: (...args: unknown[]) => mockDeleteTask(...args),
@@ -198,6 +202,7 @@ function setupMocks(
     members?: TeamMember[];
     projects?: Project[];
     labelTaxonomy?: Taxonomy[];
+    activity?: ActivityEntry[];
   } = {},
 ): Task {
   const task = opts.task ?? makeTask();
@@ -214,6 +219,12 @@ function setupMocks(
   mockUseLookups.mockReturnValue({ data: opts.lookups ?? makeLookups() });
   mockUseTaxonomy.mockReturnValue({
     data: opts.labelTaxonomy ?? LABEL_TAXONOMY,
+  });
+  mockUseTaskActivity.mockReturnValue({
+    data: opts.activity ?? [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
   });
   return task;
 }
@@ -464,11 +475,50 @@ describe("TaskDetailPage", () => {
     mockUseTasks.mockReturnValue({ data: [] });
     mockUseLookups.mockReturnValue({ data: makeLookups() });
     mockUseTaxonomy.mockReturnValue({ data: LABEL_TAXONOMY });
+    mockUseTaskActivity.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
 
     renderPage();
 
     screen.getByText("Task #1 no longer exists.");
     expect(screen.queryByText(/Loading task/)).toBeNull();
+  });
+
+  it("the activity card is mounted in the document column", () => {
+    setupMocks({
+      activity: [
+        {
+          id: 1,
+          entity_type: "task",
+          entity_id: 1,
+          action: "created",
+          old_value: null,
+          new_value: "Original title",
+          actor: "system",
+          created_at: "2026-08-08 00:00:00",
+        },
+        {
+          id: 2,
+          entity_type: "task",
+          entity_id: 1,
+          action: "status_changed",
+          old_value: "todo",
+          new_value: "in-progress",
+          actor: "system",
+          created_at: "2026-08-08 01:00:00",
+        },
+      ],
+    });
+    const { container } = renderPage();
+    const doc = container.querySelector(".td-doc");
+    expect(doc).not.toBeNull();
+    const feed = doc?.querySelector(".td-feed");
+    expect(feed).not.toBeNull();
+    expect(feed?.querySelectorAll("li").length).toBe(2);
   });
 
   it("status badge colour comes from the taxonomy", () => {

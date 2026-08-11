@@ -47,9 +47,11 @@ import {
   useLookups,
   useProjects,
   useTask,
+  useTaskActivity,
   useTasks,
   useTaxonomy,
   useTeamMembers,
+  type ActivityEntry,
   type Project,
   type Task,
   type Taxonomy,
@@ -60,6 +62,7 @@ import { relativeTime } from "../lib/format-helpers";
 import { Shell } from "../components/layout/shell";
 import { LaunchFromSourceButton } from "../components/launch/launch-from-source-button";
 import { AgentMarkdown } from "../components/terminal/agent-markdown";
+import { ActivityCard } from "../components/task-detail/activity-card";
 import { hashHue, initialsOf } from "../components/task-detail/avatar";
 import { PropertiesCard } from "../components/task-detail/properties-card";
 import { TdPopover } from "../components/task-detail/td-popover";
@@ -72,6 +75,7 @@ const NO_TASKS: Task[] = [];
 const NO_VOCAB: WorkflowVocabEntry[] = [];
 const NO_TAXONOMY: Taxonomy[] = [];
 const NO_STATUS_COLORS: Record<string, string> = {};
+const NO_ACTIVITY: ActivityEntry[] = [];
 
 const AVATAR_PX = 20;
 const AVATAR_FONT_PX = 9;
@@ -98,6 +102,12 @@ export function TaskDetailPage(): ReactElement {
   const { data: allTasks = NO_TASKS } = useTasks();
   const { data: lookups } = useLookups();
   const { data: labelTaxonomy = NO_TAXONOMY } = useTaxonomy("task_label");
+  const {
+    data: activity = NO_ACTIVITY,
+    isLoading: activityLoading,
+    isError: activityError,
+    refetch: refetchActivity,
+  } = useTaskActivity(taskId);
 
   const priorityVocab = lookups?.workflow_task_priorities ?? NO_VOCAB;
 
@@ -111,6 +121,14 @@ export function TaskDetailPage(): ReactElement {
       e.color ? e : { ...e, color: colors[e.slug] ?? null },
     );
   }, [lookups]);
+
+  // Activity phrases localise a status slug via this map (falling back to
+  // the humanizer) rather than a hardcoded label list — the taxonomy is
+  // user-editable.
+  const statusLabels = useMemo(
+    () => Object.fromEntries(statusVocab.map((e) => [e.slug, e.label])),
+    [statusVocab],
+  );
 
   // ── Save indicator ────────────────────────────────────────────────────
   const [savePhase, setSavePhase] = useState<SavePhase>("idle");
@@ -133,6 +151,7 @@ export function TaskDetailPage(): ReactElement {
         await qc.invalidateQueries({ queryKey: ["task", taskId] });
         void qc.invalidateQueries({ queryKey: ["tasks"] });
         void qc.invalidateQueries({ queryKey: ["dashboard"] });
+        void qc.invalidateQueries({ queryKey: ["task-activity", taskId] });
         setSavePhase("saved");
         if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
         savedTimerRef.current = setTimeout(
@@ -540,6 +559,14 @@ export function TaskDetailPage(): ReactElement {
                 </div>
               )}
             </div>
+
+            <ActivityCard
+              entries={activity}
+              isLoading={activityLoading}
+              isError={activityError}
+              onRetry={() => void refetchActivity()}
+              statusLabels={statusLabels}
+            />
           </div>
 
           <div className="td-side">
