@@ -5,7 +5,7 @@ import aiosqlite
 from fastapi import HTTPException
 
 from . import notification_service
-from .activity_service import log_activity
+from .activity_service import DEFAULT_ENTITY_LIMIT, list_for_entity, log_activity
 
 _SORT_CLAUSES = {
     "created_at_asc": "t.created_at ASC",
@@ -283,6 +283,16 @@ async def get_task_blockers(db: aiosqlite.Connection, task_id: int):
         (task_id,),
     )
     return await rows.fetchall()
+
+
+async def list_task_activity(
+    db: aiosqlite.Connection,
+    task_id: int,
+    limit: int = DEFAULT_ENTITY_LIMIT,
+) -> list[dict[str, Any]]:
+    """Newest-first ``activity_log`` rows for one task. 404s on an unknown task."""
+    await _assert_task(db, task_id)
+    return await list_for_entity(db, "task", task_id, limit)
 
 
 async def _cascade_unblock(db: aiosqlite.Connection, completed_task_id: int):

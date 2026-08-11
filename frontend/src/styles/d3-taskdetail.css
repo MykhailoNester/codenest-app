@@ -18,19 +18,23 @@
  *
  * Deliberate deviations from the source file:
  *
- * - NOT PORTED — the design file also styles six sections this app does not
- *   build yet (four need schema, two need a read endpoint that doesn't
- *   exist): `.td-prog`, `.td-subs`, `.td-check`, `.td-addsub` (subtasks),
- *   `.td-runs`/`.td-run*` (agent runs), `.td-tabs` (section tabs),
- *   `.td-feed*` (activity feed), `.td-files`/`.td-file*` (changed files),
- *   `.td-branch*` (branch card), `.td-comment`/`.td-para` (comments/rich
- *   description body). `.td-btn*` (including `.td-btn--sm`) is not ported
- *   either — the action bar reuses `.d3-btn`/`.d3-btn--primary`/
- *   `.d3-btn--ghost` from d3-creative.css, which already carry the same
- *   gradient/border/shadow declarations, so the primary button
- *   (`<LaunchFromSourceButton>`, which hardcodes those classes) stays
- *   visually consistent with its neighbours. `.td-ghost` IS ported — it is
- *   a distinct, borderless affordance with no `d3-` equivalent.
+ * - NOT PORTED — the design file also styles five sections this app does not
+ *   build yet, all needing schema or data this app does not have:
+ *   `.td-prog`, `.td-subs`, `.td-check`, `.td-addsub` (subtasks),
+ *   `.td-runs`/`.td-run*` (agent runs), `.td-files`/`.td-file*` (changed
+ *   files), `.td-branch*` (branch card), `.td-comment`/`.td-para`
+ *   (comments/rich description body). `.td-tabs` (section tabs) and
+ *   `.td-feed*` (activity feed) are no longer on this list — they were
+ *   ported (see below) once `GET /api/v1/tasks/{id}/activity` gave the
+ *   Activity tab something to read; the tab strip still renders only that
+ *   one tab, since Changed files and Comments still have no data source.
+ *   `.td-btn*` (including `.td-btn--sm`) is not ported either — the action
+ *   bar reuses `.d3-btn`/`.d3-btn--primary`/`.d3-btn--ghost` from
+ *   d3-creative.css, which already carry the same gradient/border/shadow
+ *   declarations, so the primary button (`<LaunchFromSourceButton>`, which
+ *   hardcodes those classes) stays visually consistent with its neighbours.
+ *   `.td-ghost` IS ported — it is a distinct, borderless affordance with no
+ *   `d3-` equivalent.
  * - COLOUR — the source's two opaque hex literals are replaced with the
  *   nearest existing token so this file, like `d3-taskboard.css`, carries no
  *   raw hex at all: the dark-navy popover background (`.td-pop__menu`,
@@ -284,6 +288,73 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* Tabs */
+.td-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--line-1);
+  margin: -2px -4px 12px;
+  padding: 0 4px;
+}
+.td-tabs button {
+  background: transparent;
+  border: none;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 7px 11px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.td-tabs button:hover {
+  color: var(--fg-1);
+}
+.td-tabs button.is-on {
+  color: var(--fg-0);
+  border-bottom-color: var(--accent);
+}
+
+/* Activity feed */
+.td-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.td-feed li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 2px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.td-feed li:last-child {
+  border-bottom: none;
+}
+.td-feed__i {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg-3);
+}
+.td-feed__t b {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+.td-feed__w {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 /* Properties */
