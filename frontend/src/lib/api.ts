@@ -620,6 +620,20 @@ export function useTaskActivity(
   });
 }
 
+export function useTaskRuns(
+  taskId: number,
+  limit = 50, // mirrors agent_runs_service.DEFAULT_SOURCE_LIMIT
+): UseQueryResult<AgentRun[], SidecarError> {
+  return useQuery<AgentRun[], SidecarError>({
+    queryKey: ["task-runs", taskId, limit],
+    queryFn: () =>
+      fetchSidecar<AgentRun[]>(`/api/v1/tasks/${taskId}/runs?limit=${limit}`),
+    enabled: taskId > 0,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
+}
+
 // Standalone fetchers (no hook — callers invalidate ["tasks"] / ["dashboard"]
 // themselves after a write) for the Work Board's write paths. `tasks.tsx`
 // used to call `fetchSidecar` inline for these three; relocated here so

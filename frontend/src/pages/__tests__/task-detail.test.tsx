@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TaskDetailPage } from "../task-detail";
 import type {
   ActivityEntry,
+  AgentRun,
   LookupsOut,
   Project,
   Task,
@@ -27,6 +28,9 @@ const {
   mockUseLookups,
   mockUseTaxonomy,
   mockUseTaskActivity,
+  mockUseTaskRuns,
+  mockUseSessionReplay,
+  mockUseProfiles,
   mockUpdateTask,
   mockChangeTaskStatus,
   mockDeleteTask,
@@ -44,6 +48,9 @@ const {
   mockUseLookups: vi.fn(),
   mockUseTaxonomy: vi.fn(),
   mockUseTaskActivity: vi.fn(),
+  mockUseTaskRuns: vi.fn(),
+  mockUseSessionReplay: vi.fn(),
+  mockUseProfiles: vi.fn(),
   mockUpdateTask: vi.fn(),
   mockChangeTaskStatus: vi.fn(),
   mockDeleteTask: vi.fn(),
@@ -63,6 +70,9 @@ vi.mock("../../lib/api", () => ({
   useLookups: () => mockUseLookups(),
   useTaxonomy: (...args: unknown[]) => mockUseTaxonomy(...args),
   useTaskActivity: (...args: unknown[]) => mockUseTaskActivity(...args),
+  useTaskRuns: (...args: unknown[]) => mockUseTaskRuns(...args),
+  useSessionReplay: (...args: unknown[]) => mockUseSessionReplay(...args),
+  useProfiles: (...args: unknown[]) => mockUseProfiles(...args),
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
   changeTaskStatus: (...args: unknown[]) => mockChangeTaskStatus(...args),
   deleteTask: (...args: unknown[]) => mockDeleteTask(...args),
@@ -203,6 +213,7 @@ function setupMocks(
     projects?: Project[];
     labelTaxonomy?: Taxonomy[];
     activity?: ActivityEntry[];
+    runs?: AgentRun[];
   } = {},
 ): Task {
   const task = opts.task ?? makeTask();
@@ -226,6 +237,18 @@ function setupMocks(
     isError: false,
     refetch: vi.fn(),
   });
+  mockUseTaskRuns.mockReturnValue({
+    data: opts.runs ?? [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  });
+  mockUseSessionReplay.mockReturnValue({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  });
+  mockUseProfiles.mockReturnValue({ data: [] });
   return task;
 }
 
@@ -481,6 +504,18 @@ describe("TaskDetailPage", () => {
       isError: false,
       refetch: vi.fn(),
     });
+    mockUseTaskRuns.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockUseSessionReplay.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+    });
+    mockUseProfiles.mockReturnValue({ data: [] });
 
     renderPage();
 
@@ -519,6 +554,148 @@ describe("TaskDetailPage", () => {
     const feed = doc?.querySelector(".td-feed");
     expect(feed).not.toBeNull();
     expect(feed?.querySelectorAll("li").length).toBe(2);
+  });
+
+  it("the runs card is mounted in the document column", () => {
+    const runs: AgentRun[] = [
+      {
+        row_kind: "run",
+        id: 101,
+        session_id: "sess-101",
+        provider_id: 1,
+        project_id: 1,
+        pane_id: "pane-1",
+        model: "claude-opus",
+        prompt_preview: "Investigate the flaky test",
+        status: "ended",
+        source_kind: "task",
+        source_id: 1,
+        started_at: "2026-08-11T16:00:00+00:00",
+        ended_at: "2026-08-11T16:05:00+00:00",
+        profile: "work",
+        target: "embedded",
+        provider_name: "claude-code",
+        provider_display_name: "Claude Code",
+        provider_color: "#d97757",
+        project_name: "Alpha",
+        session_status: "ended",
+        session_current_tool: null,
+        session_tokens_in: 100,
+        session_tokens_out: 50,
+        session_cost_usd: 0.42,
+        session_initial_prompt: null,
+        session_total_tool_calls: 12,
+        schedule_id: null,
+        schedule_name: null,
+      },
+      {
+        row_kind: "run",
+        id: 102,
+        session_id: null,
+        provider_id: null,
+        project_id: 1,
+        pane_id: null,
+        model: null,
+        prompt_preview: null,
+        status: "running",
+        source_kind: "task",
+        source_id: 1,
+        started_at: "2026-08-11T16:10:00+00:00",
+        ended_at: null,
+        profile: null,
+        target: null,
+        provider_name: null,
+        provider_display_name: null,
+        provider_color: null,
+        project_name: "Alpha",
+        session_status: null,
+        session_current_tool: null,
+        session_tokens_in: null,
+        session_tokens_out: null,
+        session_cost_usd: null,
+        session_initial_prompt: null,
+        session_total_tool_calls: null,
+        schedule_id: null,
+        schedule_name: null,
+      },
+    ];
+    setupMocks({ runs });
+    const { container } = renderPage();
+    const doc = container.querySelector(".td-doc");
+    expect(doc).not.toBeNull();
+    const runsList = doc?.querySelector(".td-runs");
+    expect(runsList).not.toBeNull();
+    expect(runsList?.querySelectorAll(".td-run").length).toBe(2);
+  });
+
+  it("Replay mounts the existing replay panel", () => {
+    const runs: AgentRun[] = [
+      {
+        row_kind: "run",
+        id: 201,
+        session_id: "sess-201",
+        provider_id: 1,
+        project_id: 1,
+        pane_id: "pane-2",
+        model: "claude-opus",
+        prompt_preview: "Ship the runs card",
+        status: "ended",
+        source_kind: "task",
+        source_id: 1,
+        started_at: "2026-08-11T16:00:00+00:00",
+        ended_at: "2026-08-11T16:05:00+00:00",
+        profile: "work",
+        target: "embedded",
+        provider_name: "claude-code",
+        provider_display_name: "Claude Code",
+        provider_color: "#d97757",
+        project_name: "Alpha",
+        session_status: "ended",
+        session_current_tool: null,
+        session_tokens_in: 100,
+        session_tokens_out: 50,
+        session_cost_usd: 0.42,
+        session_initial_prompt: null,
+        session_total_tool_calls: 12,
+        schedule_id: null,
+        schedule_name: null,
+      },
+    ];
+    setupMocks({ runs });
+    mockUseSessionReplay.mockReturnValue({
+      data: {
+        session: {
+          id: 1,
+          session_id: "sess-201",
+          profile: "work",
+          status: "ended",
+          cwd: "/repo",
+          project_id: 1,
+          provider_id: 1,
+          model: "claude-opus",
+          tokens_in: 100,
+          tokens_out: 50,
+          cost_usd: 0.42,
+          project_name: "Alpha",
+          initial_prompt: "Ship the runs card",
+          current_tool: null,
+          total_tool_calls: 12,
+          started_at: "2026-08-11T16:00:00+00:00",
+          ended_at: "2026-08-11T16:05:00+00:00",
+          last_event_at: null,
+        },
+        events: [],
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    const { container } = renderPage();
+    expect(container.querySelector(".d3-replay")).toBeNull();
+
+    fireEvent.click(screen.getByText("Replay"));
+    const doc = container.querySelector(".td-doc");
+    expect(doc?.querySelector(".d3-replay")).not.toBeNull();
   });
 
   it("status badge colour comes from the taxonomy", () => {

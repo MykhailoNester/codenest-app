@@ -4,7 +4,7 @@ from typing import Any
 import aiosqlite
 from fastapi import HTTPException
 
-from . import notification_service
+from . import agent_runs_service, notification_service
 from .activity_service import DEFAULT_ENTITY_LIMIT, list_for_entity, log_activity
 
 _SORT_CLAUSES = {
@@ -293,6 +293,19 @@ async def list_task_activity(
     """Newest-first ``activity_log`` rows for one task. 404s on an unknown task."""
     await _assert_task(db, task_id)
     return await list_for_entity(db, "task", task_id, limit)
+
+
+async def list_task_runs(
+    db: aiosqlite.Connection,
+    task_id: int,
+    limit: int = agent_runs_service.DEFAULT_SOURCE_LIMIT,
+) -> list[dict[str, Any]]:
+    """Newest-first ``agent_runs`` rows launched from one task. 404s on an
+    unknown task."""
+    await _assert_task(db, task_id)
+    return await agent_runs_service.list_for_source(
+        db, source_kind="task", source_id=task_id, limit=limit
+    )
 
 
 async def _cascade_unblock(db: aiosqlite.Connection, completed_task_id: int):

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
-from app.services import activity_service
+from app.services import activity_service, agent_runs_service
 from app.services.task_service import (
     add_blocker,
     add_task_label,
@@ -16,6 +16,7 @@ from app.services.task_service import (
     get_task_blockers,
     list_task_activity,
     list_task_labels,
+    list_task_runs,
     remove_blocker,
     remove_task_label,
     set_task_labels,
@@ -69,6 +70,14 @@ async def api_task_activity(
     db = await get_db()
     entries = await list_task_activity(db, task_id, limit)
     return JSONResponse(entries)
+
+
+@router.get("/api/v1/tasks/{task_id}/runs")
+async def api_task_runs(
+    task_id: int, limit: int = agent_runs_service.DEFAULT_SOURCE_LIMIT
+) -> JSONResponse:
+    db = await get_db()
+    return JSONResponse(await list_task_runs(db, task_id, limit))
 
 
 @router.post("/api/v1/tasks")

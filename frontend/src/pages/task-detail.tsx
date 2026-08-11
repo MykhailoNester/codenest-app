@@ -48,10 +48,12 @@ import {
   useProjects,
   useTask,
   useTaskActivity,
+  useTaskRuns,
   useTasks,
   useTaxonomy,
   useTeamMembers,
   type ActivityEntry,
+  type AgentRun,
   type Project,
   type Task,
   type Taxonomy,
@@ -65,6 +67,8 @@ import { AgentMarkdown } from "../components/terminal/agent-markdown";
 import { ActivityCard } from "../components/task-detail/activity-card";
 import { hashHue, initialsOf } from "../components/task-detail/avatar";
 import { PropertiesCard } from "../components/task-detail/properties-card";
+import { TaskRunReplay } from "../components/task-detail/run-replay";
+import { RunsCard } from "../components/task-detail/runs-card";
 import { TdPopover } from "../components/task-detail/td-popover";
 
 // Module-level sentinels so a not-yet-resolved query never hands a fresh
@@ -76,6 +80,7 @@ const NO_VOCAB: WorkflowVocabEntry[] = [];
 const NO_TAXONOMY: Taxonomy[] = [];
 const NO_STATUS_COLORS: Record<string, string> = {};
 const NO_ACTIVITY: ActivityEntry[] = [];
+const NO_RUNS: AgentRun[] = [];
 
 const AVATAR_PX = 20;
 const AVATAR_FONT_PX = 9;
@@ -108,6 +113,12 @@ export function TaskDetailPage(): ReactElement {
     isError: activityError,
     refetch: refetchActivity,
   } = useTaskActivity(taskId);
+  const {
+    data: runs = NO_RUNS,
+    isLoading: runsLoading,
+    isError: runsError,
+    refetch: refetchRuns,
+  } = useTaskRuns(taskId);
 
   const priorityVocab = lookups?.workflow_task_priorities ?? NO_VOCAB;
 
@@ -129,6 +140,12 @@ export function TaskDetailPage(): ReactElement {
     () => Object.fromEntries(statusVocab.map((e) => [e.slug, e.label])),
     [statusVocab],
   );
+
+  // ── Agent runs replay — toggles closed on a second click of the same run.
+  const [replaySessionId, setReplaySessionId] = useState<string | null>(null);
+  const handleReplay = useCallback((sessionId: string) => {
+    setReplaySessionId((cur) => (cur === sessionId ? null : sessionId));
+  }, []);
 
   // ── Save indicator ────────────────────────────────────────────────────
   const [savePhase, setSavePhase] = useState<SavePhase>("idle");
@@ -567,6 +584,21 @@ export function TaskDetailPage(): ReactElement {
               onRetry={() => void refetchActivity()}
               statusLabels={statusLabels}
             />
+
+            <RunsCard
+              runs={runs}
+              isLoading={runsLoading}
+              isError={runsError}
+              onRetry={() => void refetchRuns()}
+              activeSessionId={replaySessionId}
+              onReplay={handleReplay}
+            />
+            {replaySessionId ? (
+              <TaskRunReplay
+                sessionId={replaySessionId}
+                onClose={() => setReplaySessionId(null)}
+              />
+            ) : null}
           </div>
 
           <div className="td-side">

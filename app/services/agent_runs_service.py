@@ -315,6 +315,9 @@ async def relink_run_to_session(
 
 # ── Read API ─────────────────────────────────────────────────────────────────
 
+DEFAULT_SOURCE_LIMIT = 50
+MAX_SOURCE_LIMIT = 200
+
 
 async def list_runs(
     db: aiosqlite.Connection,
@@ -322,6 +325,8 @@ async def list_runs(
     provider_id: int | None = None,
     status: str | None = None,
     profile: str | None = None,
+    source_kind: str | None = None,
+    source_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return a unified agent list: ``agent_runs`` rows plus observe-only sessions.
 
@@ -333,7 +338,13 @@ async def list_runs(
        ``row_kind='observe'`` so the UI can mark them as observe-only.
 
     Filters ``provider_id``, ``status``, and ``profile`` are applied to both
-    halves where the relevant column exists.
+    halves where the relevant column exists. ``source_kind``/``source_id``
+    filter the *run* half only (``agent_runs.source_kind``/``source_id``) and,
+    when either is set, the observe half is skipped entirely rather than
+    unioned in filtered-to-nothing: observe rows select literal ``NULL`` for
+    both source columns, so they can never satisfy a source filter and
+    including them would silently return every external session instead of
+    an empty complement.
 
     Each row exposes:
     - ``row_kind``: ``'run'`` | ``'observe'``.
@@ -359,6 +370,12 @@ async def list_runs(
     if profile is not None:
         run_conditions.append("r.profile = ?")
         run_params.append(profile)
+    if source_kind is not None:
+        run_conditions.append("r.source_kind = ?")
+        run_params.append(source_kind)
+    if source_id is not None:
+        run_conditions.append("r.source_id = ?")
+        run_params.append(source_id)
 
     run_where = ("WHERE " + " AND ".join(run_conditions)) if run_conditions else ""
 
@@ -472,17 +489,47 @@ async def list_runs(
         {obs_where}
     """
 
-    union_sql = f"""
-        SELECT * FROM ({run_sql}) runs
-        UNION ALL
-        SELECT * FROM ({obs_sql}) observe
-        ORDER BY started_at DESC
-        LIMIT ?
-    """
+    source_filtered = source_kind is not None or source_id is not None
+    if source_filtered:
+        # See the docstring: observe rows can never satisfy a source filter,
+        # so skipping the half (rather than unioning it in and filtering
+        # after) is what makes the filter mean what it says.
+        union_sql = f"""
+            SELECT * FROM ({run_sql}) runs
+            ORDER BY started_at DESC
+            LIMIT ?
+        """
+        all_params: list[Any] = run_params + [limit]
+    else:
+        union_sql = f"""
+            SELECT * FROM ({run_sql}) runs
+            UNION ALL
+            SELECT * FROM ({obs_sql}) observe
+            ORDER BY started_at DESC
+            LIMIT ?
+        """
+        all_params = run_params + obs_params + [limit]
 
-    all_params: list[Any] = run_params + obs_params + [limit]
     rows = await db.execute(union_sql, all_params)
     return [dict(row) for row in await rows.fetchall()]
+
+
+async def list_for_source(
+    db: aiosqlite.Connection,
+    *,
+    source_kind: str,
+    source_id: int,
+    limit: int = DEFAULT_SOURCE_LIMIT,
+) -> list[dict[str, Any]]:
+    """Runs launched from one source row (task/inbox), newest first.
+
+    Clamps ``limit`` here rather than in ``list_runs`` so the Command
+    Center's existing unclamped behaviour is untouched.
+    """
+    capped = max(1, min(int(limit), MAX_SOURCE_LIMIT))
+    return await list_runs(
+        db, limit=capped, source_kind=source_kind, source_id=source_id
+    )
 
 
 async def get_run_by_pane(
