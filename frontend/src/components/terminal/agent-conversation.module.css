@@ -205,6 +205,48 @@
   color: var(--err);
 }
 
+/* One delegation card per `Task`/`Agent` call, in place of the machine-
+   written prompt that used to render as a `YOU` turn. A sibling of `.tool`,
+   one visual step up — an accent left border rather than a new visual
+   language — since it is a call in the transcript, just one whose contents
+   live in a child stream this pane does not render yet. */
+.delegation {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  margin: 5px 0;
+  padding: 7px 11px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--r-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.delegationName {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.delegationTask {
+  color: var(--fg-1);
+  white-space: normal;
+}
+
+.delegationMeta {
+  color: var(--fg-4);
+}
+
+.delegationLive {
+  color: var(--accent);
+}
+
 .errorBlock {
   margin: 5px 0;
   padding: 5px 9px;

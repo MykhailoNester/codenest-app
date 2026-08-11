@@ -68,6 +68,13 @@ export interface ConvToolBlock {
   startedAt: number;
   endedAt: number | null;
   isError: boolean;
+  /** Everything a sub-agent this call spawned emitted, as ordinary turns —
+   *  the same `ConvTurn`/`ConvBlock` shapes the main transcript uses, so a
+   *  child stream needs no renderer of its own. `[]` for every tool that is
+   *  not a delegation, and for a delegation whose sub-agent has not spoken
+   *  yet. Populated only from frames carrying this block's `id` in
+   *  `parent_tool_use_id`. */
+  childTurns: ConvTurn[];
 }
 
 export interface ConvErrorBlock {
@@ -278,6 +285,81 @@ function withToolResult(
   return { ...state, turns };
 }
 
+/** `raw.parent_tool_use_id`, or `null` when the frame is the main agent's.
+ *  An empty string is treated as absent — never a block id (D9). */
+export function frameParentToolUseId(raw: unknown): string | null {
+  return asString(asRecord(raw)?.["parent_tool_use_id"]) || null;
+}
+
+/** Replaces the child stream of the tool block whose `id` is `parentId`,
+ * searching turns, their tool blocks, and those blocks' own child streams —
+ * recursively, so depth is not capped at one. `null` means no block anywhere
+ * in the tree carries that id, which the caller must treat as "drop the
+ * frame" (requirement 4): a machine-written prompt is never shown as the
+ * user's own words. Returns the *same* array reference when `update` made no
+ * change, so an inert frame keeps state identity. */
+function withChildStream(
+  turns: ConvTurn[],
+  parentId: string,
+  update: (childTurns: ConvTurn[]) => ConvTurn[],
+): ConvTurn[] | null {
+  let found = false;
+  let changed = false;
+  const next = turns.map((turn) => {
+    let touchedTurn = false;
+    const blocks = turn.blocks.map((block): ConvBlock => {
+      if (block.type !== "tool") return block;
+      if (block.id === parentId) {
+        found = true;
+        const updated = update(block.childTurns);
+        if (updated === block.childTurns) return block;
+        touchedTurn = true;
+        changed = true;
+        return { ...block, childTurns: updated };
+      }
+      if (block.childTurns.length === 0) return block;
+      const nested = withChildStream(block.childTurns, parentId, update);
+      if (nested === null) return block;
+      found = true;
+      if (nested === block.childTurns) return block;
+      touchedTurn = true;
+      changed = true;
+      return { ...block, childTurns: nested };
+    });
+    return touchedTurn ? { ...turn, blocks } : turn;
+  });
+  if (!found) return null;
+  return changed ? next : turns;
+}
+
+/** Folds a parented frame into its parent block's child stream by running the
+ * ordinary per-kind reducer over a synthetic conversation whose `turns` are
+ * that stream (D4) — so a child turn is built exactly like a main one, dedup,
+ * output cap and all. `null` when the parent is unknown. */
+function applyChildFrame(
+  state: ConversationState,
+  frame: AgentFrame,
+  parentId: string,
+  now: number,
+): ConversationState | null {
+  const turns = withChildStream(state.turns, parentId, (child) => {
+    const childState: ConversationState = { ...emptyConversation(), turns: child };
+    switch (frame.kind) {
+      case "assistant":
+      case "tool_use":
+        return applyAssistantOrToolUse(childState, frame.raw, now).turns;
+      case "tool_result":
+        return applyToolResult(childState, frame.raw, now).turns;
+      case "user":
+        return applyUserFrame(childState, frame.raw, now).turns;
+      default:
+        return child;
+    }
+  });
+  if (turns === null) return null;
+  return turns === state.turns ? state : { ...state, turns };
+}
+
 // ---------------------------------------------------------------------------
 // Tool-call rendering helpers
 // ---------------------------------------------------------------------------
@@ -290,6 +372,12 @@ const TOOL_ARG_KEY: Record<string, string> = {
   Glob: "pattern",
   Grep: "pattern",
   Task: "description",
+  // The wire's actual `tool_use.name` for a delegation is `Agent`, not `Task`
+  // (see `SUBAGENT_TOOL_NAMES`) — without this entry the one-line task read
+  // from `toolArgSummary`'s first-string fallback, which happens to be
+  // `description` today only because that key is first in the wire's input
+  // object (D8).
+  Agent: "description",
 };
 
 /** `Bash`→`command`, `Read|Edit|Write`→`file_path`, `Glob|Grep`→`pattern`,
@@ -684,6 +772,7 @@ function blocksFromAssistantContent(
         startedAt: now,
         endedAt: null,
         isError: false,
+        childTurns: [],
       });
     }
     // "thinking" (redacted text, per Design decision 6) and any other block
@@ -1294,12 +1383,39 @@ function applyControl(
  * `Date.now()` in production) is injected rather than read internally so
  * tests are deterministic (Design decision 10 — every clock in this task is
  * frontend-only; nothing here touches SQLite or a Python datetime).
+ *
+ * `raw.parent_tool_use_id` is read first, before the ordinary per-kind
+ * switch: a frame naming a sub-agent's own emitter is a different message
+ * entirely, not the main session's, and belongs in the delegating
+ * `Task`/`Agent` block's `childTurns` rather than in `state.turns` (Design
+ * decision 3). Only the transcript-shaped kinds — `assistant`, `tool_use`,
+ * `tool_result`, `user` — are re-routed; `delta`/`result` are no-ops when
+ * parented (a sub-agent's tokens must never reach the main stream buffer, and
+ * its turn ending must never idle the pane), and every other kind describes
+ * the session rather than a message and is always applied to the main state —
+ * `permission` above all, since dropping a parented ask would hang the
+ * session on an unanswered `can_use_tool`.
  */
 export function applyFrame(
   state: ConversationState,
   frame: AgentFrame,
   now: number,
 ): ConversationState {
+  const parentId = frameParentToolUseId(frame.raw);
+  if (parentId !== null) {
+    switch (frame.kind) {
+      case "assistant":
+      case "tool_use":
+      case "tool_result":
+      case "user":
+        return applyChildFrame(state, frame, parentId, now) ?? state;
+      case "delta":
+      case "result":
+        return state;
+      default:
+        break;
+    }
+  }
   switch (frame.kind) {
     case "init":
       return applyInit(state, frame, now);
@@ -1368,16 +1484,21 @@ const TOOL_PHRASES: Record<string, { verb: string; one: string; many: string }> 
  *  Three clauses is the most that stays readable on one line at pane width. */
 const SUMMARY_CLAUSE_LIMIT = 3;
 
-/** A run of consecutive tool calls, or a single non-tool block, in render
- *  order. `groupTurnBlocks` never reorders — a summary always sits exactly
- *  where its calls were, between the prose that preceded and followed them. */
+/** A run of consecutive tool calls, a single non-tool block, or one
+ *  delegation, in render order. `groupTurnBlocks` never reorders — a summary
+ *  always sits exactly where its calls were, between the prose that preceded
+ *  and followed them. */
 export type ConvRenderGroup =
   | { kind: "block"; block: ConvBlock; key: string }
-  | { kind: "toolRun"; blocks: ConvToolBlock[]; key: string };
+  | { kind: "toolRun"; blocks: ConvToolBlock[]; key: string }
+  | { kind: "delegation"; block: ConvToolBlock; key: string };
 
 /** Runs of two or more consecutive tool blocks collapse into one `toolRun`;
  *  a lone tool call stays its own row, where its arguments are worth the
- *  width and a summary would only add a layer to open. */
+ *  width and a summary would only add a layer to open. A `Task`/`Agent`
+ *  block never joins either — it flushes whatever run was open and becomes
+ *  its own `delegation` group (Design decision 7), so a card can never be
+ *  buried inside a collapsed "delegating 1 sub-agent" summary. */
 export function groupTurnBlocks(blocks: ConvBlock[]): ConvRenderGroup[] {
   const groups: ConvRenderGroup[] = [];
   let run: ConvToolBlock[] = [];
@@ -1395,6 +1516,11 @@ export function groupTurnBlocks(blocks: ConvBlock[]): ConvRenderGroup[] {
 
   blocks.forEach((block, i) => {
     if (block.type === "tool") {
+      if (isSubagentTool(block.name)) {
+        flush();
+        groups.push({ kind: "delegation", block, key: `del-${block.id}` });
+        return;
+      }
       run.push(block);
       return;
     }
@@ -1458,4 +1584,27 @@ export function toolRunHeadline(blocks: ConvToolBlock[]): ConvToolBlock | null {
  *  error inside a folded run cannot hide. */
 export function toolRunErrorCount(blocks: ConvToolBlock[]): number {
   return blocks.filter((b) => b.isError).length;
+}
+
+/** How many tool calls the sub-agent this block delegated to has made — its
+ *  own child stream only, so a nested delegation's tools are counted on the
+ *  nested card, not double-counted here. `0` until it calls anything, which
+ *  the card renders as *no* clause rather than "0 tools" (the honesty rule
+ *  `agent-session-hud.tsx`'s cells already follow). */
+export function childToolCount(block: ConvToolBlock): number {
+  let count = 0;
+  for (const turn of block.childTurns) {
+    for (const childBlock of turn.blocks) {
+      if (childBlock.type === "tool") count += 1;
+    }
+  }
+  return count;
+}
+
+/** Elapsed for a delegation: exact once `endedAt` is known, else measured
+ *  against the injected `now` (D5 — the clock is the component's, never this
+ *  module's). Never negative. */
+export function delegationElapsedMs(block: ConvToolBlock, now: number): number {
+  const end = block.endedAt ?? now;
+  return Math.max(0, end - block.startedAt);
 }

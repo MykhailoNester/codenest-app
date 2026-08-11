@@ -574,6 +574,7 @@ export function AgentPane({
             onAllowPermissionSession={handleAllowSession}
             onDenyPermission={handleDeny}
             lastControlNote={lastControlNote}
+            onOpenSubagent={(id) => setSelectedView({ kind: "subagent", id })}
           />
         ) : viewedSubagent !== null ? (
           <AgentViewPanel

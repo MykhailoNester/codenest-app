@@ -9,6 +9,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
+  childToolCount,
+  delegationElapsedMs,
   formatDuration,
   groupTurnBlocks,
   splitInlineCode,
@@ -21,6 +23,7 @@ import {
   type ConvToolBlock,
   type ConvTurn,
 } from "../../lib/agent-conversation";
+import { subagentDescription, subagentLabel } from "../../lib/agent-views";
 import { AgentMarkdown } from "./agent-markdown";
 import { AgentPermissionDialog } from "./agent-permission-dialog";
 import styles from "./agent-conversation.module.css";
@@ -37,6 +40,12 @@ interface AgentConversationProps {
    * returns the same state object for a `control` frame (pinned by a test),
    * so `<AgentPane/>` tracks this itself from the raw frame stream. */
   lastControlNote?: string | null;
+  /** Opens the named `Task`/`Agent` block's own view — the sub-agent id, the
+   * same one `viewKey({ kind: "subagent", id })` takes. Required rather than
+   * optional (the reason `agent-session-hud.tsx`'s `paneId` gives): a second
+   * mount that forgot it would silently lose the delegation card's click
+   * target rather than fail to compile. */
+  onOpenSubagent: (id: string) => void;
 }
 
 /**
@@ -184,18 +193,76 @@ function ToolRunRow({
   );
 }
 
+/**
+ * The card a `Task`/`Agent` delegation renders instead of the machine-written
+ * prompt that used to land in the main transcript as a `YOU` turn: agent
+ * name, one-line task, live/ended status, elapsed time, and a tool count once
+ * the sub-agent has made a call. Clicking it opens that sub-agent's own view
+ * (`onOpen`, wired to `setSelectedView({ kind: "subagent", id })` at the
+ * pane).
+ *
+ * The clock is component-local and gated on `running` (Design decision 5),
+ * mirroring `agent-session-hud.tsx`'s own ticker: five parallel delegations
+ * mean five small intervals, each re-rendering only its own card, rather than
+ * one ticker re-rendering the whole transcript.
+ */
+function DelegationCard({
+  block,
+  sessionExited,
+  onOpen,
+}: {
+  block: ConvToolBlock;
+  sessionExited: boolean;
+  onOpen: (id: string) => void;
+}): ReactElement {
+  const running = block.endedAt === null && !sessionExited;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+
+  const label = subagentLabel(block);
+  const description = subagentDescription(block);
+  const tools = childToolCount(block);
+  const statusWord = running ? "running" : block.isError ? "failed" : "done";
+
+  return (
+    <button
+      type="button"
+      className={styles.delegation}
+      onClick={() => onOpen(block.id)}
+      aria-label={`Open sub-agent ${label}`}
+    >
+      <span className={styles.delegationName}>
+        → {label}
+      </span>
+      {description ? <span className={styles.delegationTask}>{description}</span> : null}
+      <span className={`${styles.delegationMeta} ${running ? styles.delegationLive : ""}`}>
+        {statusWord} · {formatDuration(delegationElapsedMs(block, now))}
+        {tools > 0 ? ` · ${tools} tools` : ""}
+      </span>
+    </button>
+  );
+}
+
 function Turn({
   turn,
   expandedTools,
   onToggleTool,
   expandedRuns,
   onToggleRun,
+  sessionExited,
+  onOpenSubagent,
 }: {
   turn: ConvTurn;
   expandedTools: Set<string>;
   onToggleTool: (id: string) => void;
   expandedRuns: Set<string>;
   onToggleRun: (key: string) => void;
+  sessionExited: boolean;
+  onOpenSubagent: (id: string) => void;
 }): ReactElement {
   const isUser = turn.role === "user";
   return (
@@ -216,6 +283,16 @@ function Turn({
               onToggle={() => onToggleRun(group.key)}
               expandedTools={expandedTools}
               onToggleTool={onToggleTool}
+            />
+          );
+        }
+        if (group.kind === "delegation") {
+          return (
+            <DelegationCard
+              key={group.key}
+              block={group.block}
+              sessionExited={sessionExited}
+              onOpen={onOpenSubagent}
             />
           );
         }
@@ -250,6 +327,7 @@ export function AgentConversation({
   onAllowPermissionSession,
   onDenyPermission,
   lastControlNote,
+  onOpenSubagent,
 }: AgentConversationProps): ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -315,6 +393,8 @@ export function AgentConversation({
           onToggleTool={toggleTool}
           expandedRuns={expandedRuns}
           onToggleRun={toggleRun}
+          sessionExited={state.status === "exited"}
+          onOpenSubagent={onOpenSubagent}
         />
       ))}
 
