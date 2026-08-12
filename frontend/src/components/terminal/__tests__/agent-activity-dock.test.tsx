@@ -4,20 +4,30 @@
 // here as the Tools/Agents/Workflows groups, along with the one Stop button
 // in the app that ends a `Workflow` run without killing the whole session.
 //
-// Two cases changed on purpose rather than moving unchanged (D5): "the
-// expansion resets itself when the expanded call/run ends" becomes "the group
-// stays open and re-targets the next live call/run" — per-pane collapse state
-// that survives re-render cannot also derive itself closed per-entity, and the
-// ticket asks for the former.
+// #21 replaced the Agents/Workflows group *bodies* — a single "primary
+// entity" detail panel — with one row per delegation/run/phase-agent, so most
+// of this file's cases now read those rows (`dock-agent-row(s)`,
+// `dock-workflow-row(s)`, `dock-workflow-agent-row`) instead of the old
+// `agent-subagent-detail` / `agent-orchestration-detail` panels, which no
+// longer exist. The `dock()` helper below supplies the dock's required
+// `selectedView`/`onSelectView` pair so every case doesn't have to.
+//
+// Three cases changed on purpose rather than moving unchanged: "the Agents/
+// Workflows group disappears when its call/run completes [/ on an exited
+// session]" becomes "…stays listed…" — the ticket's whole point is that a
+// finished entity keeps its row. "The group stays open and re-targets the
+// next live call/run" becomes "…and both stay listed…" for the same reason.
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { AgentActivityDock } from "../agent-activity-dock";
 import {
   applyFrame,
   emptyConversation,
   type ConversationState,
 } from "../../../lib/agent-conversation";
+import { MAIN_VIEW, type AgentViewId } from "../../../lib/agent-views";
 import { agentStopTask } from "../../../lib/ipc";
 import type { AgentFrame, AgentFrameKind } from "../../../lib/ipc";
 
@@ -131,6 +141,27 @@ function orchestrationTerminalFrame(taskId: string, status: string): AgentFrame 
   return frame("system", { type: "system", subtype: "task_notification", task_id: taskId, status });
 }
 
+const noop = (): void => undefined;
+
+/** Wraps `<AgentActivityDock/>` with the required `selectedView`/
+ *  `onSelectView` pair — every case renders through this rather than the
+ *  component directly, so the dock's now-mandatory selection prop doesn't
+ *  have to be repeated at every call site. */
+function dock(
+  state: ConversationState,
+  over: { selectedView?: AgentViewId; onSelectView?: (id: AgentViewId) => void } = {},
+): ReactElement {
+  return (
+    <AgentActivityDock
+      state={state}
+      cwd={undefined}
+      paneId="p1"
+      selectedView={over.selectedView ?? MAIN_VIEW}
+      onSelectView={over.onSelectView ?? noop}
+    />
+  );
+}
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -139,16 +170,16 @@ afterEach(() => {
 
 describe("AgentActivityDock — presence and the metrics line", () => {
   it("renders nothing at all for a fresh session", () => {
-    render(<AgentActivityDock state={emptyConversation()} cwd={undefined} paneId="p1" />);
+    render(dock(emptyConversation()));
     expect(screen.queryByTestId("agent-activity-dock")).toBeNull();
     expect(screen.queryByTestId("agent-session-hud")).toBeNull();
   });
 
   it("renders the metrics line once init reports a start", () => {
-    render(<AgentActivityDock state={liveState()} cwd={undefined} paneId="p1" />);
-    const dock = screen.getByTestId("agent-activity-dock");
+    render(dock(liveState()));
+    const dockEl = screen.getByTestId("agent-activity-dock");
     const strip = screen.getByTestId("agent-session-hud");
-    expect(dock.contains(strip)).toBe(true);
+    expect(dockEl.contains(strip)).toBe(true);
     expect(strip.querySelector('[data-cell="elapsed"]')).not.toBeNull();
   });
 });
@@ -160,7 +191,7 @@ describe("AgentActivityDock — Tools group", () => {
     state = applyFrame(state, toolUseFrame("t2", { command: "pwd" }), 3_100);
     state = applyFrame(state, toolUseFrame("t3", { file_path: "a.ts" }, "Read"), 3_200);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const group = screen.getByTestId("dock-group-tools");
     expect(group.textContent).toContain("Running 2 commands, reading 1 file");
     // Pins the reuse of `toolRunHeadline` — a second summariser would name a
@@ -177,7 +208,7 @@ describe("AgentActivityDock — Tools group", () => {
     state = applyFrame(state, toolResultFrame("t1"), 3_200);
     state = applyFrame(state, toolResultFrame("t2"), 3_300);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     expect(screen.queryByTestId("dock-group-tools")).toBeNull();
   });
 
@@ -186,7 +217,7 @@ describe("AgentActivityDock — Tools group", () => {
     vi.setSystemTime(1_000_000);
     const state = applyFrame(liveState(), toolUseFrame("t1", { command: "ls" }), 1_000_000 - 1_000);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const before = screen.getByTestId("dock-group-tools").textContent;
 
     act(() => {
@@ -199,12 +230,12 @@ describe("AgentActivityDock — Tools group", () => {
 
   it("renders no Tools group on an exited session", () => {
     let state = applyFrame(liveState(), toolUseFrame("t1", { command: "ls" }), 3_000);
-    const live = render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    const live = render(dock(state));
     expect(screen.getByTestId("dock-group-tools")).not.toBeNull();
     live.unmount();
 
     state = applyFrame(state, frame("exit", { exit_code: 0 }), 4_000);
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     expect(screen.queryByTestId("dock-group-tools")).toBeNull();
   });
 });
@@ -215,7 +246,7 @@ describe("AgentActivityDock — Agents group", () => {
     vi.setSystemTime(1_000_000);
     const state = taskState("planner-agent", "Plan the migration", 1_000_000 - 12_000);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const group = screen.getByTestId("dock-group-agents");
     expect(group.textContent).toContain("planner-agent");
     expect(group.textContent).toContain("12s");
@@ -224,7 +255,7 @@ describe("AgentActivityDock — Agents group", () => {
   it("a live Task owns the Agents group and not the Tools group", () => {
     const state = taskState("planner-agent", "d", 1_000);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     expect(screen.queryByTestId("dock-group-tools")).toBeNull();
     expect(screen.queryByTestId("dock-group-agents")).not.toBeNull();
   });
@@ -233,7 +264,7 @@ describe("AgentActivityDock — Agents group", () => {
     let state = taskState("planner-agent", "d", 1_000);
     state = applyFrame(state, toolUseFrame("toolu_bash", { command: "ls" }), 1_500);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     expect(screen.getByTestId("dock-group-tools")).not.toBeNull();
     expect(screen.getByTestId("dock-group-agents")).not.toBeNull();
   });
@@ -254,51 +285,73 @@ describe("AgentActivityDock — Agents group", () => {
       1_000_000 - 5_000,
     );
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const group = screen.getByTestId("dock-group-agents");
     expect(group.textContent).toContain("2 sub-agents");
     // Timed from the oldest (toolu_a), not the newest.
     expect(group.textContent).toContain("20s");
   });
 
-  it("the Agents group disappears when the sub-agent completes", () => {
+  it("a completed sub-agent stays listed, marked done", () => {
     let state = taskState("planner-agent", "d", 1_000);
-    const { rerender } = render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    const { rerender } = render(dock(state));
     expect(screen.getByTestId("dock-group-agents")).not.toBeNull();
 
     state = applyFrame(state, toolResultFrame("toolu_sub", false), 2_000);
-    rerender(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
-    expect(screen.queryByTestId("dock-group-agents")).toBeNull();
-    expect(screen.queryByTestId("agent-subagent-detail")).toBeNull();
+    rerender(dock(state));
+    // The group and its row survive completion — the opposite of the old
+    // "disappears when the sub-agent completes" behaviour this case pinned.
+    expect(screen.getByTestId("dock-group-agents")).not.toBeNull();
+
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    const row = screen.getByTestId("dock-agent-row");
+    expect(row.querySelector('[class*="dotDone"]')).not.toBeNull();
+    expect(row.textContent).toContain("1.0s");
+    expect(row.textContent).not.toContain("running");
   });
 
-  it("the Agents group disappears when the sub-agent errors", () => {
+  it("a failed sub-agent stays listed with a failed dot", () => {
     let state = taskState("planner-agent", "d", 1_000);
-    const { rerender } = render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    const { rerender } = render(dock(state));
 
     state = applyFrame(state, toolResultFrame("toolu_sub", true), 2_000);
-    rerender(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
-    expect(screen.queryByTestId("dock-group-agents")).toBeNull();
-    expect(screen.queryByTestId("agent-subagent-detail")).toBeNull();
+    rerender(dock(state));
+    expect(screen.getByTestId("dock-group-agents")).not.toBeNull();
+
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    const row = screen.getByTestId("dock-agent-row");
+    expect(row.querySelector('[class*="dotFailed"]')).not.toBeNull();
   });
 
-  it("renders no Agents group on an exited session", () => {
+  it("an exited session still lists its delegations and calls none of them running", () => {
     let state = taskState("planner-agent", "d", 1_000);
     state = applyFrame(state, frame("exit", { exit_code: 0 }), 4_000);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
-    expect(screen.queryByTestId("dock-group-agents")).toBeNull();
+    render(dock(state));
+    const group = screen.getByTestId("dock-group-agents");
+    expect(group).not.toBeNull();
+
+    fireEvent.click(group.querySelector("button") as HTMLButtonElement);
+    const row = screen.getByTestId("dock-agent-row");
+    // The wire never reported this call's end (the process died first), so
+    // the row reads "ended", never "running" and never "done".
+    expect(row.querySelector('[class*="dotEnded"]')).not.toBeNull();
+    expect(row.textContent).not.toContain("running");
   });
 
   it("renders no Agents group and no detail panel when nothing is delegated", () => {
-    render(<AgentActivityDock state={liveState()} cwd={undefined} paneId="p1" />);
+    render(dock(liveState()));
     expect(screen.queryByTestId("dock-group-agents")).toBeNull();
     expect(screen.queryByTestId("agent-subagent-detail")).toBeNull();
   });
 
   it("clicking the header expands the sub-agent detail and clicking again collapses it", () => {
     const state = taskState("planner-agent", "Plan the migration", 1_000);
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
 
     const button = screen
       .getByTestId("dock-group-agents")
@@ -307,20 +360,20 @@ describe("AgentActivityDock — Agents group", () => {
 
     fireEvent.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
-    const detail = screen.getByTestId("agent-subagent-detail");
-    expect(detail.textContent).toContain("planner-agent");
-    expect(detail.textContent).toContain("Plan the migration");
-    expect(detail.textContent).toContain("running");
+    const rows = screen.getByTestId("dock-agent-rows");
+    expect(rows.textContent).toContain("planner-agent");
+    expect(rows.textContent).toContain("Plan the migration");
+    expect(rows.textContent).toContain("running");
 
     fireEvent.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("agent-subagent-detail")).toBeNull();
+    expect(screen.queryByTestId("dock-agent-rows")).toBeNull();
   });
 
-  it("the group stays open and re-targets the next live call when the expanded one ends", () => {
+  it("the group stays open and both calls stay listed when the older one ends", () => {
     let state = withTask(liveState(), "toolu_a", { subagent_type: "planner", description: "p" }, 1_000);
     state = withTask(state, "toolu_b", { subagent_type: "coder", description: "c" }, 2_000);
-    const { rerender } = render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    const { rerender } = render(dock(state));
 
     const button = screen
       .getByTestId("dock-group-agents")
@@ -328,16 +381,17 @@ describe("AgentActivityDock — Agents group", () => {
     fireEvent.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
 
-    // The oldest call (toolu_a, the one showing) finishes; toolu_b runs on.
+    // The oldest call (toolu_a) finishes; toolu_b runs on.
     state = applyFrame(state, toolResultFrame("toolu_a", false), 3_000);
-    rerender(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    rerender(dock(state));
 
     // The group stays open (D5) rather than deriving itself closed…
     const newButton = screen.getByTestId("dock-group-agents").querySelector("button");
     expect(newButton?.getAttribute("aria-expanded")).toBe("true");
-    // …and its body now names the surviving call, not the dead one.
-    const detail = screen.getByTestId("agent-subagent-detail");
-    expect(detail.textContent).toContain("coder");
+    // …and its body still names both calls, not just the survivor.
+    const rows = screen.getByTestId("dock-agent-rows");
+    expect(rows.textContent).toContain("planner");
+    expect(rows.textContent).toContain("coder");
   });
 
   it("the elapsed value ticks while a sub-agent runs", () => {
@@ -345,7 +399,7 @@ describe("AgentActivityDock — Agents group", () => {
     vi.setSystemTime(1_000_000);
     const state = taskState("planner-agent", "d", 1_000_000 - 1_000);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const before = screen.getByTestId("dock-group-agents").textContent;
 
     act(() => {
@@ -357,11 +411,89 @@ describe("AgentActivityDock — Agents group", () => {
   });
 });
 
+describe("AgentActivityDock — Agents group rows", () => {
+  it("five parallel sub-agents of the same type render five individually identifiable rows", () => {
+    let state = liveState();
+    const descriptions = ["Scan A", "Scan B", "Scan C", "Scan D", "Scan E"];
+    descriptions.forEach((description, i) => {
+      state = withTask(
+        state,
+        `toolu_${i}`,
+        { subagent_type: "general-purpose", description },
+        1_000 + i,
+      );
+    });
+
+    render(dock(state));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+
+    expect(screen.getAllByTestId("dock-agent-row")).toHaveLength(5);
+    const rowsText = screen.getByTestId("dock-agent-rows").textContent ?? "";
+    for (const description of descriptions) {
+      expect(rowsText).toContain(description);
+    }
+  });
+
+  it("a running row reads the word running; a finished row reads its exact duration", () => {
+    let state = withTask(liveState(), "toolu_a", { subagent_type: "planner", description: "p" }, 1_000);
+    state = applyFrame(state, toolResultFrame("toolu_a", false), 3_000);
+    state = withTask(state, "toolu_b", { subagent_type: "coder", description: "c" }, 4_000);
+
+    render(dock(state));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+
+    const rows = screen.getAllByTestId("dock-agent-row");
+    expect(rows[0]?.textContent).toContain("2.0s");
+    expect(rows[0]?.textContent).not.toContain("running");
+    expect(rows[1]?.textContent).toContain("running");
+  });
+
+  it("row order does not change when a running agent finishes", () => {
+    let state = withTask(liveState(), "toolu_a", { subagent_type: "planner", description: "p" }, 1_000);
+    state = withTask(state, "toolu_b", { subagent_type: "coder", description: "c" }, 2_000);
+    const { rerender } = render(dock(state));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+
+    const before = screen
+      .getAllByTestId("dock-agent-row")
+      .map((row) => row.getAttribute("data-view-key"));
+
+    state = applyFrame(state, toolResultFrame("toolu_a", false), 3_000);
+    rerender(dock(state));
+
+    const after = screen
+      .getAllByTestId("dock-agent-row")
+      .map((row) => row.getAttribute("data-view-key"));
+    expect(after).toEqual(before);
+  });
+
+  it("clicking an agent row asks the pane to show that sub-agent", () => {
+    const state = taskState("planner-agent", "d", 1_000);
+    const onSelectView = vi.fn();
+    render(dock(state, { onSelectView }));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+
+    fireEvent.click(
+      screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement,
+    );
+    expect(onSelectView).toHaveBeenCalledTimes(1);
+    expect(onSelectView).toHaveBeenCalledWith({ kind: "subagent", id: "toolu_sub" });
+  });
+});
+
 describe("AgentActivityDock — Workflows group", () => {
   it("renders no Workflows group and no panel when nothing is orchestrating", () => {
-    render(<AgentActivityDock state={liveState()} cwd={undefined} paneId="p1" />);
+    render(dock(liveState()));
     expect(screen.queryByTestId("dock-group-workflows")).toBeNull();
-    expect(screen.queryByTestId("agent-orchestration-detail")).toBeNull();
+    expect(screen.queryByTestId("dock-workflow-rows")).toBeNull();
   });
 
   it("names the orchestration and its phase and agent counts while it runs", () => {
@@ -381,7 +513,7 @@ describe("AgentActivityDock — Workflows group", () => {
       1_000_000 - 4_000,
     );
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const group = screen.getByTestId("dock-group-workflows");
     expect(group.textContent).toContain("wire-probe");
     expect(group.textContent).toContain("2 phases");
@@ -399,29 +531,42 @@ describe("AgentActivityDock — Workflows group", () => {
       1_500,
     );
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const group = screen.getByTestId("dock-group-workflows");
     expect(group.textContent).not.toContain("phase");
     expect(group.textContent).toContain("0/1 agents");
   });
 
-  it("the Workflows group disappears when the run completes", () => {
+  it("a completed run stays listed and stops offering Stop", () => {
     let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
-    const { rerender } = render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    const { rerender } = render(dock(state));
     expect(screen.getByTestId("dock-group-workflows")).not.toBeNull();
 
     state = applyFrame(state, orchestrationTerminalFrame("wf1", "completed"), 2_000);
-    rerender(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
-    expect(screen.queryByTestId("dock-group-workflows")).toBeNull();
-    expect(screen.queryByTestId("agent-orchestration-detail")).toBeNull();
+    rerender(dock(state));
+    // The group and its row survive completion — the opposite of the old
+    // "disappears when the run completes" behaviour this case pinned.
+    expect(screen.getByTestId("dock-group-workflows")).not.toBeNull();
+
+    fireEvent.click(
+      screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
+    );
+    expect(screen.getByTestId("dock-workflow-rows")).not.toBeNull();
+    expect(screen.queryByText("Stop")).toBeNull();
   });
 
-  it("renders no Workflows group on an exited session", () => {
+  it("an exited session still lists its runs and calls none of them running", () => {
     let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
     state = applyFrame(state, frame("exit", { exit_code: 0 }), 2_000);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
-    expect(screen.queryByTestId("dock-group-workflows")).toBeNull();
+    render(dock(state));
+    const group = screen.getByTestId("dock-group-workflows");
+    expect(group).not.toBeNull();
+
+    fireEvent.click(group.querySelector("button") as HTMLButtonElement);
+    const row = screen.getByTestId("dock-workflow-row");
+    expect(row.querySelector('[class*="dotEnded"]')).not.toBeNull();
+    expect(screen.queryByText("Stop")).toBeNull();
   });
 
   it("clicking the header expands the phase tree and clicking again collapses it", () => {
@@ -438,7 +583,7 @@ describe("AgentActivityDock — Workflows group", () => {
       1_500,
     );
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const button = screen
       .getByTestId("dock-group-workflows")
       .querySelector("button") as HTMLButtonElement;
@@ -446,18 +591,18 @@ describe("AgentActivityDock — Workflows group", () => {
 
     fireEvent.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
-    const detail = screen.getByTestId("agent-orchestration-detail");
-    expect(detail.textContent).toContain("wire-probe");
-    expect(detail.textContent).toContain("1 phase");
-    expect(detail.textContent).toContain("0/1 agents");
-    expect(detail.textContent).toContain("4k");
+    const rows = screen.getByTestId("dock-workflow-rows");
+    expect(rows.textContent).toContain("wire-probe");
+    expect(rows.textContent).toContain("1 phase");
+    expect(rows.textContent).toContain("0/1 agents");
+    expect(rows.textContent).toContain("4k");
 
     fireEvent.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("agent-orchestration-detail")).toBeNull();
+    expect(screen.queryByTestId("dock-workflow-rows")).toBeNull();
   });
 
-  it("the expanded panel lists each phase with one status-pilled row per agent", () => {
+  it("the expanded panel lists each phase with one dot-marked row per agent", () => {
     let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
     state = applyFrame(
       state,
@@ -471,29 +616,22 @@ describe("AgentActivityDock — Workflows group", () => {
       1_500,
     );
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     fireEvent.click(
       screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
     );
 
-    const detail = screen.getByTestId("agent-orchestration-detail");
-    // Scoped to the exact `.detailAgent` row class — `[class*="detailAgent_"]`
-    // (trailing underscore) does not also match the sibling `.detailAgentLabel`
-    // class the CSS-module hasher produces (same idiom as
-    // `context-picker.test.tsx`'s `[class*='pickerRowTitle']`).
-    const rows = detail.querySelectorAll('[class*="detailAgent_"]');
+    const rows = screen.getAllByTestId("dock-workflow-agent-row");
     expect(rows).toHaveLength(2);
 
-    const runningPill = rows[0]?.querySelector(".d3-status");
-    expect(runningPill?.className).toContain("d3-status--active");
-    expect(runningPill?.querySelector(".d3-status__pulse")).not.toBeNull();
+    expect(rows[0]?.querySelector('[class*="dotRunning"]')).not.toBeNull();
+    expect(rows[0]?.querySelector(".d3-status__pulse")).not.toBeNull();
 
-    const donePill = rows[1]?.querySelector(".d3-status");
-    expect(donePill?.className).toContain("d3-status--active");
-    expect(donePill?.querySelector(".d3-status__pulse")).toBeNull();
+    expect(rows[1]?.querySelector('[class*="dotDone"]')).not.toBeNull();
+    expect(rows[1]?.querySelector(".d3-status__pulse")).toBeNull();
   });
 
-  it("an errored agent renders the amber pill and its error text", () => {
+  it("an errored workflow agent renders a warn dot and its error text", () => {
     let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
     state = applyFrame(
       state,
@@ -505,22 +643,20 @@ describe("AgentActivityDock — Workflows group", () => {
       1_500,
     );
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     fireEvent.click(
       screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
     );
 
-    const detail = screen.getByTestId("agent-orchestration-detail");
-    const row = detail.querySelector('[class*="detailAgent_"]');
-    const pill = row?.querySelector(".d3-status");
-    expect(pill?.className).toContain("d3-status--idle");
-    expect(row?.textContent).toContain("boom");
+    const row = screen.getByTestId("dock-workflow-agent-row");
+    expect(row.querySelector('[class*="dotWarn"]')).not.toBeNull();
+    expect(row.textContent).toContain("boom");
   });
 
   it("Stop calls agentStopTask with the pane id and the run's task_id, then disables itself", () => {
     const state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     fireEvent.click(
       screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
     );
@@ -536,15 +672,19 @@ describe("AgentActivityDock — Workflows group", () => {
     fireEvent.click(stopButton);
     expect(agentStopTask).toHaveBeenCalledTimes(1);
 
-    // No optimistic status change: the panel still reads the wire's own
-    // "running" state, not a locally-guessed "stopped".
-    expect(screen.getByTestId("agent-orchestration-detail").textContent).toContain("running");
+    // No optimistic status change: the row still reads the wire's own live
+    // state — the literal word "running" — not a locally-guessed "stopped".
+    expect(screen.getByTestId("dock-workflow-rows").textContent).toContain("running");
   });
 
-  it("the group stays open and re-targets the next live run when the expanded one ends", () => {
+  it("the group stays open and both runs stay listed when the older one ends", () => {
     let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
-    state = applyFrame(state, orchestrationTaskStartedFrame("wf2"), 2_000);
-    const { rerender } = render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    state = applyFrame(
+      state,
+      orchestrationTaskStartedFrame("wf2", { workflow_name: "wire-probe-2" }),
+      2_000,
+    );
+    const { rerender } = render(dock(state));
 
     const button = screen
       .getByTestId("dock-group-workflows")
@@ -552,15 +692,16 @@ describe("AgentActivityDock — Workflows group", () => {
     fireEvent.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
 
-    // The primary (oldest, wf1) run finishes; wf2 runs on.
+    // The older (wf1) run finishes; wf2 runs on.
     state = applyFrame(state, orchestrationTerminalFrame("wf1", "completed"), 3_000);
-    rerender(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    rerender(dock(state));
 
     // The group stays open (D5) rather than deriving itself closed, and its
-    // body now names the surviving run, not the dead one.
+    // body still names both runs, not just the survivor.
     const newButton = screen.getByTestId("dock-group-workflows").querySelector("button");
     expect(newButton?.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("agent-orchestration-detail")).not.toBeNull();
+    expect(screen.getByTestId("dock-workflow-rows").textContent).toContain("wire-probe-2");
+    expect(screen.getAllByTestId("dock-workflow-row")).toHaveLength(2);
   });
 
   it("a live Task and a live orchestration render as two separate groups", () => {
@@ -571,7 +712,7 @@ describe("AgentActivityDock — Workflows group", () => {
       1_500,
     );
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     expect(screen.getByTestId("dock-group-agents")).not.toBeNull();
     expect(screen.getByTestId("dock-group-workflows")).not.toBeNull();
   });
@@ -581,7 +722,7 @@ describe("AgentActivityDock — Workflows group", () => {
     vi.setSystemTime(1_000_000);
     const state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000_000 - 1_000);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const before = screen.getByTestId("dock-group-workflows").textContent;
 
     act(() => {
@@ -593,12 +734,77 @@ describe("AgentActivityDock — Workflows group", () => {
   });
 });
 
+describe("AgentActivityDock — Workflows group rows", () => {
+  it("a phase agent row is not a click target", () => {
+    let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
+    state = applyFrame(
+      state,
+      orchestrationProgressFrame("wf1", {
+        workflow_progress: [{ type: "workflow_agent", index: 1, label: "red", state: "start" }],
+      }),
+      1_500,
+    );
+
+    render(dock(state));
+    fireEvent.click(
+      screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
+    );
+
+    const row = screen.getByTestId("dock-workflow-agent-row");
+    expect(row.querySelector("button")).toBeNull();
+  });
+
+  it("a run row offers Stop only while it is running", () => {
+    let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
+    const { rerender } = render(dock(state));
+    fireEvent.click(
+      screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
+    );
+    expect(screen.queryByText("Stop")).not.toBeNull();
+
+    state = applyFrame(state, orchestrationTerminalFrame("wf1", "completed"), 2_000);
+    rerender(dock(state));
+    expect(screen.queryByText("Stop")).toBeNull();
+  });
+
+  it("clicking a workflow row asks the pane to show that run", () => {
+    const state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
+    const onSelectView = vi.fn();
+    render(dock(state, { onSelectView }));
+    fireEvent.click(
+      screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
+    );
+
+    fireEvent.click(
+      screen.getByTestId("dock-workflow-row").querySelector("button") as HTMLButtonElement,
+    );
+    expect(onSelectView).toHaveBeenCalledTimes(1);
+    expect(onSelectView).toHaveBeenCalledWith({ kind: "workflow", taskId: "wf1" });
+  });
+});
+
+describe("AgentActivityDock — selection", () => {
+  it("the row matching the current selection is marked", () => {
+    let state = withTask(liveState(), "toolu_a", { subagent_type: "planner", description: "p" }, 1_000);
+    state = withTask(state, "toolu_b", { subagent_type: "coder", description: "c" }, 2_000);
+
+    render(dock(state, { selectedView: { kind: "subagent", id: "toolu_a" } }));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+
+    const rows = screen.getAllByTestId("dock-agent-row");
+    expect(rows[0]?.querySelector("button")?.getAttribute("aria-current")).toBe("true");
+    expect(rows[1]?.querySelector("button")?.getAttribute("aria-current")).toBeNull();
+  });
+});
+
 describe("AgentActivityDock — collapse state and layout", () => {
   it("each group collapses independently and the state survives a re-render", () => {
     let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
     state = applyFrame(state, toolUseFrame("t1", { command: "ls" }), 1_500);
 
-    const { rerender } = render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    const { rerender } = render(dock(state));
 
     const toolsButton = screen
       .getByTestId("dock-group-tools")
@@ -616,7 +822,7 @@ describe("AgentActivityDock — collapse state and layout", () => {
     // A fresh state object (same content, new reference) — the collapse flags
     // are component state, not something re-derived from `state` on the fly.
     const freshState: ConversationState = { ...state };
-    rerender(<AgentActivityDock state={freshState} cwd={undefined} paneId="p1" />);
+    rerender(dock(freshState));
 
     const toolsButtonAfter = screen
       .getByTestId("dock-group-tools")
@@ -632,7 +838,7 @@ describe("AgentActivityDock — collapse state and layout", () => {
   it("collapse state survives a phase with nothing to report", () => {
     let state = liveState();
     state = applyFrame(state, toolUseFrame("t1", { command: "ls" }), 1_500);
-    const { rerender } = render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    const { rerender } = render(dock(state));
 
     const toolsButton = screen
       .getByTestId("dock-group-tools")
@@ -644,12 +850,12 @@ describe("AgentActivityDock — collapse state and layout", () => {
     // dock itself stays mounted (the metrics line still has something to
     // show), so the collapse flag is not reset by a remount.
     const resolved = applyFrame(state, toolResultFrame("t1", false), 2_000);
-    rerender(<AgentActivityDock state={resolved} cwd={undefined} paneId="p1" />);
+    rerender(dock(resolved));
     expect(screen.queryByTestId("dock-group-tools")).toBeNull();
 
     // A new live run starts — the group reappears still collapsed.
     const again = applyFrame(resolved, toolUseFrame("t2", { command: "pwd" }), 3_000);
-    rerender(<AgentActivityDock state={again} cwd={undefined} paneId="p1" />);
+    rerender(dock(again));
     const toolsButtonAgain = screen
       .getByTestId("dock-group-tools")
       .querySelector("button");
@@ -661,12 +867,12 @@ describe("AgentActivityDock — collapse state and layout", () => {
     state = withTask(state, "toolu_sub", { subagent_type: "planner", description: "d" }, 1_500);
     state = applyFrame(state, toolUseFrame("t1", { command: "ls" }), 2_000);
 
-    render(<AgentActivityDock state={state} cwd={undefined} paneId="p1" />);
+    render(dock(state));
     const toolsGroup = screen.getByTestId("dock-group-tools");
     const agentsGroup = screen.getByTestId("dock-group-agents");
     const workflowsGroup = screen.getByTestId("dock-group-workflows");
     const strip = screen.getByTestId("agent-session-hud");
-    const dock = screen.getByTestId("agent-activity-dock");
+    const dockEl = screen.getByTestId("agent-activity-dock");
 
     const container = toolsGroup.parentElement;
     expect(container).not.toBeNull();
@@ -675,7 +881,7 @@ describe("AgentActivityDock — collapse state and layout", () => {
     // The scroll box is its own element, distinct from the dock root and never
     // an ancestor of the metrics strip — the strip must stay pinned even while
     // the group stack scrolls.
-    expect(container).not.toBe(dock);
+    expect(container).not.toBe(dockEl);
     expect(container?.contains(strip)).toBe(false);
   });
 });

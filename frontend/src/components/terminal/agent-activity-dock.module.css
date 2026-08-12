@@ -127,3 +127,138 @@
   color: var(--fg-4);
   flex: none;
 }
+
+/* Agents/Workflows group bodies (#21) — one row per delegation/run/phase-agent,
+   all sharing the same `<DockRow/>` shape so the three kinds cannot drift
+   into three different layouts. */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Button reset matching `.groupHead` above — shared by the interactive
+   (`<button>`) and non-interactive (phase-agent `<div>`) row bodies, so a
+   phase-agent row lines up with the click-target rows around it. */
+.rowMain {
+  appearance: none;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rowMain:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.rowSelected {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.rowIndent {
+  padding-left: 14px;
+}
+
+/* Same 22ch clip `.cellLabel` (`session-hud.module.css`) applies to the
+   metrics strip — a pathologically long `subagent_type` must not stretch a
+   row past the dock's own width. */
+.rowName {
+  color: var(--fg-1);
+  flex: none;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowDesc {
+  color: var(--fg-3);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta,
+.rowElapsed {
+  color: var(--fg-3);
+  flex: none;
+  white-space: nowrap;
+}
+
+.rowLive {
+  color: var(--violet);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+  display: inline-block;
+}
+
+.dotRunning {
+  color: var(--ok);
+}
+
+.dotDone {
+  color: var(--ok);
+}
+
+.dotFailed {
+  color: var(--err);
+}
+
+.dotWarn {
+  color: var(--warn);
+}
+
+.dotEnded {
+  color: var(--fg-4);
+}
+
+.phase {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 6px;
+}
+
+.phaseTitle {
+  color: var(--fg-2);
+  font-weight: 600;
+  padding: 2px 4px;
+}
+
+/* Geometry only, re-declared from the strip's now-orphaned `.detailStop`
+   (`session-hud.module.css:273-277`) rather than importing that module just
+   for this — the red border/colour still come from `d3-btn d3-btn--sm` plus
+   the same two inline properties the Stop button has always set. */
+.rowStop {
+  font: inherit;
+  padding: 2px 8px;
+  cursor: pointer;
+}

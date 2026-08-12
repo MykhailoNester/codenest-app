@@ -598,8 +598,19 @@ export function AgentPane({
         {/* Zone B — the activity dock. A *sibling* of `.viewport`, never a
             child: inside it, it would scroll away with the transcript.
             Mounted unconditionally so its collapse state survives the phases
-            where it has nothing to report and renders null. */}
-        <AgentActivityDock state={conv} cwd={cwd} paneId={leafId} />
+            where it has nothing to report and renders null. Its rows and the
+            composer's picker below are two views of the same `selectedView`
+            state — the dock takes the resolved value and the setter as a
+            prop pair rather than owning a second copy, so clicking a row
+            here and picking the same entity in the composer can never
+            disagree. */}
+        <AgentActivityDock
+          state={conv}
+          cwd={cwd}
+          paneId={leafId}
+          selectedView={effectiveView}
+          onSelectView={setSelectedView}
+        />
 
         {/*
           A dead session shows its status bar *above* a still-mounted composer
