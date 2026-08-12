@@ -14,7 +14,7 @@
  * keep the session — and the conversation, and the draft — when it does.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DragEvent, ReactElement } from "react";
 import {
   agentStart,
@@ -42,14 +42,21 @@ import { AgentViewPanel } from "./agent-view-panel";
 import {
   findOrchestration,
   findSubagent,
+  findToolBlock,
   listAgentViews,
   MAIN_VIEW,
   resolveView,
+  viewKey,
   type AgentViewId,
 } from "../../lib/agent-views";
 import { AgentActivityDock } from "./agent-activity-dock";
 import { Icon } from "../icon";
 import styles from "./agent-pane.module.css";
+
+/** The stick-to-bottom threshold Effect A's scroll listener applies — how
+ *  close to the bottom counts as "still pinned". Carries the same figure the
+ *  `<AgentConversation/>` listener this replaced used. */
+const STICK_TO_BOTTOM_PX = 40;
 
 interface AgentPaneProps {
   leafId: string;
@@ -239,11 +246,23 @@ export function AgentPane({
   const restartRef = useRef(false);
   /**
    * The pane's single scroll viewport (`.viewport`, agent-pane.module.css),
-   * shared by all three body views below. `<AgentConversation/>` measures
-   * and scrolls this element rather than owning a scroller of its own — see
-   * its `scrollRef` prop's doc comment.
+   * shared by all three body views below. The pane measures and scrolls this
+   * element itself (Effects A-D below) — the transcript and every drill-in
+   * view are plain content with no overflow of their own.
    */
   const viewportRef = useRef<HTMLDivElement>(null);
+  /** How far into a view's own content the user had scrolled, and whether
+   *  they were pinned to its bottom, keyed by `viewKey(effectiveView)`. A
+   *  ref-held Map: nothing renders from it and writing it must not
+   *  re-render. Its lifetime is this mount — the same lifetime
+   *  `selectedView` and the dock's collapse state already have, so a
+   *  sibling-close remount resets all three together rather than leaving
+   *  one stale. */
+  const scrollMemoryRef = useRef(new Map<string, { top: number; stick: boolean }>());
+  /** Stick-to-bottom for the view currently on screen; mirrored into the map
+   *  above on every switch (Effect B). A view never seen before starts
+   *  pinned. */
+  const stickRef = useRef(true);
 
   useEffect(() => {
     // See the doc comment on `startedPanes` above (review round 1, F1) —
@@ -462,11 +481,109 @@ export function AgentPane({
   // restart, a session that exited — falls back to the transcript instead of
   // rendering an empty panel for something that no longer exists.
   const effectiveView = resolveView(conv, selectedView);
+  const viewKeyStr = viewKey(effectiveView);
   const agentViews = listAgentViews(conv);
   const viewedSubagent =
     effectiveView.kind === "subagent" ? findSubagent(conv, effectiveView.id) : null;
   const viewedRun =
     effectiveView.kind === "workflow" ? findOrchestration(conv, effectiveView.taskId) : null;
+  // The workflow view's own stream: frames the wire parented to the
+  // `Workflow` block itself (`OrchestrationRun.toolUseId`), not to any one
+  // agent inside it — the only stream an orchestration can have (see the
+  // plan's Scope/Out and Design decision 5). `[]` when the wire parented
+  // nothing there, or when the view is not a workflow at all; either way
+  // `<AgentViewPanel/>` renders no stream section for an empty array.
+  const viewedRunTurns =
+    viewedRun?.toolUseId != null
+      ? (findToolBlock(conv, viewedRun.toolUseId)?.childTurns ?? [])
+      : [];
+
+  // Effect A — one scroll listener for the pane's life. `viewportRef`'s
+  // element is rendered unconditionally (below), so it is the same DOM node
+  // for the whole mount and a re-subscribe per view switch would be pointless
+  // churn; `stickRef` is what Effects B-D read and set instead.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onScroll = (): void => {
+      stickRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM_PX;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+
+  // Effect B — restores the view being switched *to*, and saves the view
+  // being switched *away from*, in the same effect: the cleanup closes over
+  // the `viewKeyStr` this run applied to, which is exactly the outgoing view
+  // by the time the next run's cleanup fires, so restore and save can never
+  // disagree about which view they describe. `useLayoutEffect`, not
+  // `useEffect`, so the restored offset is in place before paint — otherwise
+  // the user would see the bottom flash past on every switch.
+  useLayoutEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    // Captured once per run rather than read again in the cleanup: the ref's
+    // own `.current` is a stable `Map` for this mount's whole life (nothing
+    // ever replaces it), but `react-hooks/exhaustive-deps` cannot know that
+    // and warns generically about reading `.current` inside a cleanup —
+    // this local binding is what it asks for either way.
+    const memory = scrollMemoryRef.current;
+    const saved = memory.get(viewKeyStr);
+    if (saved === undefined) {
+      // A view this mount has never shown starts pinned to the bottom — the
+      // right default for a stream the user has not scrolled in yet.
+      stickRef.current = true;
+      el.scrollTop = el.scrollHeight;
+    } else {
+      stickRef.current = saved.stick;
+      el.scrollTop = saved.stick ? el.scrollHeight : saved.top;
+    }
+    return () => {
+      memory.set(viewKeyStr, { top: el.scrollTop, stick: stickRef.current });
+    };
+  }, [viewKeyStr]);
+
+  // Effect C — the moved stick-to-bottom: a new frame pins the viewport only
+  // when the user has not scrolled away from it. `conv.turns` changes
+  // identity for a *child* frame too (`withChildStream`/`applyChildFrame`
+  // return fresh arrays/state), so this one dependency covers the main
+  // transcript and every child stream a drill-in view renders.
+  useEffect(() => {
+    if (!stickRef.current) return;
+    const el = viewportRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [conv.turns, conv.streamText, conv.thinking]);
+
+  const permission = conv.permissions[0];
+
+  // Effect D — a pending permission request blocks the session, so it is
+  // scrolled into view whether or not the user was stuck to the bottom —
+  // unlike ordinary output, which must not yank a scrolled-back reader down.
+  // Without this, a request that arrived while reading scrollback left the
+  // pane looking hung with the dialog off screen; and when the next request
+  // in a queue took the first one's place, the replacement could render
+  // below the fold. Scoped to the `main` view: `<AgentPermissionDialog/>`
+  // only renders there (below), so forcing a drill-in view to the bottom for
+  // a dialog the user cannot see there would be a yank with no payoff.
+  useEffect(() => {
+    if (permission === undefined) return;
+    if (effectiveView.kind !== "main") return;
+    const el = viewportRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    stickRef.current = true;
+  }, [permission, effectiveView.kind]);
+
+  /** Opens the named `Task`/`Agent` block's own drill-in view — the click
+   *  target for every delegation card, wherever it renders (the main
+   *  transcript, a sub-agent's own stream, a workflow's own stream). */
+  function openSubagent(id: string): void {
+    setSelectedView({ kind: "subagent", id });
+  }
 
   /**
    * Pane-wide drop target, so dragging files onto an agent pane behaves like
@@ -576,22 +693,28 @@ export function AgentPane({
           {effectiveView.kind === "main" ? (
             <AgentConversation
               state={conv}
-              scrollRef={viewportRef}
               isFocusedPane={isFocused && active}
               onAllowPermission={handleAllow}
               onAllowPermissionSession={handleAllowSession}
               onDenyPermission={handleDeny}
               lastControlNote={lastControlNote}
-              onOpenSubagent={(id) => setSelectedView({ kind: "subagent", id })}
+              onOpenSubagent={openSubagent}
             />
           ) : viewedSubagent !== null ? (
             <AgentViewPanel
               kind="subagent"
               block={viewedSubagent}
               sessionExited={conv.status === "exited"}
+              onOpenSubagent={openSubagent}
             />
           ) : viewedRun !== null ? (
-            <AgentViewPanel kind="workflow" run={viewedRun} />
+            <AgentViewPanel
+              kind="workflow"
+              run={viewedRun}
+              childTurns={viewedRunTurns}
+              sessionExited={conv.status === "exited"}
+              onOpenSubagent={openSubagent}
+            />
           ) : null}
         </div>
 

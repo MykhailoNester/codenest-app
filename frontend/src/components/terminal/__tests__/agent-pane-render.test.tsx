@@ -1095,8 +1095,9 @@ describe("agent pane render", () => {
     const viewport = screen.getByTestId("agent-pane-viewport");
 
     // jsdom has no layout — its own `scrollTop` setter is a no-op without a
-    // real box — so the geometry `<AgentConversation/>`'s stick-to-bottom
-    // effect reads and writes has to be stubbed onto this exact instance.
+    // real box — so the geometry `<AgentPane/>`'s stick-to-bottom effect
+    // (Effect C, `agent-pane.tsx`) reads and writes has to be stubbed onto
+    // this exact instance.
     Object.defineProperty(viewport, "scrollHeight", {
       configurable: true,
       value: 4000,
@@ -1129,9 +1130,134 @@ describe("agent pane render", () => {
       });
     });
 
-    // If `scrollRef` were ever pointed back at the (now non-scrolling)
-    // transcript div, this stays 0 and the regression is caught here instead
-    // of silently in production.
+    // If the pane ever measured a different (non-scrolling) element instead
+    // of this viewport, this stays 0 and the regression is caught here
+    // instead of silently in production. A first-ever `main` view has no
+    // scroll memory, so Effect B pins it to the bottom on mount and Effect C
+    // keeps it there for this first frame.
     expect(scrollTop).toBe(4000);
+  });
+
+  it("each view remembers its own scroll position and its own stick-to-bottom", async () => {
+    seedCatalog();
+    seedTab(makeAgentTab("agent-scroll-memory"), "agent-scroll-memory");
+
+    render(<TerminalsLayout />);
+    await waitFor(() => expect(agentStartMock).toHaveBeenCalledTimes(1));
+    const feed = subscribeAgentFramesMock.mock.calls[0]?.[1] as (
+      frame: AgentFrame,
+    ) => void;
+    expect(feed).toBeTypeOf("function");
+
+    const viewport = screen.getByTestId("agent-pane-viewport");
+
+    // Same jsdom-has-no-layout stub as the test above.
+    Object.defineProperty(viewport, "scrollHeight", {
+      configurable: true,
+      value: 4000,
+    });
+    Object.defineProperty(viewport, "clientHeight", {
+      configurable: true,
+      value: 300,
+    });
+    let scrollTop = 0;
+    Object.defineProperty(viewport, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = v;
+      },
+    });
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-scroll-memory",
+        session_id: "session-1",
+        kind: "init",
+        raw: { type: "system", subtype: "init", model: "claude-opus-5" },
+      });
+    });
+
+    await act(async () => {
+      feed({
+        pane_id: "agent-scroll-memory",
+        session_id: "session-1",
+        kind: "assistant",
+        raw: {
+          type: "assistant",
+          message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+        },
+      });
+    });
+    // A first-ever `main` view has no memory, so it starts pinned — the new
+    // frame drove it to the bottom.
+    expect(scrollTop).toBe(4000);
+
+    // The user scrolls up and away from the bottom.
+    scrollTop = 1000;
+    fireEvent.scroll(viewport);
+
+    // Make a sub-agent selectable, without ending it — same shape as the
+    // "renders every view kind" test above.
+    await act(async () => {
+      feed({
+        pane_id: "agent-scroll-memory",
+        session_id: "session-1",
+        kind: "tool_use",
+        raw: {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_task_1",
+                name: "Task",
+                input: { description: "Review the diff", subagent_type: "reviewer" },
+              },
+            ],
+          },
+        },
+      });
+    });
+
+    const picker = screen.getByTestId("composer-view-picker");
+    await waitFor(() =>
+      expect(
+        picker.querySelector('option[value="sub:toolu_task_1"]'),
+      ).not.toBeNull(),
+    );
+
+    // Switching to a view this mount has never shown starts pinned to the
+    // bottom — not yanked to 1000, and not left wherever `main` happened to
+    // leave `scrollTop`.
+    await act(async () => {
+      fireEvent.change(picker, { target: { value: "sub:toolu_task_1" } });
+    });
+    expect(scrollTop).toBe(4000);
+
+    // Switching back to `main` restores exactly where the user had scrolled
+    // to before switching away — the "returns to where the user was" half.
+    await act(async () => {
+      fireEvent.change(picker, { target: { value: "main" } });
+    });
+    expect(scrollTop).toBe(1000);
+
+    // And a new frame arriving on `main` must not yank it back down: the
+    // user was scrolled away from the bottom there, and switching views is
+    // not itself a reason to re-pin. This is the "does not yank either to
+    // the bottom" half.
+    await act(async () => {
+      feed({
+        pane_id: "agent-scroll-memory",
+        session_id: "session-1",
+        kind: "assistant",
+        raw: {
+          type: "assistant",
+          message: { role: "assistant", content: [{ type: "text", text: "still here" }] },
+        },
+      });
+    });
+    expect(scrollTop).toBe(1000);
   });
 });

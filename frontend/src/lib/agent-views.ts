@@ -23,6 +23,7 @@ import {
   orchestrationCounts,
   type ConversationState,
   type ConvToolBlock,
+  type ConvTurn,
   type OrchestrationRun,
 } from "./agent-conversation";
 
@@ -86,24 +87,63 @@ export function sameView(a: AgentViewId, b: AgentViewId): boolean {
   return viewKey(a) === viewKey(b);
 }
 
-/** Every `Task`/`Agent` tool block in the transcript, finished or not —
- *  unlike `activeSubagents`, which is deliberately in-flight only because its
- *  consumers are live indicators. The picker needs the finished ones too: the
- *  most useful moment to read a sub-agent's result is right after it ends.
- *
- *  Top-level only, deliberately: a depth-2 delegation now lives inside its
- *  parent block's `childTurns` rather than as a sibling of the main agent's
- *  own (that sibling placement was the bug this walk used to have). Listing
- *  a nested delegation here would be a dead row until the child stream gets
- *  its own renderer — a later ticket. */
-export function subagentBlocks(state: ConversationState): ConvToolBlock[] {
-  const blocks: ConvToolBlock[] = [];
-  for (const turn of state.turns) {
+/** Depth-first walk pushing every `Task`/`Agent` block into `out`, then
+ *  descending into *every* tool block's `childTurns` (delegation or not —
+ *  a `Workflow` block's own stream can carry a further delegation just as
+ *  well as a `Task` block's can) so a delegation nested at any depth is
+ *  found immediately after its parent. */
+function collectSubagents(turns: readonly ConvTurn[], out: ConvToolBlock[]): void {
+  for (const turn of turns) {
     for (const block of turn.blocks) {
-      if (block.type === "tool" && isSubagentTool(block.name)) blocks.push(block);
+      if (block.type !== "tool") continue;
+      if (isSubagentTool(block.name)) out.push(block);
+      if (block.childTurns.length > 0) collectSubagents(block.childTurns, out);
     }
   }
+}
+
+/** Every `Task`/`Agent` tool block in the transcript, at any nesting depth,
+ *  finished or not — unlike `activeSubagents`, which is deliberately
+ *  in-flight only because its consumers are live indicators. The picker
+ *  needs the finished ones too: the most useful moment to read a sub-agent's
+ *  result is right after it ends.
+ *
+ *  Every depth, not just the top level: a nested delegation lives inside its
+ *  parent block's `childTurns`, and once the drill-in view renders that
+ *  stream (`agent-view-panel.tsx`'s `SubagentView`) its own delegation cards
+ *  need somewhere to send `onOpenSubagent` — `findSubagent` and `resolveView`
+ *  are plain wrappers around this list, and the composer's `<select>` would
+ *  otherwise hold a `value` with no matching `<option>` and render blank.
+ *  Depth-first, a parent immediately before its own descendants — the order
+ *  a reader would open them in. */
+export function subagentBlocks(state: ConversationState): ConvToolBlock[] {
+  const blocks: ConvToolBlock[] = [];
+  collectSubagents(state.turns, blocks);
   return blocks;
+}
+
+/** The tool block matching `id`, at any depth — recursing into every block's
+ *  own `childTurns` regardless of its name. Depth-first, same order as
+ *  `collectSubagents`. */
+function findBlockRecursive(turns: readonly ConvTurn[], id: string): ConvToolBlock | null {
+  for (const turn of turns) {
+    for (const block of turn.blocks) {
+      if (block.type !== "tool") continue;
+      if (block.id === id) return block;
+      if (block.childTurns.length === 0) continue;
+      const nested = findBlockRecursive(block.childTurns, id);
+      if (nested !== null) return nested;
+    }
+  }
+  return null;
+}
+
+/** The tool block carrying this `tool_use.id`, at any depth — delegation or
+ *  not. `subagentBlocks` deliberately filters to `Task`/`Agent`; the
+ *  workflow view needs the `Workflow` block itself, whose `childTurns` are
+ *  the run's own stream. `null` when nothing in the tree carries the id. */
+export function findToolBlock(state: ConversationState, id: string): ConvToolBlock | null {
+  return findBlockRecursive(state.turns, id);
 }
 
 /** A sub-agent's display name: its declared type, else the tool's own name.

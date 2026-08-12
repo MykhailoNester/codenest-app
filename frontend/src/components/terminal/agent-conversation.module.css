@@ -208,7 +208,9 @@
    written prompt that used to render as a `YOU` turn. A sibling of `.tool`,
    one visual step up — an accent left border rather than a new visual
    language — since it is a call in the transcript, just one whose contents
-   live in a child stream this pane does not render yet. */
+   live in a child stream: clicking the card opens it in the drill-in view
+   (`agent-view-panel.tsx`'s `SubagentView`), rendered through this same
+   `ConversationTurns`/`Turn`/`ToolRunRow` set of classes. */
 .delegation {
   display: flex;
   flex-direction: column;

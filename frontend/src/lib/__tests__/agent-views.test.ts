@@ -2,8 +2,10 @@
 // thing it is pointing at disappears.
 
 import { describe, it, expect } from "vitest";
-import { emptyConversation, type ConversationState } from "../agent-conversation";
+import { emptyConversation, type ConversationState, type ConvTurn } from "../agent-conversation";
 import {
+  findSubagent,
+  findToolBlock,
   listAgentViews,
   MAIN_VIEW,
   parseViewKey,
@@ -25,6 +27,16 @@ function subagentBlock(over: Record<string, unknown> = {}) {
     startedAt: 1_000,
     endedAt: 2_000,
     isError: false,
+    // Required, not cosmetic: this fixture is inferred, not typed as
+    // `ConvToolBlock` (some callers cast it past the type), and the
+    // recursive walk below reads `block.childTurns` on every tool block it
+    // visits. Fixture completeness, not a behaviour change — every real
+    // block has this field (`agent-conversation.ts:58-78`). Typed explicitly
+    // as `ConvTurn[]` rather than left to infer `never[]` — an untyped empty
+    // array there makes `withSubagent`'s `as ConversationState["turns"]`
+    // cast below fail with "neither type sufficiently overlaps with the
+    // other" (`never[]` cannot compare against a real `ConvTurn[]`).
+    childTurns: [] as ConvTurn[],
     ...over,
   };
 }
@@ -54,6 +66,12 @@ function withSubagent(block: ReturnType<typeof subagentBlock>): ConversationStat
   return state({
     turns: [{ role: "assistant", blocks: [block] }] as ConversationState["turns"],
   });
+}
+
+/** One child-stream turn, the shape `withChildStream` builds — for a nested
+ *  delegation fixture's `childTurns`. */
+function childTurn(blocks: ReturnType<typeof subagentBlock>[]) {
+  return { id: "child-turn", role: "assistant" as const, at: 1_500, blocks };
 }
 
 describe("viewKey / parseViewKey", () => {
@@ -157,6 +175,32 @@ describe("listAgentViews", () => {
   it("falls back to the tool name when the call declared no sub-agent type", () => {
     expect(subagentLabel(subagentBlock({ input: {} }) as never)).toBe("Task");
   });
+
+  it("lists a nested delegation, so its card has a view to open", () => {
+    // A depth-2 delegation: the top-level `Agent` call's own `childTurns`
+    // hold a second `Agent` call. Without the recursion the picker's
+    // `<select>` would hold a `value` with no matching `<option>` and render
+    // blank the moment a nested card were clicked.
+    const nestedId = "nested-1";
+    const outer = subagentBlock({
+      childTurns: [
+        childTurn([subagentBlock({ id: nestedId, startedAt: 1_500, endedAt: null })]),
+      ],
+    });
+    const s = withSubagent(outer);
+
+    const views = listAgentViews(s);
+    expect(views.map((v) => v.id)).toEqual([
+      MAIN_VIEW,
+      { kind: "subagent", id: "call-1" },
+      { kind: "subagent", id: nestedId },
+    ]);
+    expect(findSubagent(s, nestedId)).not.toBeNull();
+    expect(resolveView(s, { kind: "subagent", id: nestedId })).toEqual({
+      kind: "subagent",
+      id: nestedId,
+    });
+  });
 });
 
 describe("resolveView", () => {
@@ -176,5 +220,19 @@ describe("resolveView", () => {
 
   it("leaves main alone", () => {
     expect(resolveView(state(), MAIN_VIEW)).toEqual(MAIN_VIEW);
+  });
+});
+
+describe("findToolBlock", () => {
+  it("finds a non-delegation block at any depth", () => {
+    // `Workflow` is deliberately not a `Task`/`Agent` name — `subagentBlocks`
+    // would never surface it, but the workflow view needs the block itself
+    // for its own `childTurns`.
+    const workflowBlock = subagentBlock({ id: "toolu_workflow", name: "Workflow" });
+    const outer = subagentBlock({ childTurns: [childTurn([workflowBlock])] });
+    const s = withSubagent(outer);
+
+    expect(findToolBlock(s, "toolu_workflow")).toEqual(workflowBlock);
+    expect(findToolBlock(s, "does-not-exist")).toBeNull();
   });
 });

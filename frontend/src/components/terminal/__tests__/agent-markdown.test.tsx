@@ -7,7 +7,6 @@
 // `react-markdown` and `remark-gfm` are used for real here (not mocked as in
 // `doc-preview-modal.test.tsx`): the whole point is what the parser produces.
 
-import { createRef } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AgentMarkdown } from "../agent-markdown";
@@ -161,12 +160,8 @@ describe("AgentMarkdown", () => {
 describe("conversation text blocks", () => {
   it("renders an assistant turn as markdown", () => {
     render(
-      // This test exercises markdown rendering, not scrolling, so a ref
-      // nobody attaches to the DOM is correct here — both scroll effects
-      // already `return` on a null element.
       <AgentConversation
         state={assistantState("**Four projects** are registered")}
-        scrollRef={createRef<HTMLDivElement>()}
         isFocusedPane
         onAllowPermission={noop}
         onAllowPermissionSession={noop}
@@ -183,11 +178,8 @@ describe("conversation text blocks", () => {
     // its asterisks to emphasis and its pipes to a table.
     const typed = "keep **literal** and | pipes | intact";
     render(
-      // Same as above: a ref nobody attaches is fine — this test concerns
-      // literal-vs-markdown rendering, not the scroll container.
       <AgentConversation
         state={appendUserTurn(emptyConversation(), typed, 0)}
-        scrollRef={createRef<HTMLDivElement>()}
         isFocusedPane
         onAllowPermission={noop}
         onAllowPermissionSession={noop}
