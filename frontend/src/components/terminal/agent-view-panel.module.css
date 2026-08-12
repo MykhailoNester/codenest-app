@@ -61,6 +61,18 @@
   margin-bottom: 12px;
 }
 
+/* The drilled-in agent's own stream. `.panel` above sets mono/11px for this
+   panel's chrome; the transcript's block classes set their own family and
+   size for tool rows and cards (agent-conversation.module.css), but `.msg`,
+   `.who` and `.errorBlock` inherit theirs — so the stream restores the
+   context they are written against rather than rendering the agent's prose
+   in the panel's chrome font. */
+.stream {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  margin-bottom: 12px;
+}
+
 .sectionTitle {
   margin: 0 0 6px;
   font-size: 10px;

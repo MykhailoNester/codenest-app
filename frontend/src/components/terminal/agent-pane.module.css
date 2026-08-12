@@ -117,8 +117,10 @@
    owns filling the flex line and scrolling on behalf of all of them. A view
    that declared no `flex` used to collapse the line and drag the composer
    up under itself; owning it here means no view can opt out. It is also the
-   element `<AgentConversation/>` measures for stick-to-bottom (`scrollRef`):
-   the scroller and the measured node must be the same one. The activity dock
+   element `<AgentPane/>` itself measures and scrolls for stick-to-bottom and
+   per-view scroll memory (`agent-pane.tsx`'s Effects A-D) — the rendered
+   node never changes across a view switch, which is what lets one set of
+   effects serve the transcript and every drill-in view. The activity dock
    (Zone B) is this element's *sibling*, not its child — inside it, the dock
    would scroll away with the transcript instead of staying pinned. */
 .viewport {

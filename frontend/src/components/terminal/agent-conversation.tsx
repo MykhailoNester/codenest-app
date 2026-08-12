@@ -5,13 +5,15 @@
  * indicator. `permissions[0]` renders `<AgentPermissionDialog/>` — the
  * clearest thing this surface does better than a redraw-heavy TUI.
  *
- * The scroll box is the pane's single viewport (`<AgentPane/>`'s
- * `.viewport`), passed in as `scrollRef` rather than owned here — see that
- * prop's doc comment for why.
+ * Scrolling belongs to `<AgentPane/>`, not here: it owns the single
+ * `.viewport` element every body view (this one, a sub-agent drill-in, a
+ * workflow drill-in) shares, and per-view scroll position/stick-to-bottom, so
+ * one component measures and restores it rather than each view keeping its
+ * own copy of that logic. See `agent-pane.tsx`'s `scrollMemoryRef` for why.
  */
 
-import { useEffect, useRef, useState } from "react";
-import type { ReactElement, RefObject } from "react";
+import { useEffect, useState } from "react";
+import type { ReactElement } from "react";
 import {
   childToolCount,
   delegationElapsedMs,
@@ -34,14 +36,6 @@ import styles from "./agent-conversation.module.css";
 
 interface AgentConversationProps {
   state: ConversationState;
-  /** The element that actually scrolls: the pane's single view viewport
-   *  (`agent-pane.module.css` `.viewport`), rendered by `<AgentPane/>` and
-   *  shared by all three body views. Passed in rather than created here
-   *  because the transcript div below is plain content with no overflow of
-   *  its own — measuring it would measure a non-scrolling element and
-   *  stick-to-bottom would silently stop working with nothing in
-   *  `make check-all` to notice. */
-  scrollRef: RefObject<HTMLDivElement | null>;
   isFocusedPane: boolean;
   onAllowPermission: () => void;
   onAllowPermissionSession: () => void;
@@ -267,6 +261,7 @@ function Turn({
   onToggleRun,
   sessionExited,
   onOpenSubagent,
+  userLabel,
 }: {
   turn: ConvTurn;
   expandedTools: Set<string>;
@@ -275,13 +270,14 @@ function Turn({
   onToggleRun: (key: string) => void;
   sessionExited: boolean;
   onOpenSubagent: (id: string) => void;
+  userLabel: string;
 }): ReactElement {
   const isUser = turn.role === "user";
   return (
     <div className={styles.turn}>
       <div className={styles.who}>
         <span className={isUser ? styles.whoUser : styles.whoAsst}>
-          {isUser ? "You" : "Claude"}
+          {isUser ? userLabel : "Claude"}
         </span>
         <span className={styles.ln} />
       </div>
@@ -332,31 +328,39 @@ function Turn({
   );
 }
 
-export function AgentConversation({
-  state,
-  scrollRef,
-  isFocusedPane,
-  onAllowPermission,
-  onAllowPermissionSession,
-  onDenyPermission,
-  lastControlNote,
+/**
+ * The single renderer for *any* `ConvTurn[]` — the main transcript below and
+ * every child stream a sub-agent or an orchestration run has of its own
+ * (`agent-view-panel.tsx`'s drill-in views). Owns the tool-run/tool-call
+ * expansion sets, `Turn` alone is not a reusable unit — a caller would have
+ * to reimplement `expandedTools`/`expandedRuns` and both toggles, which is a
+ * second copy of state logic that can drift. Existing to prevent exactly
+ * that: one implementation of the block rendering in the whole tree.
+ *
+ * Renders a fragment, not a wrapper element, so `<AgentConversation/>` below
+ * keeps its own `.conv`/`data-testid="agent-conversation"` exactly as before,
+ * and a drill-in view can supply its own wrapper without nesting `.conv`'s
+ * padding or gaining a testid `agent-pane-render.test.tsx` asserts is absent
+ * there.
+ */
+export function ConversationTurns({
+  turns,
+  sessionExited,
   onOpenSubagent,
-}: AgentConversationProps): ReactElement {
-  const stickToBottomRef = useRef(true);
+  userLabel = "You",
+}: {
+  turns: readonly ConvTurn[];
+  sessionExited: boolean;
+  onOpenSubagent: (id: string) => void;
+  /** How the user role reads for *these* turns. A child stream's first turn
+   *  is the delegated prompt, not something the pane's own user typed —
+   *  rendering it as "You" would reintroduce the lie #17 removed from the
+   *  main transcript, so the drill-in views pass `"Prompt"`. Defaults to
+   *  `"You"`, which is correct for the main transcript's own turns. */
+  userLabel?: string;
+}): ReactElement {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = (): void => {
-      stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-    };
-  }, [scrollRef]);
 
   function toggleTool(id: string): void {
     setExpandedTools((prev) => {
@@ -376,33 +380,9 @@ export function AgentConversation({
     });
   }
 
-  useEffect(() => {
-    if (!stickToBottomRef.current) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [state.turns, state.streamText, state.thinking]);
-
-  const permission = state.permissions[0];
-  const extraPending = Math.max(0, state.permissions.length - 1);
-
-  // A pending permission request blocks the session, so it is scrolled into
-  // view whether or not the user was stuck to the bottom — unlike ordinary
-  // output, which must not yank a scrolled-back reader down. Without this, a
-  // request that arrived while reading scrollback left the pane looking hung
-  // with the dialog off screen; and when the next request in a queue took the
-  // first one's place, the replacement could render below the fold.
-  useEffect(() => {
-    if (permission === undefined) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    stickToBottomRef.current = true;
-  }, [permission]);
-
   return (
-    <div className={styles.conv} data-testid="agent-conversation">
-      {state.turns.map((turn) => (
+    <>
+      {turns.map((turn) => (
         <Turn
           key={turn.id}
           turn={turn}
@@ -410,10 +390,34 @@ export function AgentConversation({
           onToggleTool={toggleTool}
           expandedRuns={expandedRuns}
           onToggleRun={toggleRun}
-          sessionExited={state.status === "exited"}
+          sessionExited={sessionExited}
           onOpenSubagent={onOpenSubagent}
+          userLabel={userLabel}
         />
       ))}
+    </>
+  );
+}
+
+export function AgentConversation({
+  state,
+  isFocusedPane,
+  onAllowPermission,
+  onAllowPermissionSession,
+  onDenyPermission,
+  lastControlNote,
+  onOpenSubagent,
+}: AgentConversationProps): ReactElement {
+  const permission = state.permissions[0];
+  const extraPending = Math.max(0, state.permissions.length - 1);
+
+  return (
+    <div className={styles.conv} data-testid="agent-conversation">
+      <ConversationTurns
+        turns={state.turns}
+        sessionExited={state.status === "exited"}
+        onOpenSubagent={onOpenSubagent}
+      />
 
       {state.thinking ? (
         <div className={styles.thinking}>

@@ -3,7 +3,6 @@
 // is the user-visible statement of the bug the reducer-level
 // `subagent-attribution.test.ts` fixes underneath.
 
-import { createRef } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AgentConversation } from "../agent-conversation";
@@ -101,12 +100,8 @@ function renderConversation(
   onOpenSubagent: (id: string) => void = noop,
 ): ReturnType<typeof render> {
   return render(
-    // These tests exercise the delegation card, not scrolling, so a ref
-    // nobody attaches to the DOM is correct here — both scroll effects
-    // already `return` on a null element.
     <AgentConversation
       state={state}
-      scrollRef={createRef<HTMLDivElement>()}
       isFocusedPane
       onAllowPermission={noop}
       onAllowPermissionSession={noop}

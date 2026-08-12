@@ -1,10 +1,16 @@
 /**
  * The pane body when the picker is on something other than the main agent:
- * one sub-agent's delegated task, or one orchestration's phases and agents.
+ * one sub-agent's delegated task and its own live stream, or one
+ * orchestration's phases, agents and (when the wire provides one) its own
+ * stream.
  *
  * Both render from state the pane already holds — a sub-agent from its
- * `Task`/`Agent` tool block, an orchestration from `state.orchestrations` —
- * so this is a second view of existing data, not a second source of it.
+ * `Task`/`Agent` tool block's `childTurns`, an orchestration from
+ * `state.orchestrations` plus the `Workflow` block's `childTurns` — so this
+ * is a second view of existing data, not a second source of it. The stream
+ * itself is rendered by `<ConversationTurns/>`, the same block renderer the
+ * main transcript uses, so a sub-agent's assistant text, tool rows and
+ * nested delegation cards read identically wherever they appear.
  */
 
 import type { ReactElement } from "react";
@@ -12,9 +18,14 @@ import {
   formatDuration,
   orchestrationPhaseTree,
   type ConvToolBlock,
+  type ConvTurn,
   type OrchestrationAgent,
   type OrchestrationRun,
 } from "../../lib/agent-conversation";
+// The component module, not the lib one imported above for types — same base
+// name, different directory, so no import collision, but worth flagging
+// since a reader skimming the import list could otherwise mistake the two.
+import { ConversationTurns } from "./agent-conversation";
 import { subagentLabel } from "../../lib/agent-views";
 import styles from "./agent-view-panel.module.css";
 
@@ -26,15 +37,40 @@ function Elapsed({ ms, running }: { ms: number | null; running: boolean }): Reac
   return <span className={styles.muted}>{formatDuration(ms)}</span>;
 }
 
+/**
+ * Three distinguishable "nothing to show" cases for the Result section, none
+ * of them invented:
+ *
+ * - The call has usable output → a `<pre>`, unchanged from before.
+ * - The call ended (`endedAt !== null`) with no usable output → "Reported
+ *   nothing back." — the wire's `tool_result` genuinely carried nothing.
+ * - The session exited with the call still open → "Session ended before this
+ *   sub-agent reported back." — the wire never sent an end for this call at
+ *   all, so claiming it "returned nothing" would report something nobody
+ *   said (the same case `subagentRowStatus` already calls `ended` rather
+ *   than `done`, `agent-dock.ts:194-200`).
+ * - Still running → `null`. The section does not render; the stream above
+ *   speaks for that case (or, with no stream yet, "Still working").
+ */
+function subagentResultNote(block: ConvToolBlock, sessionExited: boolean): string | null {
+  if (block.endedAt !== null) return "Reported nothing back.";
+  if (sessionExited) return "Session ended before this sub-agent reported back.";
+  return null;
+}
+
 function SubagentView({
   block,
   sessionExited,
+  onOpenSubagent,
 }: {
   block: ConvToolBlock;
   sessionExited: boolean;
+  onOpenSubagent: (id: string) => void;
 }): ReactElement {
   const running = block.endedAt === null && !sessionExited;
   const elapsed = block.endedAt === null ? null : block.endedAt - block.startedAt;
+  const hasOutput = block.output !== null && block.output.trim() !== "";
+  const resultNote = hasOutput ? null : subagentResultNote(block, sessionExited);
   return (
     <div
       className={styles.panel}
@@ -49,16 +85,37 @@ function SubagentView({
 
       {block.argSummary ? <p className={styles.task}>{block.argSummary}</p> : null}
 
-      <section className={styles.section}>
-        <h4 className={styles.sectionTitle}>Result</h4>
-        {block.output === null ? (
-          <p className={styles.muted}>
-            {running ? "Still working — nothing reported back yet." : "Reported nothing back."}
-          </p>
-        ) : (
-          <pre className={block.isError ? styles.outputError : styles.output}>{block.output}</pre>
-        )}
-      </section>
+      {block.childTurns.length > 0 ? (
+        <section className={styles.stream} data-testid="subagent-stream">
+          <ConversationTurns
+            turns={block.childTurns}
+            sessionExited={sessionExited}
+            onOpenSubagent={onOpenSubagent}
+            userLabel="Prompt"
+          />
+        </section>
+      ) : running ? (
+        <p className={styles.muted}>Still working — nothing reported back yet.</p>
+      ) : null}
+
+      {/* Always last, per the ticket: the returned result must stay the most
+          useful thing in the view once it lands, however much stream sits
+          above it. Rendered only when there is something to say — output, or
+          the call is over one way or another; nothing at all while it is
+          still running with an empty stream, since the line above already
+          covers that case. */}
+      {hasOutput || resultNote !== null ? (
+        <section className={styles.section}>
+          <h4 className={styles.sectionTitle}>Result</h4>
+          {hasOutput ? (
+            <pre className={block.isError ? styles.outputError : styles.output}>
+              {block.output}
+            </pre>
+          ) : (
+            <p className={styles.muted}>{resultNote}</p>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -81,7 +138,22 @@ function AgentRow({ agent }: { agent: OrchestrationAgent }): ReactElement {
   );
 }
 
-function WorkflowView({ run }: { run: OrchestrationRun }): ReactElement {
+function WorkflowView({
+  run,
+  childTurns,
+  sessionExited,
+  onOpenSubagent,
+}: {
+  run: OrchestrationRun;
+  /** `findToolBlock(state, run.toolUseId)?.childTurns` — the run's own
+   *  stream, frames parented to the `Workflow` block itself. `[]` when the
+   *  wire parented nothing to it (an unverified case; see the plan's Design
+   *  decision 5), in which case no stream section renders at all — the phase
+   *  tree above is the whole story, same as today. */
+  childTurns: readonly ConvTurn[];
+  sessionExited: boolean;
+  onOpenSubagent: (id: string) => void;
+}): ReactElement {
   const running = run.status === "running";
   const elapsed = run.endedAt === null ? null : run.endedAt - run.startedAt;
   const tree = orchestrationPhaseTree(run);
@@ -114,18 +186,49 @@ function WorkflowView({ run }: { run: OrchestrationRun }): ReactElement {
           )}
         </section>
       ))}
+
+      {childTurns.length > 0 ? (
+        <section className={styles.stream} data-testid="workflow-stream">
+          <ConversationTurns
+            turns={childTurns}
+            sessionExited={sessionExited}
+            onOpenSubagent={onOpenSubagent}
+            userLabel="Prompt"
+          />
+        </section>
+      ) : null}
     </div>
   );
 }
 
 export function AgentViewPanel(
   props:
-    | { kind: "subagent"; block: ConvToolBlock; sessionExited: boolean }
-    | { kind: "workflow"; run: OrchestrationRun },
+    | {
+        kind: "subagent";
+        block: ConvToolBlock;
+        sessionExited: boolean;
+        onOpenSubagent: (id: string) => void;
+      }
+    | {
+        kind: "workflow";
+        run: OrchestrationRun;
+        childTurns: readonly ConvTurn[];
+        sessionExited: boolean;
+        onOpenSubagent: (id: string) => void;
+      },
 ): ReactElement {
   return props.kind === "subagent" ? (
-    <SubagentView block={props.block} sessionExited={props.sessionExited} />
+    <SubagentView
+      block={props.block}
+      sessionExited={props.sessionExited}
+      onOpenSubagent={props.onOpenSubagent}
+    />
   ) : (
-    <WorkflowView run={props.run} />
+    <WorkflowView
+      run={props.run}
+      childTurns={props.childTurns}
+      sessionExited={props.sessionExited}
+      onOpenSubagent={props.onOpenSubagent}
+    />
   );
 }
