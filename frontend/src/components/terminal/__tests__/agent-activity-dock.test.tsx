@@ -27,7 +27,7 @@ import {
   emptyConversation,
   type ConversationState,
 } from "../../../lib/agent-conversation";
-import { MAIN_VIEW, type AgentViewId } from "../../../lib/agent-views";
+import { MAIN_VIEW, viewKey, type AgentViewId } from "../../../lib/agent-views";
 import { agentStopTask } from "../../../lib/ipc";
 import type { AgentFrame, AgentFrameKind } from "../../../lib/ipc";
 
@@ -144,12 +144,21 @@ function orchestrationTerminalFrame(taskId: string, status: string): AgentFrame 
 const noop = (): void => undefined;
 
 /** Wraps `<AgentActivityDock/>` with the required `selectedView`/
- *  `onSelectView` pair — every case renders through this rather than the
- *  component directly, so the dock's now-mandatory selection prop doesn't
- *  have to be repeated at every call site. */
+ *  `onSelectView` pair, plus the four keyboard-cursor props #22 added — every
+ *  case renders through this rather than the component directly, so the
+ *  dock's now-mandatory props don't have to be repeated at every call site.
+ *  Defaults match "no cursor, no pending focus request, nobody listening" —
+ *  the common case for every test that isn't specifically exercising #22. */
 function dock(
   state: ConversationState,
-  over: { selectedView?: AgentViewId; onSelectView?: (id: AgentViewId) => void } = {},
+  over: {
+    selectedView?: AgentViewId;
+    onSelectView?: (id: AgentViewId) => void;
+    highlightedKey?: string | null;
+    focusRequest?: { key: string; token: number } | null;
+    onHighlightChange?: (key: string | null, opts?: { focus?: boolean }) => void;
+    onReturnFocus?: () => void;
+  } = {},
 ): ReactElement {
   return (
     <AgentActivityDock
@@ -158,6 +167,10 @@ function dock(
       paneId="p1"
       selectedView={over.selectedView ?? MAIN_VIEW}
       onSelectView={over.onSelectView ?? noop}
+      highlightedKey={over.highlightedKey ?? null}
+      focusRequest={over.focusRequest ?? null}
+      onHighlightChange={over.onHighlightChange ?? noop}
+      onReturnFocus={over.onReturnFocus ?? noop}
     />
   );
 }
@@ -735,7 +748,7 @@ describe("AgentActivityDock — Workflows group", () => {
 });
 
 describe("AgentActivityDock — Workflows group rows", () => {
-  it("a phase agent row is not a click target", () => {
+  it("a phase agent row is announced but is not focusable or selectable", () => {
     let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
     state = applyFrame(
       state,
@@ -752,6 +765,10 @@ describe("AgentActivityDock — Workflows group rows", () => {
 
     const row = screen.getByTestId("dock-workflow-agent-row");
     expect(row.querySelector("button")).toBeNull();
+    const option = row.querySelector('[role="option"]');
+    expect(option).not.toBeNull();
+    expect(option?.getAttribute("aria-disabled")).toBe("true");
+    expect(option?.hasAttribute("tabindex")).toBe(false);
   });
 
   it("a run row offers Stop only while it is running", () => {
@@ -794,8 +811,14 @@ describe("AgentActivityDock — selection", () => {
     );
 
     const rows = screen.getAllByTestId("dock-agent-row");
-    expect(rows[0]?.querySelector("button")?.getAttribute("aria-current")).toBe("true");
-    expect(rows[1]?.querySelector("button")?.getAttribute("aria-current")).toBeNull();
+    // Changed, not regressed (#22): the row became a `role="option"`, where
+    // `aria-selected` is the conformant expression of "this is the chosen
+    // one" — `aria-current` is the navigation-landmark idiom and would be a
+    // second, non-conformant channel for the same fact (plan D13). The
+    // behaviour under test — which row is marked as the current selection —
+    // is identical to before.
+    expect(rows[0]?.querySelector("button")?.getAttribute("aria-selected")).toBe("true");
+    expect(rows[1]?.querySelector("button")?.getAttribute("aria-selected")).toBe("false");
   });
 });
 
@@ -883,5 +906,385 @@ describe("AgentActivityDock — collapse state and layout", () => {
     // the group stack scrolls.
     expect(container).not.toBe(dockEl);
     expect(container?.contains(strip)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Keyboard navigation over the dock rows (#22) — the cursor, its focus
+// requests, and the ARIA that describes both. `dock()`'s new defaults (no
+// cursor, no pending focus request) mean every case above this line is
+// unaffected; these cases exercise the four new props directly.
+// ---------------------------------------------------------------------------
+
+describe("AgentActivityDock — keyboard navigation (#22)", () => {
+  it("the rows are a listbox of options that announce name and status", () => {
+    let state = taskState("planner", "d", 1_000);
+    state = applyFrame(state, orchestrationTaskStartedFrame("wf1"), 1_500);
+    state = applyFrame(
+      state,
+      orchestrationProgressFrame("wf1", {
+        workflow_progress: [
+          { type: "workflow_phase", index: 1, title: "Alpha" },
+          { type: "workflow_agent", index: 1, label: "red", phaseIndex: 1, state: "start" },
+        ],
+      }),
+      1_600,
+    );
+
+    render(dock(state));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
+    );
+
+    const agentRows = screen.getByTestId("dock-agent-rows");
+    expect(agentRows.getAttribute("role")).toBe("listbox");
+    expect(agentRows.getAttribute("aria-label")).toBe("Sub-agents");
+    const workflowRows = screen.getByTestId("dock-workflow-rows");
+    expect(workflowRows.getAttribute("role")).toBe("listbox");
+    expect(workflowRows.getAttribute("aria-label")).toBe("Workflow runs");
+
+    const agentOption = screen.getByTestId("dock-agent-row").querySelector('[role="option"]');
+    expect(agentOption?.getAttribute("aria-label")).toBe("planner — running");
+
+    const phase = screen.getByText("Alpha").closest('[role="group"]');
+    expect(phase?.getAttribute("aria-label")).toBe("Alpha");
+
+    // The running run row carries the Stop button, so its own wrapper is a
+    // `role="group"` — never a bare `role="presentation"`, which would make
+    // the Stop button a non-conformant direct child of the listbox.
+    expect(screen.getByTestId("dock-workflow-row").getAttribute("role")).toBe("group");
+  });
+
+  it("the highlighted row and the selected row are two different states", () => {
+    let state = withTask(liveState(), "toolu_a", { subagent_type: "planner", description: "p" }, 1_000);
+    state = withTask(state, "toolu_b", { subagent_type: "coder", description: "c" }, 2_000);
+
+    render(
+      dock(state, {
+        selectedView: { kind: "subagent", id: "toolu_a" },
+        highlightedKey: viewKey({ kind: "subagent", id: "toolu_b" }),
+      }),
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+
+    const rows = screen.getAllByTestId("dock-agent-row");
+    const a = rows[0]?.querySelector("button");
+    const b = rows[1]?.querySelector("button");
+    expect(a?.getAttribute("aria-selected")).toBe("true");
+    expect(a?.hasAttribute("data-highlighted")).toBe(false);
+    expect(b?.getAttribute("aria-selected")).toBe("false");
+    expect(b?.getAttribute("data-highlighted")).toBe("true");
+  });
+
+  it("exactly one row is a Tab stop, and it is the highlighted one", () => {
+    let state = withTask(liveState(), "toolu_a", { subagent_type: "planner", description: "p" }, 1_000);
+    state = withTask(state, "toolu_b", { subagent_type: "coder", description: "c" }, 2_000);
+    state = applyFrame(state, orchestrationTaskStartedFrame("wf1"), 3_000);
+
+    render(dock(state, { highlightedKey: viewKey({ kind: "subagent", id: "toolu_b" }) }));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
+    );
+
+    const options = [
+      ...screen.getAllByTestId("dock-agent-row"),
+      ...screen.getAllByTestId("dock-workflow-row"),
+    ].map((row) => row.querySelector("button") as HTMLButtonElement);
+
+    const tabStops = options.filter((el) => el.getAttribute("tabindex") === "0");
+    expect(tabStops).toHaveLength(1);
+    expect(tabStops[0]?.getAttribute("data-highlighted")).toBe("true");
+  });
+
+  it("with no cursor the tab stop falls back to the selected row, then to the first row", () => {
+    let state = withTask(liveState(), "toolu_a", { subagent_type: "planner", description: "p" }, 1_000);
+    state = withTask(state, "toolu_b", { subagent_type: "coder", description: "c" }, 2_000);
+
+    const { rerender } = render(
+      dock(state, { selectedView: { kind: "subagent", id: "toolu_b" } }),
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+
+    let rows = screen
+      .getAllByTestId("dock-agent-row")
+      .map((r) => r.querySelector("button") as HTMLButtonElement);
+    expect(rows[1]?.getAttribute("tabindex")).toBe("0");
+    expect(rows[0]?.getAttribute("tabindex")).toBe("-1");
+
+    // No cursor and no selection override — `dock()`'s default `selectedView`
+    // is `MAIN_VIEW`, which names no row, so the tab stop falls all the way
+    // to the first row.
+    rerender(dock(state));
+    rows = screen
+      .getAllByTestId("dock-agent-row")
+      .map((r) => r.querySelector("button") as HTMLButtonElement);
+    expect(rows[0]?.getAttribute("tabindex")).toBe("0");
+    expect(rows[1]?.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("aria-activedescendant names the highlighted option only on the group that holds it", () => {
+    let state = withTask(liveState(), "toolu_a", { subagent_type: "planner", description: "p" }, 1_000);
+    state = applyFrame(state, orchestrationTaskStartedFrame("wf1"), 2_000);
+
+    render(dock(state, { highlightedKey: viewKey({ kind: "subagent", id: "toolu_a" }) }));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
+    );
+
+    const agentRows = screen.getByTestId("dock-agent-rows");
+    const workflowRows = screen.getByTestId("dock-workflow-rows");
+    const optionId = screen.getByTestId("dock-agent-row").querySelector("button")?.id;
+    expect(optionId).toBeTruthy();
+    expect(agentRows.getAttribute("aria-activedescendant")).toBe(optionId);
+    expect(workflowRows.hasAttribute("aria-activedescendant")).toBe(false);
+  });
+
+  it("ArrowDown/ArrowUp on a row ask the pane to move the cursor with focus, and never select", () => {
+    let state = withTask(liveState(), "toolu_a", { subagent_type: "planner", description: "p" }, 1_000);
+    state = withTask(state, "toolu_b", { subagent_type: "coder", description: "c" }, 2_000);
+    const onHighlightChange = vi.fn();
+    const onSelectView = vi.fn();
+
+    render(
+      dock(state, {
+        highlightedKey: viewKey({ kind: "subagent", id: "toolu_a" }),
+        onHighlightChange,
+        onSelectView,
+      }),
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+
+    const rowA = screen
+      .getAllByTestId("dock-agent-row")[0]
+      ?.querySelector("button") as HTMLButtonElement;
+    fireEvent.keyDown(rowA, { key: "ArrowDown" });
+
+    expect(onHighlightChange).toHaveBeenCalledWith(
+      viewKey({ kind: "subagent", id: "toolu_b" }),
+      { focus: true },
+    );
+    expect(onSelectView).not.toHaveBeenCalled();
+  });
+
+  it("a row click asks for a highlight but never for focus", () => {
+    const state = taskState("planner", "d", 1_000);
+    const onHighlightChange = vi.fn();
+    const onSelectView = vi.fn();
+
+    render(dock(state, { onHighlightChange, onSelectView }));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement,
+    );
+
+    expect(onSelectView).toHaveBeenCalledWith({ kind: "subagent", id: "toolu_sub" });
+    expect(onHighlightChange).toHaveBeenCalledWith(
+      viewKey({ kind: "subagent", id: "toolu_sub" }),
+    );
+    // Exactly one argument: this is the unit-level half of the "clicking must
+    // not steal the caret" guarantee — a later refactor that starts passing
+    // `{ focus: true }` from `onClick` turns this red even in jsdom, where a
+    // click never moves focus by itself.
+    expect(onHighlightChange.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("a focus request whose row is not in the DOM hands focus back to the composer", () => {
+    const state = taskState("planner", "d", 1_000);
+    const onReturnFocus = vi.fn();
+
+    expect(() =>
+      render(dock(state, { focusRequest: { key: "sub:gone", token: 1 }, onReturnFocus })),
+    ).not.toThrow();
+
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("a highlighted row that disappears while it holds focus returns focus to the composer", () => {
+    const key = viewKey({ kind: "subagent", id: "toolu_sub" });
+
+    // Part 1: the row held focus. Removing it (the sub-agent ages out of the
+    // transcript — same shape as a `/clear`) drops DOM focus to `<body>`, and
+    // the custodian effect hands it back.
+    const onReturnFocusA = vi.fn();
+    const withRow = taskState("planner", "d", 1_000);
+    const { rerender, unmount } = render(
+      dock(withRow, { highlightedKey: key, onReturnFocus: onReturnFocusA }),
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    const option = screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement;
+    option.focus();
+    expect(document.activeElement).toBe(option);
+
+    // The session lives on (still `dockHasContent`) but the row itself is
+    // gone — the Agents group disappears along with it.
+    rerender(dock(liveState(), { highlightedKey: key, onReturnFocus: onReturnFocusA }));
+    expect(onReturnFocusA).toHaveBeenCalledTimes(1);
+    unmount();
+
+    // Part 2: same transition, but focus was never on the row — parked on an
+    // unrelated element instead. The `document.activeElement === document.body`
+    // guard means the custodian must stay out of it.
+    const onReturnFocusB = vi.fn();
+    const { rerender: rerenderB } = render(
+      dock(withRow, { highlightedKey: key, onReturnFocus: onReturnFocusB }),
+    );
+    const decoy = document.createElement("button");
+    document.body.appendChild(decoy);
+    decoy.focus();
+    expect(document.activeElement).toBe(decoy);
+    rerenderB(dock(liveState(), { highlightedKey: key, onReturnFocus: onReturnFocusB }));
+    expect(onReturnFocusB).not.toHaveBeenCalled();
+    decoy.remove();
+  });
+
+  it("Enter and ArrowRight open the row's view and hand focus back", () => {
+    const state = taskState("planner", "d", 1_000);
+    const onSelectView = vi.fn();
+    const onReturnFocus = vi.fn();
+
+    render(dock(state, { onSelectView, onReturnFocus }));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    const option = screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement;
+
+    fireEvent.keyDown(option, { key: "Enter" });
+    expect(onSelectView).toHaveBeenCalledWith({ kind: "subagent", id: "toolu_sub" });
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
+
+    onSelectView.mockClear();
+    onReturnFocus.mockClear();
+    fireEvent.keyDown(option, { key: "ArrowRight" });
+    expect(onSelectView).toHaveBeenCalledWith({ kind: "subagent", id: "toolu_sub" });
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape and ArrowLeft go back to the main transcript and hand focus back", () => {
+    const state = taskState("planner", "d", 1_000);
+    const onSelectView = vi.fn();
+    const onReturnFocus = vi.fn();
+
+    render(dock(state, { onSelectView, onReturnFocus }));
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    const option = screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement;
+
+    fireEvent.keyDown(option, { key: "Escape" });
+    expect(onSelectView).toHaveBeenCalledWith(MAIN_VIEW);
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
+
+    onSelectView.mockClear();
+    onReturnFocus.mockClear();
+    fireEvent.keyDown(option, { key: "ArrowLeft" });
+    expect(onSelectView).toHaveBeenCalledWith(MAIN_VIEW);
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("a cursor inside a collapsed group forces that group open", () => {
+    const state = taskState("planner", "d", 1_000);
+    // `agents` defaults collapsed (`agent-activity-dock.tsx`) — no click here.
+    render(dock(state, { highlightedKey: viewKey({ kind: "subagent", id: "toolu_sub" }) }));
+
+    expect(
+      screen.getByTestId("dock-group-agents").querySelector("button")?.getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(screen.getByTestId("dock-agent-row")).not.toBeNull();
+  });
+
+  it("collapsing a group that holds the cursor clears it", () => {
+    const state = taskState("planner", "d", 1_000);
+    const onHighlightChange = vi.fn();
+    const cursorKey = viewKey({ kind: "subagent", id: "toolu_sub" });
+
+    // First, a genuine (non-cursor-forced) expand: the group's own collapse
+    // flag flips to "open" with no cursor in play yet.
+    const { rerender } = render(dock(state, { onHighlightChange }));
+    const header = screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement;
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+
+    // The cursor lands inside the now-genuinely-open group (e.g. Ctrl+↓).
+    rerender(dock(state, { highlightedKey: cursorKey, onHighlightChange }));
+
+    // Collapsing it now must clear the cursor first — otherwise D5's derived
+    // expansion (`!collapsed[id] || cursorGroup === id`) would keep rendering
+    // the group open despite the collapse flag flipping, and the click would
+    // appear to do nothing.
+    fireEvent.click(header);
+    expect(onHighlightChange).toHaveBeenCalledWith(null);
+    // No focus option — otherwise the click would pull the caret out of the
+    // composer for a group-collapse, which is a pointer path (plan D5/D15).
+    expect(onHighlightChange.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("collapsing a group with the mouse while its cursor row holds real DOM focus hands focus back to the composer", () => {
+    // Review round 1, F1: reaching the row via Ctrl+↓/arrow keys puts real
+    // DOM focus on it; clicking the group's twisty next clears the cursor
+    // and collapses the group in one commit, so `cursorLost` never edges
+    // false→true and the custodian effect below never fires. Without the fix
+    // in `toggle()`, the row's removal from the DOM would strand focus on
+    // <body>.
+    const state = taskState("planner", "d", 1_000);
+    const onHighlightChange = vi.fn();
+    const onReturnFocus = vi.fn();
+    const cursorKey = viewKey({ kind: "subagent", id: "toolu_sub" });
+
+    const { rerender } = render(dock(state, { onHighlightChange, onReturnFocus }));
+    const header = screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement;
+    fireEvent.click(header); // genuine, non-cursor-forced expand
+
+    rerender(dock(state, { highlightedKey: cursorKey, onHighlightChange, onReturnFocus }));
+    const option = screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement;
+    option.focus();
+    expect(document.activeElement).toBe(option);
+
+    fireEvent.click(header); // collapses the group the focused row lives in
+    expect(onHighlightChange).toHaveBeenCalledWith(null);
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("collapsing a group with the mouse while its cursor row does NOT hold DOM focus leaves focus alone", () => {
+    // The mirror case: the cursor is inside the collapsing group, but DOM
+    // focus is parked elsewhere (e.g. the composer). Collapsing must still
+    // clear the cursor, but must not reach for focus it does not own.
+    const state = taskState("planner", "d", 1_000);
+    const onHighlightChange = vi.fn();
+    const onReturnFocus = vi.fn();
+    const cursorKey = viewKey({ kind: "subagent", id: "toolu_sub" });
+
+    const { rerender } = render(dock(state, { onHighlightChange, onReturnFocus }));
+    const header = screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement;
+    fireEvent.click(header); // genuine, non-cursor-forced expand
+
+    rerender(dock(state, { highlightedKey: cursorKey, onHighlightChange, onReturnFocus }));
+    const decoy = document.createElement("button");
+    document.body.appendChild(decoy);
+    decoy.focus();
+    expect(document.activeElement).toBe(decoy);
+
+    fireEvent.click(header);
+    expect(onHighlightChange).toHaveBeenCalledWith(null);
+    expect(onReturnFocus).not.toHaveBeenCalled();
+    decoy.remove();
   });
 });

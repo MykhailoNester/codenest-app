@@ -8,7 +8,10 @@ interface ShortcutRow {
 }
 
 /**
- * Shortcut definitions pulled directly from use-terminal-shortcuts.ts.
+ * Shortcut definitions pulled directly from use-terminal-shortcuts.ts, plus
+ * (#22) the dock/composer navigation bindings, which come from
+ * `agent-composer.tsx`'s `handleKeyDown` and `agent-activity-dock.tsx`'s row
+ * keyboard handler — a future change to either has two places to mirror.
  * Update here if bindings change.
  */
 const SHORTCUTS: ShortcutRow[] = [
@@ -25,6 +28,11 @@ const SHORTCUTS: ShortcutRow[] = [
   { keys: ["⌘", "="], label: "Increase font size" },
   { keys: ["⌘", "−"], label: "Decrease font size" },
   { keys: ["⌘", "0"], label: "Reset font size" },
+  { keys: ["⌃", "↑ / ↓"], label: "Agent composer — move the activity-dock cursor" },
+  { keys: ["↑ / ↓"], label: "Activity dock — move the cursor" },
+  { keys: ["→ / ↩"], label: "Activity dock — open the highlighted agent" },
+  { keys: ["← / Esc"], label: "Activity dock — back to the main transcript" },
+  { keys: ["Esc"], label: "Viewing a sub-agent — back to the main transcript" },
 ];
 
 export function ShortcutsHint(): ReactElement {

@@ -175,6 +175,17 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* The keyboard cursor — deliberately a different channel from `.rowSelected`
+   above (which owns the inset accent bar + wash): a dashed ring plus a
+   lighter fill, so a row that is both highlighted and selected reads as
+   both. Painted regardless of focus, because the cursor must stay visible
+   after Enter hands focus back to the composer. */
+.rowHighlighted {
+  background: var(--bg-4);
+  outline: 1px dashed var(--accent-line);
+  outline-offset: -1px;
+}
+
 .rowIndent {
   padding-left: 14px;
 }

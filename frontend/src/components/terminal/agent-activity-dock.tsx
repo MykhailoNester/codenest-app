@@ -49,15 +49,62 @@
  * Sizes to its own content and caps at a max height past which its group
  * stack — not the whole dock — scrolls internally (`agent-activity-dock.module.css`),
  * so a session with a large workflow can never push the composer off screen.
+ *
+ * **Keyboard surface (#22).** The dock is also a `role="listbox"` (two of
+ * them, in fact — see below) that the composer's `Ctrl+↑`/`Ctrl+↓` can hand a
+ * cursor and focus to, and that the arrow keys can walk once focus is here.
+ * Three things worth knowing before touching any of this:
+ *
+ * - **Roving tabindex *and* `aria-activedescendant`, deliberately both.**
+ *   These are normally alternative ARIA patterns; this dock uses both because
+ *   focus genuinely moves to the option (matching `explorer-tree.tsx`'s own
+ *   roving-tabindex precedent) *and* the containing listbox names the
+ *   highlighted option via `aria-activedescendant`. The redundancy is
+ *   harmless — an AT ignores `aria-activedescendant` on a container that
+ *   does not hold focus — and is recorded here so a later reader does not
+ *   "fix" one of them away. A consequence of there being **two** listboxes
+ *   (Agents, Workflows) sharing **one** cursor: `↓` off the last Agents row
+ *   moves focus across a listbox boundary into Workflows rather than
+ *   wrapping inside the group it left — deliberate (see `nextDockNavKey`'s
+ *   own "clamp, never wrap" doc comment in `lib/agent-dock.ts`).
+ * - **A group holding the cursor renders expanded, derived, never
+ *   `setState`d.** `expanded = !collapsed[g] || cursorIsInGroup(g)`. An
+ *   effect that expanded the group instead would be a `setState` from inside
+ *   a `useEffect`, which `react-hooks/set-state-in-effect` (error) forbids —
+ *   and both groups default collapsed, so without this a fresh pane's first
+ *   `Ctrl+↓` would highlight a row that is not in the DOM.
+ * - **DOM focus moves into the dock only when `focusRequest` changes, never
+ *   because the highlight moved.** A row's `onClick` calls `onHighlightChange`
+ *   with no focus option, so a mouse click highlights and selects a row
+ *   without ever pulling the caret out of the composer — WKWebView does not
+ *   focus a `<button>` on click either, so this matches what already happens
+ *   today. The focus-serving effect below depends on `focusRequest` alone
+ *   (never on `highlightedKey`) for exactly this reason.
+ *
+ * "Exactly one `Tab` stop" is true of the dock's **rows** only, deliberately
+ * not of the dock as a whole: the `DockGroup` header buttons (the twisties)
+ * and the Workflow `Stop` button stay ordinary tab stops outside the roving
+ * order, so `Tab` still passes through the dock more than once overall.
+ * Folding them in would need a `role="tree"`-shaped redesign of this
+ * component — a follow-up, not this one.
  */
 
-import { Fragment, useEffect, useState, type ReactElement, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import {
   combinedOrchestrationCounts,
   dockAgentRows,
   dockHasContent,
+  dockNavRows,
   dockWorkflowRows,
   liveToolRun,
+  nextDockNavKey,
   orchestrationCountsLabel,
   toolRunStartedAt,
   type DockRowStatus,
@@ -71,7 +118,7 @@ import {
   type ConversationState,
   type OrchestrationRun,
 } from "../../lib/agent-conversation";
-import { sameView, viewKey, type AgentViewId } from "../../lib/agent-views";
+import { MAIN_VIEW, sameView, viewKey, type AgentViewId } from "../../lib/agent-views";
 import { agentStopTask } from "../../lib/ipc";
 import { AgentSessionHud } from "./agent-session-hud";
 import { elapsedSecondsSinceMs, formatElapsed, formatTokens } from "./session-hud-format";
@@ -92,6 +139,36 @@ interface AgentActivityDockProps {
   /** `setSelectedView` itself, the same setter the picker and the
    *  transcript's delegation card call. */
   onSelectView: (id: AgentViewId) => void;
+  /** The row the keyboard cursor points at, as a `viewKey`. `null` = no
+   *  cursor. A key with no matching row (the entity aged out of the
+   *  transcript) renders as no highlight — self-healing, no effect required.
+   *  Changing *only* this never moves DOM focus. Required for the same
+   *  reason `selectedView` is: an optional highlight would let the dock
+   *  invent a second, silently diverging cursor. */
+  highlightedKey: string | null;
+  /** A one-shot request to put DOM focus on a row. `null` — the common case,
+   *  including every pointer interaction and every render after the request
+   *  was served — means "leave focus exactly where it is". `token`
+   *  distinguishes two consecutive requests for the same row (a clamped move
+   *  at the end of the list still has to re-focus). */
+  focusRequest: { key: string; token: number } | null;
+  /** Cursor moves originating inside the dock: arrow keys pass
+   *  `{ focus: true }` because focus is already here and must follow the
+   *  cursor; a row's `onClick` and a group collapse pass nothing, because a
+   *  pointer user's caret must stay in the composer. */
+  onHighlightChange: (key: string | null, opts?: { focus?: boolean }) => void;
+  /** "I am done here" — the pane returns focus to the composer editor at the
+   *  caret offset it was left at. Called on Enter/→/Esc/← from a row, and by
+   *  the dock's focus custodian when the row that was to receive (or was
+   *  holding) focus is no longer in the DOM. */
+  onReturnFocus: () => void;
+}
+
+/** `dock-opt-${paneId}-${key}` — unique across panes and detached windows.
+ *  Never used as a CSS selector, so the `:` inside a `sub:`/`wf:` key needs
+ *  no escaping. */
+function dockOptionId(paneId: string, key: string): string {
+  return `dock-opt-${paneId}-${key}`;
 }
 
 /** `${primaryRun.name ?? "orchestration"}` for one run, `"N orchestrations"`
@@ -189,6 +266,13 @@ function RowElapsed({
  * whole run). Otherwise the row's own body is a `<button>`, and `trailing`
  * (the Workflow Stop button) is its sibling, never its child — a `<button>`
  * nested inside a `<button>` is invalid HTML and breaks click handling.
+ *
+ * The outer `div.row` carries a role too (#22): `role="presentation"` when it
+ * has no `trailing`, or `role="group"` + `aria-label={name}` when it does — a
+ * bare `presentation` wrapper would make the Workflow `Stop` `<button>` a
+ * direct child of `role="listbox"`, which owns only `option`/`group`
+ * children, and a `group` wrapper keeps the tree conformant at no
+ * behavioural cost.
  */
 function DockRow(props: {
   view: AgentViewId | null;
@@ -205,6 +289,28 @@ function DockRow(props: {
   indent?: boolean;
   trailing?: ReactNode;
   testId: string;
+  /** Whether the keyboard cursor is on this row — orthogonal to `selected`
+   *  (plan D12/the ticket's "two different states, both visible"). Omitted
+   *  (defaults `false`) for a `view === null` (phase-agent) row: it is never
+   *  a cursor target. */
+  highlighted?: boolean;
+  /** Whether this row is the one `Tab` stop among the dock's rows (roving
+   *  tabindex). Omitted (defaults `false`) for a `view === null` row, which
+   *  carries no `tabIndex` at all. */
+  isTabStop?: boolean;
+  /** The DOM id this row's option carries, so `aria-activedescendant` on the
+   *  listbox above can name it. Omitted for a `view === null` row. */
+  optionId?: string;
+  /** Arrow/Enter/Escape handling — see `handleRowKeyDown` in the component
+   *  body. Omitted for a `view === null` row, which is not a Tab stop. */
+  onKeyDown?: (e: ReactKeyboardEvent<HTMLButtonElement>) => void;
+  /** Moves the keyboard cursor to this row with **no** focus request (D15) —
+   *  a mouse click highlights and selects without ever pulling the caret out
+   *  of the composer. Called with `viewKey(view)` — this row's own cursor
+   *  key — which the caller does not need to pass separately since `view` is
+   *  narrowed non-null wherever this fires. Omitted for a `view === null`
+   *  row. */
+  onHighlight?: (key: string) => void;
 }): ReactElement {
   const {
     view,
@@ -220,6 +326,11 @@ function DockRow(props: {
     indent,
     trailing,
     testId,
+    highlighted = false,
+    isTabStop = false,
+    optionId,
+    onKeyDown,
+    onHighlight,
   } = props;
   const metaText = meta.join(" · ");
   const body = (
@@ -236,19 +347,31 @@ function DockRow(props: {
       className={`${styles.row}${indent === true ? ` ${styles.rowIndent}` : ""}`}
       data-testid={testId}
       data-view-key={view === null ? undefined : viewKey(view)}
+      role={trailing !== undefined ? "group" : "presentation"}
+      aria-label={trailing !== undefined ? name : undefined}
     >
       {view !== null ? (
         <button
           type="button"
-          className={`${styles.rowMain}${selected ? ` ${styles.rowSelected}` : ""}`}
-          aria-current={selected ? "true" : undefined}
-          aria-label={`Show ${name} — ${word}`}
-          onClick={() => onSelect(view)}
+          id={optionId}
+          role="option"
+          className={`${styles.rowMain}${selected ? ` ${styles.rowSelected}` : ""}${highlighted ? ` ${styles.rowHighlighted}` : ""}`}
+          aria-selected={selected}
+          aria-label={`${name} — ${word}`}
+          data-highlighted={highlighted ? "true" : undefined}
+          tabIndex={isTabStop ? 0 : -1}
+          onKeyDown={onKeyDown}
+          onClick={() => {
+            onSelect(view);
+            onHighlight?.(viewKey(view));
+          }}
         >
           {body}
         </button>
       ) : (
-        <div className={styles.rowMain}>{body}</div>
+        <div className={styles.rowMain} role="option" aria-disabled="true" aria-label={`${name} — ${word}`}>
+          {body}
+        </div>
       )}
       {trailing ?? null}
     </div>
@@ -309,6 +432,10 @@ export function AgentActivityDock({
   paneId,
   selectedView,
   onSelectView,
+  highlightedKey,
+  focusRequest,
+  onHighlightChange,
+  onReturnFocus,
 }: AgentActivityDockProps): ReactElement | null {
   // One interval, gated exactly as the metrics strip's own ticker is —
   // nothing here ticks on a dead pane either, and the sub-agent/orchestration
@@ -335,19 +462,149 @@ export function AgentActivityDock({
     agents: true,
     workflows: true,
   });
-  function toggle(id: DockGroupKey): void {
-    setCollapsed((c) => ({ ...c, [id]: !c[id] }));
-  }
 
   // Task ids with a Stop request in flight — disables the button and blocks a
   // double-send without an optimistic status change: the wire, not this set,
   // decides when the run actually stops.
   const [stoppingTaskIds, setStoppingTaskIds] = useState<readonly string[]>([]);
 
+  // --- Keyboard-cursor derivations (#22) — hoisted above the early return
+  // below because the two effects that follow need them, and every one of
+  // these is a pure read of props/state (no hook rules to keep straight). ---
+  const navRows = dockNavRows(state);
+  const cursorGroup = navRows.find((r) => r.key === highlightedKey)?.group ?? null;
+  const selectedKey = viewKey(selectedView);
+  // D5: a group holding the cursor renders expanded, derived — never
+  // `setState`d from an effect (`react-hooks/set-state-in-effect` forbids
+  // it), and both groups default collapsed, so without this a fresh pane's
+  // first `Ctrl+↓` would highlight a row that never mounts.
+  const agentsExpanded = !collapsed.agents || cursorGroup === "agents";
+  const workflowsExpanded = !collapsed.workflows || cursorGroup === "workflows";
+  const renderedKeys = navRows
+    .filter((r) => (r.group === "agents" ? agentsExpanded : workflowsExpanded))
+    .map((r) => r.key);
+  // The single Tab stop among the dock's rows (roving tabindex): the cursor
+  // if it names a rendered row, else the selected row if rendered, else the
+  // first rendered row. `null` when nothing is on screen (both groups
+  // collapsed with no cursor) — correct, since there is nothing to tab to.
+  const tabStopKey =
+    (highlightedKey !== null && renderedKeys.includes(highlightedKey) ? highlightedKey : null) ??
+    (renderedKeys.includes(selectedKey) ? selectedKey : null) ??
+    (renderedKeys[0] ?? null);
+  /** The cursor points at a row that is not on screen — the entity aged out
+   *  (`/clear`, a restart) between two renders. */
+  const cursorLost = highlightedKey !== null && !renderedKeys.includes(highlightedKey);
+
+  function toggle(id: DockGroupKey): void {
+    // A click that is about to *collapse* a group holding the cursor would
+    // otherwise appear to do nothing — D5's derived expansion would keep the
+    // group open because the cursor is still inside it. Clearing the cursor
+    // first (no focus option: this is a pointer path) lets the click land.
+    if (!collapsed[id] && cursorGroup === id) {
+      // Review round 1, F1: if the cursor's own row is also the element
+      // holding *real* DOM focus right now (reached via Ctrl+↓/arrow keys,
+      // then the mouse took the twisty), clearing the cursor and collapsing
+      // the group land in this one commit — `cursorLost` never edges
+      // false→true (it was false before the click, since the row was
+      // rendered, and stays false after, since `highlightedKey` itself just
+      // became `null`), so the focus custodian effect below never fires. Left
+      // uncorrected, the browser's own "focused element removed from the DOM"
+      // behaviour would strand focus on `<body>`. Hand it back explicitly
+      // here instead of relying on that effect to also catch this case.
+      if (
+        highlightedKey !== null &&
+        document.activeElement?.id === dockOptionId(paneId, highlightedKey)
+      ) {
+        onReturnFocus();
+      }
+      onHighlightChange(null);
+    }
+    setCollapsed((c) => ({ ...c, [id]: !c[id] }));
+  }
+
+  /** Arrow/Enter/Escape on a focused dock option (plan step 2's keyboard
+   *  handler). Closes over `navRows`/`onHighlightChange`/`onSelectView`/
+   *  `onReturnFocus`, so it is defined here rather than hoisted to module
+   *  scope. Never fires with a modifier held — that is always a system or
+   *  future chord, never this dock's business. */
+  function handleRowKeyDown(
+    e: ReactKeyboardEvent<HTMLButtonElement>,
+    view: AgentViewId,
+    key: string,
+  ): void {
+    if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
+    switch (e.key) {
+      case "ArrowDown":
+      case "ArrowUp":
+        e.preventDefault(); // no page scroll
+        // `{ focus: true }`: focus is already in the dock and must follow
+        // the cursor. This and the composer's Ctrl+arrow are the only two
+        // callers that ask for focus (plan D15).
+        onHighlightChange(nextDockNavKey(navRows, key, e.key === "ArrowDown" ? 1 : -1), {
+          focus: true,
+        });
+        return;
+      case "ArrowRight":
+      case "Enter":
+        e.preventDefault(); // suppresses the button's synthesized click in a real browser
+        onSelectView(view);
+        onReturnFocus();
+        return;
+      case "ArrowLeft":
+      case "Escape":
+        e.preventDefault();
+        onSelectView(MAIN_VIEW);
+        onReturnFocus();
+        return;
+      default:
+        return;
+    }
+  }
+
+  // Serves a focus request. Depends on `focusRequest` alone (plus its own
+  // constants) — deliberately NOT on `highlightedKey`: a pointer click moves
+  // the cursor without asking for focus, and an effect that also watched the
+  // cursor would yank the caret out of the composer on every click (plan
+  // D15). `focusRequest === null` — every render after a request was served,
+  // and every render of a pane whose user has never asked for the dock — is
+  // the "leave focus alone" case.
+  useEffect(() => {
+    if (focusRequest === null) return;
+    const el = document.getElementById(dockOptionId(paneId, focusRequest.key));
+    if (el === null) {
+      // The row went away between the request and this frame. Focus would be
+      // stranded on <body>, where no key does anything — hand it back.
+      onReturnFocus();
+      return;
+    }
+    el.focus();
+  }, [focusRequest, paneId, onReturnFocus]);
+
+  // Focus custodian for the other direction: the row that HELD focus was
+  // removed (its sub-agent aged out) and the browser dropped focus to <body>.
+  // Fires on the false->true edge of `cursorLost` only, and the
+  // `document.body` guard means it never touches focus that is legitimately
+  // somewhere else (the composer, another pane). A mouse-driven group
+  // collapse never reaches this edge — clearing the cursor and collapsing
+  // land in one commit, so `cursorLost` stays `false` throughout — which is
+  // why `toggle()` above hands focus back itself instead of relying on this
+  // effect to catch it too (review round 1, F1).
+  useEffect(() => {
+    if (!cursorLost) return;
+    if (document.activeElement !== document.body) return;
+    onReturnFocus();
+  }, [cursorLost, onReturnFocus]);
+
   // Every hook above runs unconditionally, before this early return — the
   // rule that makes it safe for the dock to render `null` on some renders and
   // an element on others without breaking React's hook-order contract.
   if (!dockHasContent(state)) return null;
+
+  // Hoisted here (rather than computed inline where each group used to build
+  // itself) because the derivations above already need them — moved, not
+  // duplicated.
+  const agentRows = dockAgentRows(state);
+  const workflowRows = dockWorkflowRows(state);
 
   const groups: ReactElement[] = [];
 
@@ -387,7 +644,6 @@ export function AgentActivityDock({
   // count and ticker origin stay live-only, which is the only place "counts
   // degrade to nothing as agents finish" applies — the rows themselves never
   // disappear.
-  const agentRows = dockAgentRows(state);
   const runningAgents = agentRows.filter((r) => r.running);
   const oldestRunningAgent = runningAgents[0] ?? null;
   if (agentRows.length > 0) {
@@ -404,10 +660,20 @@ export function AgentActivityDock({
             ? null
             : formatElapsed(elapsedSecondsSinceMs(oldestRunningAgent.startedAt))
         }
-        expanded={!collapsed.agents}
+        expanded={agentsExpanded}
         onToggle={() => toggle("agents")}
       >
-        <div className={styles.rows} data-testid="dock-agent-rows">
+        <div
+          className={styles.rows}
+          data-testid="dock-agent-rows"
+          role="listbox"
+          aria-label="Sub-agents"
+          aria-activedescendant={
+            cursorGroup === "agents" && highlightedKey !== null
+              ? dockOptionId(paneId, highlightedKey)
+              : undefined
+          }
+        >
           {agentRows.map((row) => (
             <DockRow
               key={row.key}
@@ -422,6 +688,11 @@ export function AgentActivityDock({
               meta={present([row.toolCount > 0 ? `${row.toolCount} tools` : null])}
               elapsedMs={row.elapsedMs}
               running={row.running}
+              highlighted={row.key === highlightedKey}
+              isTabStop={row.key === tabStopKey}
+              optionId={dockOptionId(paneId, row.key)}
+              onKeyDown={(e) => handleRowKeyDown(e, row.view, row.key)}
+              onHighlight={onHighlightChange}
             />
           ))}
         </div>
@@ -436,7 +707,6 @@ export function AgentActivityDock({
   // run. The header's counts sum *every* run (D1 — a finished run's tally
   // still belongs in the total), while its elapsed origin stays the oldest
   // *live* run, same reasoning as the Agents header above.
-  const workflowRows = dockWorkflowRows(state);
   const liveRuns = activeOrchestrations(state);
   const oldestLiveRun = liveRuns[0] ?? null;
   if (workflowRows.length > 0) {
@@ -454,10 +724,20 @@ export function AgentActivityDock({
             ? null
             : formatElapsed(elapsedSecondsSinceMs(oldestLiveRun.startedAt))
         }
-        expanded={!collapsed.workflows}
+        expanded={workflowsExpanded}
         onToggle={() => toggle("workflows")}
       >
-        <div className={styles.rows} data-testid="dock-workflow-rows">
+        <div
+          className={styles.rows}
+          data-testid="dock-workflow-rows"
+          role="listbox"
+          aria-label="Workflow runs"
+          aria-activedescendant={
+            cursorGroup === "workflows" && highlightedKey !== null
+              ? dockOptionId(paneId, highlightedKey)
+              : undefined
+          }
+        >
           {workflowRows.map((row) => {
             const stopping = stoppingTaskIds.includes(row.taskId);
             return (
@@ -478,6 +758,11 @@ export function AgentActivityDock({
                   ])}
                   elapsedMs={row.elapsedMs}
                   running={row.running}
+                  highlighted={row.key === highlightedKey}
+                  isTabStop={row.key === tabStopKey}
+                  optionId={dockOptionId(paneId, row.key)}
+                  onKeyDown={(e) => handleRowKeyDown(e, row.view, row.key)}
+                  onHighlight={onHighlightChange}
                   trailing={
                     row.running ? (
                       <button
@@ -503,7 +788,12 @@ export function AgentActivityDock({
                   }
                 />
                 {row.phases.map((phase) => (
-                  <div className={styles.phase} key={phase.key}>
+                  <div
+                    className={styles.phase}
+                    key={phase.key}
+                    role="group"
+                    aria-label={phase.title}
+                  >
                     <span className={styles.phaseTitle}>{phase.title}</span>
                     {phase.agents.map((agent) => (
                       <DockRow
@@ -539,7 +829,7 @@ export function AgentActivityDock({
   }
 
   return (
-    <div className={styles.dock} data-testid="agent-activity-dock">
+    <div className={styles.dock} data-testid="agent-activity-dock" data-agent-dock>
       <AgentSessionHud state={state} cwd={cwd} />
       {groups.length > 0 ? <div className={styles.groups}>{groups}</div> : null}
     </div>
