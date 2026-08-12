@@ -14,7 +14,7 @@
  * keep the session — and the conversation, and the draft — when it does.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DragEvent, ReactElement } from "react";
 import {
   agentStart,
@@ -36,6 +36,8 @@ import { useAgentCatalogStore } from "../../stores/agent-catalog-store";
 import { readPathDragPayload } from "../../lib/explorer/drag-payload";
 import { logDnd } from "../../lib/drop-diagnostics";
 import { emptyConversation } from "../../lib/agent-conversation";
+import { dockNavRows, nextDockNavKey } from "../../lib/agent-dock";
+import { findComposerEditor, focusComposerAt } from "../../lib/composer-focus";
 import { AgentConversation } from "./agent-conversation";
 import { AgentComposer } from "./agent-composer";
 import { AgentViewPanel } from "./agent-view-panel";
@@ -57,6 +59,22 @@ import styles from "./agent-pane.module.css";
  *  close to the bottom counts as "still pinned". Carries the same figure the
  *  `<AgentConversation/>` listener this replaced used. */
 const STICK_TO_BOTTOM_PX = 40;
+
+/**
+ * The keyboard cursor over the activity dock's rows (#22) — a second piece
+ * of pane state, but not a second *selection*: `key` is a `viewKey(...)`
+ * string, never an `AgentViewId`, so it can never be mistaken for, or fed
+ * into, `resolveView`. `focus` is a one-shot "…and take DOM focus" request,
+ * carried *inside* the object rather than read from `key`, so the dock's
+ * focus effect can key off `focus` alone — every pointer move (a row click)
+ * changes `key` while leaving `focus`'s identity untouched, so that effect
+ * never re-fires and a mouse click can never pull the caret out of the
+ * composer (plan D15, fixing review round 1's B1).
+ */
+interface DockCursorState {
+  key: string | null;
+  focus: { key: string; token: number } | null;
+}
 
 interface AgentPaneProps {
   leafId: string;
@@ -235,6 +253,52 @@ export function AgentPane({
   const [retryToken, setRetryToken] = useState(0);
   const [dropActive, setDropActive] = useState(false);
   const [selectedView, setSelectedView] = useState<AgentViewId>(MAIN_VIEW);
+
+  // The dock keyboard cursor (#22) — see `DockCursorState`'s own doc comment
+  // above for why this is a separate piece of state from `selectedView`.
+  const [dockCursor, setDockCursor] = useState<DockCursorState>({
+    key: null,
+    focus: null,
+  });
+  /** Where the caret was in the composer when focus left for the dock, so the
+   *  return trip restores the user's place and not just their text. A ref:
+   *  nothing renders from it and writing it must not re-render. */
+  const composerCaretRef = useRef<number | null>(null);
+
+  /** The only two writers of `dockCursor`, and the only place focus intent is
+   *  decided: `focus` is set when — and only when — the user pressed a key to
+   *  enter or walk the dock. A row click reaches this with no options and
+   *  therefore carries the previous request object through unchanged, so the
+   *  dock's focus effect does not re-run (plan D15). */
+  const setDockCursorKey = useCallback(
+    (key: string | null, opts?: { focus?: boolean }): void => {
+      setDockCursor((c) =>
+        opts?.focus === true && key !== null
+          ? { key, focus: { key, token: (c.focus?.token ?? 0) + 1 } }
+          : { key, focus: c.focus },
+      );
+    },
+    [],
+  );
+
+  /** Ctrl+↑ / Ctrl+↓ from the composer: remember the caret, then move the
+   *  cursor *and* ask for focus. `rows` is computed outside the updater so
+   *  the updater stays a pure function of its argument. */
+  function moveDockCursor(delta: -1 | 1): void {
+    composerCaretRef.current = findComposerEditor(leafId)?.selectionStart ?? null;
+    const rows = dockNavRows(conv);
+    setDockCursor((c) => {
+      const next = nextDockNavKey(rows, c.key, delta);
+      if (next === null) return c.key === null ? c : { key: null, focus: c.focus };
+      return { key: next, focus: { key: next, token: (c.focus?.token ?? 0) + 1 } };
+    });
+  }
+
+  const returnFocusToComposer = useCallback((): void => {
+    const caret = composerCaretRef.current;
+    focusComposerAt(leafId, caret === null ? undefined : caret);
+  }, [leafId]);
+
   /**
    * Set by [`requestRestart`] immediately before it bumps `retryToken`, and
    * read (then cleared) by the lifecycle effect's cleanup. This is how the
@@ -726,13 +790,25 @@ export function AgentPane({
             state — the dock takes the resolved value and the setter as a
             prop pair rather than owning a second copy, so clicking a row
             here and picking the same entity in the composer can never
-            disagree. */}
+            disagree.
+
+            The keyboard *cursor* (#22) is a third, separate piece of state,
+            owned here rather than by the dock, because the composer's
+            Ctrl+↑/↓ must be able to move it too. It is a row key, never a
+            selection, so it can never be fed into `resolveView` by mistake.
+            Focus intent travels with it as a one-shot field precisely so a
+            mouse click on a row cannot take the caret out of the composer —
+            see `DockCursorState`'s own doc comment above. */}
         <AgentActivityDock
           state={conv}
           cwd={cwd}
           paneId={leafId}
           selectedView={effectiveView}
           onSelectView={setSelectedView}
+          highlightedKey={dockCursor.key}
+          focusRequest={dockCursor.focus}
+          onHighlightChange={setDockCursorKey}
+          onReturnFocus={returnFocusToComposer}
         />
 
         {/*
@@ -770,6 +846,7 @@ export function AgentPane({
           views={agentViews}
           selectedView={effectiveView}
           onSelectView={setSelectedView}
+          onEnterDock={moveDockCursor}
         />
 
         {dropActive ? (

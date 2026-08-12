@@ -6,8 +6,10 @@ import { describe, it, expect } from "vitest";
 import {
   dockAgentRows,
   dockHasContent,
+  dockNavRows,
   dockWorkflowRows,
   liveToolRun,
+  nextDockNavKey,
   toolRunStartedAt,
 } from "../agent-dock";
 import {
@@ -311,5 +313,74 @@ describe("dockWorkflowRows", () => {
     const [row] = dockWorkflowRows(state([], { orchestrations: [r] }));
     const [phase] = row?.phases ?? [];
     expect(phase?.agents[0]?.status).toBe("warn");
+  });
+});
+
+describe("dockNavRows", () => {
+  it("lists every agent row then every workflow run row, and no phase agents", () => {
+    const blocks = [
+      tool({ id: "a", name: "Task", startedAt: 0 }),
+      tool({ id: "b", name: "Task", startedAt: 100, endedAt: null }),
+    ];
+    const r = run({
+      taskId: "wf1",
+      agents: [agent({ index: 1, label: "red", phaseIndex: 1 })],
+      phases: [{ index: 1, title: "Alpha" }],
+    });
+    const s = state([turn(blocks)], { orchestrations: [r] });
+
+    const rows = dockNavRows(s);
+    expect(rows.map((row) => row.key)).toEqual([
+      "sub:a",
+      "sub:b",
+      "wf:wf1",
+    ]);
+    expect(rows.map((row) => row.group)).toEqual(["agents", "agents", "workflows"]);
+    // The phase agent ("red") carries no `AgentViewId` (it is `view: null` in
+    // the dock) and can never be a cursor target.
+    expect(rows.some((row) => row.label === "red")).toBe(false);
+  });
+
+  it("is empty for a session with no delegations", () => {
+    expect(dockNavRows(state([]))).toEqual([]);
+  });
+});
+
+describe("nextDockNavKey", () => {
+  const rows = [
+    { key: "a", view: { kind: "subagent", id: "a" } as const, label: "a", group: "agents" as const },
+    { key: "b", view: { kind: "subagent", id: "b" } as const, label: "b", group: "agents" as const },
+    { key: "c", view: { kind: "workflow", taskId: "c" } as const, label: "c", group: "workflows" as const },
+  ];
+
+  it("clamps at both ends instead of wrapping", () => {
+    expect(nextDockNavKey(rows, "c", 1)).toBe("c");
+    expect(nextDockNavKey(rows, "a", -1)).toBe("a");
+  });
+
+  it("enters at the first row going down and the last going up when there is no cursor", () => {
+    expect(nextDockNavKey(rows, null, 1)).toBe("a");
+    expect(nextDockNavKey(rows, null, -1)).toBe("c");
+  });
+
+  it("treats a key that names no row as no cursor", () => {
+    // The `/clear`-then-`Ctrl+↓` path: the previously-highlighted row aged
+    // out, so the next move must not throw and must not return the stale key.
+    expect(() => nextDockNavKey(rows, "gone", 1)).not.toThrow();
+    expect(nextDockNavKey(rows, "gone", 1)).toBe("a");
+    expect(nextDockNavKey(rows, "gone", -1)).toBe("c");
+  });
+
+  it("returns null for an empty list", () => {
+    expect(nextDockNavKey([], null, 1)).toBeNull();
+    expect(nextDockNavKey([], "a", 1)).toBeNull();
+  });
+
+  it("moves one row forward and backward from a live cursor", () => {
+    expect(nextDockNavKey(rows, "a", 1)).toBe("b");
+    expect(nextDockNavKey(rows, "b", -1)).toBe("a");
+    // Moving off the last Agents row into the Workflows group — deliberate,
+    // not a wrap: `dockNavRows` returns one flat list across both groups.
+    expect(nextDockNavKey(rows, "b", 1)).toBe("c");
   });
 });

@@ -14,11 +14,20 @@
 // "Session ended (exit 0)" after closing the shell beside their agent.
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { TerminalsLayout } from "../../../pages/terminal";
 import { useTerminalStore, type Tab } from "../../../stores/terminal-store";
 import { useAgentCatalogStore } from "../../../stores/agent-catalog-store";
 import { findLeaf } from "../../../lib/layout-tree";
+import { findComposerEditor } from "../../../lib/composer-focus";
 import * as ipc from "../../../lib/ipc";
 import type { AgentFrame } from "../../../lib/ipc";
 
@@ -121,6 +130,7 @@ const agentSetModelMock = ipc.agentSetModel as unknown as ReturnType<
 >;
 const agentSetPermissionModeMock =
   ipc.agentSetPermissionMode as unknown as ReturnType<typeof vi.fn>;
+const agentInterruptMock = ipc.agentInterrupt as unknown as ReturnType<typeof vi.fn>;
 
 /**
  * The claude-work provider as the sidecar serves it, seeded straight into the
@@ -277,6 +287,61 @@ function seedTab(tab: Tab, focusedLeafId: string): void {
   });
 }
 
+/**
+ * Boots one agent pane with a single open `Task` delegation (`toolu_task_1`,
+ * subagent_type `"reviewer"`) — the shared starting point every #22
+ * keyboard-navigation case below needs: a dock row to navigate to and a
+ * composer to navigate from. Mirrors the `init` + `tool_use` frame pair the
+ * "renders every view kind…"/"clicking a dock row…" tests above feed by
+ * hand, factored out once there is a fourth caller.
+ */
+async function bootPaneWithSubagent(
+  leafId: string,
+): Promise<{ feed: (frame: AgentFrame) => void; textarea: HTMLTextAreaElement }> {
+  seedCatalog();
+  seedTab(makeAgentTab(leafId), leafId);
+
+  render(<TerminalsLayout />);
+  await waitFor(() => expect(agentStartMock).toHaveBeenCalledTimes(1));
+  const feed = subscribeAgentFramesMock.mock.calls[0]?.[1] as (
+    frame: AgentFrame,
+  ) => void;
+
+  await act(async () => {
+    feed({
+      pane_id: leafId,
+      session_id: "session-1",
+      kind: "init",
+      raw: { type: "system", subtype: "init", model: "claude-opus-5" },
+    });
+  });
+  await act(async () => {
+    feed({
+      pane_id: leafId,
+      session_id: "session-1",
+      kind: "tool_use",
+      raw: {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_task_1",
+              name: "Task",
+              input: { description: "Review the diff", subagent_type: "reviewer" },
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  const textarea = findComposerEditor(leafId);
+  if (textarea === null) throw new Error("composer textarea not found");
+  return { feed, textarea };
+}
+
 beforeEach(() => {
   installLocalStorage();
   // `afterEach(cleanup)` below unmounts the previous test's tree, which
@@ -288,6 +353,7 @@ beforeEach(() => {
   agentStopMock.mockClear();
   agentSetModelMock.mockClear();
   agentSetPermissionModeMock.mockClear();
+  agentInterruptMock.mockClear();
   recordAgentLaunchMock.mockClear();
   recordAgentExitedMock.mockClear();
   useAgentCatalogStore.setState({
@@ -300,8 +366,17 @@ beforeEach(() => {
 
 // `afterEach(cleanup)` is mandatory: `frontend/vite.config.ts` does not set
 // `globals: true`, so Testing Library's auto-cleanup never registers.
+// `vi.unstubAllGlobals()` is #22's addition: two cases below need a
+// *deferring* `requestAnimationFrame` stub (the
+// `composer-focus-restore.test.tsx:36-43,62` idiom) to observe the picker's
+// post-pick focus/caret restore mid-flight, and installing one locally only
+// works if it cannot leak into every other test in this file. `localStorage`
+// is re-stubbed by `beforeEach` regardless, and the `beforeAll` globals above
+// are installed with `Object.defineProperty`, not `vi.stubGlobal`, so nothing
+// else here is affected.
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("agent pane render", () => {
@@ -1258,6 +1333,266 @@ describe("agent pane render", () => {
         },
       });
     });
+    expect(scrollTop).toBe(1000);
+  });
+
+  // -------------------------------------------------------------------------
+  // Keyboard navigation between agent views (#22) — the composer's
+  // `Ctrl+↑`/`Ctrl+↓`, the dock's own arrow/Enter/Escape handling, and the
+  // two focus-hand-back paths (D6/D16) that keep "the composer keeps focus
+  // for typing at all times" true for both the keyboard and the pointer.
+  // -------------------------------------------------------------------------
+
+  it("Ctrl+ArrowDown in the composer moves the dock cursor without touching the draft", async () => {
+    const { textarea } = await bootPaneWithSubagent("agent-kbd-ctrl-down");
+
+    fireEvent.change(textarea, { target: { value: "a draft in progress" } });
+    textarea.focus();
+
+    fireEvent.keyDown(textarea, { key: "ArrowDown", ctrlKey: true });
+
+    const option = screen.getByTestId("dock-agent-row").querySelector("button");
+    expect(option?.dataset.highlighted).toBe("true");
+    expect(document.activeElement).toBe(option);
+    expect(textarea.value).toBe("a draft in progress");
+  });
+
+  it("a bare ArrowUp in a non-empty draft is left to the textarea", async () => {
+    const { textarea } = await bootPaneWithSubagent("agent-kbd-bare-arrow");
+
+    fireEvent.change(textarea, { target: { value: "a draft in progress" } });
+    textarea.focus();
+
+    const event = createEvent.keyDown(textarea, { key: "ArrowUp" });
+    fireEvent(textarea, event);
+
+    // The ticket's hardest guarantee: nobody intercepted the keystroke, so
+    // the textarea's native caret movement is untouched.
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.querySelector("[data-highlighted]")).toBeNull();
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.value).toBe("a draft in progress");
+  });
+
+  it("clicking a dock row highlights it but leaves the caret in the composer", async () => {
+    const { textarea } = await bootPaneWithSubagent("agent-kbd-click-highlight");
+
+    textarea.focus();
+    expect(document.activeElement).toBe(textarea);
+
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement,
+    );
+
+    // jsdom's `fireEvent.click` does not move focus by itself, which is
+    // exactly what makes this assertion meaningful: the only way
+    // `activeElement` could have changed here is a *programmatic* `.focus()`
+    // — the dock's focus effect firing on a highlight-only change, which is
+    // the bug plan D15 exists to prevent.
+    expect(document.activeElement).toBe(textarea);
+    expect(
+      screen.getByTestId("dock-agent-row").querySelector("button")?.dataset.highlighted,
+    ).toBe("true");
+    expect(screen.getByTestId("agent-view-panel").dataset.viewKind).toBe("subagent");
+  });
+
+  it("picking a sub-agent from the composer picker returns focus to the textarea, and Escape then returns to the main transcript", async () => {
+    // A *deferring* rAF stub, not a synchronous one — see
+    // `composer-focus-restore.test.tsx`'s own comment for why a synchronous
+    // stub would let a caret-offset assertion pass for the wrong reason.
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    function flushFrames(): void {
+      for (let guard = 0; guard < 8 && frames.length > 0; guard += 1) {
+        for (const cb of frames.splice(0, frames.length)) cb(0);
+      }
+    }
+
+    const { textarea } = await bootPaneWithSubagent("agent-kbd-picker-focus");
+    fireEvent.change(textarea, { target: { value: "hi there" } });
+    // `fireEvent.change` assigns through the DOM setter, which resets the
+    // selection to end-of-text first — the explicit range below is what
+    // plants the mid-draft caret this test actually cares about.
+    textarea.setSelectionRange(3, 3);
+
+    const picker = screen.getByTestId("composer-view-picker") as HTMLSelectElement;
+    await waitFor(() =>
+      expect(picker.querySelector('option[value="sub:toolu_task_1"]')).not.toBeNull(),
+    );
+    await act(async () => {
+      fireEvent.change(picker, { target: { value: "sub:toolu_task_1" } });
+    });
+    flushFrames();
+
+    expect(screen.getByTestId("agent-view-panel").dataset.viewKind).toBe("subagent");
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.selectionStart).toBe(3);
+
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(screen.getByTestId("agent-conversation")).not.toBeNull();
+    expect(screen.queryByTestId("agent-view-panel")).toBeNull();
+    expect(picker.value).toBe("main");
+  });
+
+  it("Enter on the highlighted row opens it in Zone A and returns focus to the composer at the same caret offset", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    function flushFrames(): void {
+      for (let guard = 0; guard < 8 && frames.length > 0; guard += 1) {
+        for (const cb of frames.splice(0, frames.length)) cb(0);
+      }
+    }
+
+    const { textarea } = await bootPaneWithSubagent("agent-kbd-enter-open");
+    fireEvent.change(textarea, { target: { value: "hello world" } });
+    textarea.setSelectionRange(5, 5);
+    textarea.focus();
+
+    fireEvent.keyDown(textarea, { key: "ArrowDown", ctrlKey: true });
+    const option = screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement;
+    expect(document.activeElement).toBe(option);
+
+    fireEvent.keyDown(option, { key: "Enter" });
+    flushFrames();
+
+    expect(screen.getByTestId("agent-view-panel").dataset.viewKind).toBe("subagent");
+    expect(
+      (screen.getByTestId("composer-view-picker") as HTMLSelectElement).value,
+    ).toBe("sub:toolu_task_1");
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.selectionStart).toBe(5);
+    expect(textarea.value).toBe("hello world");
+  });
+
+  it("Escape while viewing a sub-agent returns to the main transcript, and a second Escape interrupts", async () => {
+    const { feed, textarea } = await bootPaneWithSubagent("agent-kbd-escape-back");
+
+    const picker = screen.getByTestId("composer-view-picker") as HTMLSelectElement;
+    await waitFor(() =>
+      expect(picker.querySelector('option[value="sub:toolu_task_1"]')).not.toBeNull(),
+    );
+    await act(async () => {
+      fireEvent.change(picker, { target: { value: "sub:toolu_task_1" } });
+    });
+    expect(screen.getByTestId("agent-view-panel")).not.toBeNull();
+
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(screen.getByTestId("agent-conversation")).not.toBeNull();
+    expect(screen.queryByTestId("agent-view-panel")).toBeNull();
+    expect(agentInterruptMock).not.toHaveBeenCalled();
+
+    // A second Escape, now that Zone A is back on `main`, still interrupts —
+    // the drill-in layering (plan D9) costs the running session nothing.
+    await act(async () => {
+      feed({
+        pane_id: "agent-kbd-escape-back",
+        session_id: "session-1",
+        kind: "system",
+        raw: { type: "system", subtype: "status", status: "requesting" },
+      });
+    });
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    await waitFor(() => expect(agentInterruptMock).toHaveBeenCalledWith("agent-kbd-escape-back"));
+  });
+
+  it("Escape on a focused dock row leaves the drill-in and returns focus to the composer", async () => {
+    const { textarea } = await bootPaneWithSubagent("agent-kbd-escape-row");
+
+    const picker = screen.getByTestId("composer-view-picker") as HTMLSelectElement;
+    await waitFor(() =>
+      expect(picker.querySelector('option[value="sub:toolu_task_1"]')).not.toBeNull(),
+    );
+    await act(async () => {
+      fireEvent.change(picker, { target: { value: "sub:toolu_task_1" } });
+    });
+    // Real (unstubbed) `requestAnimationFrame` here — `waitFor` polls with
+    // real timers, which is enough to observe the picker's own focus
+    // hand-back (D16) land before the next step.
+    await waitFor(() => expect(document.activeElement).toBe(textarea));
+    expect(screen.getByTestId("agent-view-panel")).not.toBeNull();
+
+    fireEvent.keyDown(textarea, { key: "ArrowDown", ctrlKey: true });
+    const option = screen.getByTestId("dock-agent-row").querySelector("button");
+    expect(document.activeElement).toBe(option);
+
+    fireEvent.keyDown(option as HTMLButtonElement, { key: "Escape" });
+    expect(screen.getByTestId("agent-conversation")).not.toBeNull();
+    expect(screen.queryByTestId("agent-view-panel")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(textarea));
+  });
+
+  it("Escape on a focused dock row still works while the pane is maximized", async () => {
+    const LEAF = "agent-kbd-escape-maximized";
+    const { textarea } = await bootPaneWithSubagent(LEAF);
+
+    const picker = screen.getByTestId("composer-view-picker") as HTMLSelectElement;
+    await waitFor(() =>
+      expect(picker.querySelector('option[value="sub:toolu_task_1"]')).not.toBeNull(),
+    );
+    await act(async () => {
+      fireEvent.change(picker, { target: { value: "sub:toolu_task_1" } });
+    });
+
+    useTerminalStore.getState().toggleMaximize(LEAF);
+    expect(useTerminalStore.getState().maximizedLeafId).toBe(LEAF);
+
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: "ArrowDown", ctrlKey: true });
+    const option = screen.getByTestId("dock-agent-row").querySelector("button");
+    expect(document.activeElement).toBe(option);
+
+    fireEvent.keyDown(option as HTMLButtonElement, { key: "Escape" });
+
+    expect(screen.getByTestId("agent-conversation")).not.toBeNull();
+    expect(screen.queryByTestId("agent-view-panel")).toBeNull();
+    // The dock's own Escape handling won, not the maximize-restore shortcut.
+    expect(useTerminalStore.getState().maximizedLeafId).toBe(LEAF);
+  });
+
+  it("keyboard switching preserves each view's scroll position", async () => {
+    const LEAF = "agent-kbd-scroll-memory";
+    const { textarea } = await bootPaneWithSubagent(LEAF);
+
+    const viewport = screen.getByTestId("agent-pane-viewport");
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 4000 });
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 300 });
+    let scrollTop = 0;
+    Object.defineProperty(viewport, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = v;
+      },
+    });
+
+    // `main` is pinned to the bottom by default; the user scrolls away.
+    scrollTop = 1000;
+    fireEvent.scroll(viewport);
+
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: "ArrowDown", ctrlKey: true });
+    const option = screen.getByTestId("dock-agent-row").querySelector("button") as HTMLButtonElement;
+    fireEvent.keyDown(option, { key: "Enter" });
+
+    // A view this mount has never shown starts pinned to the bottom — not
+    // left wherever `main` happened to leave `scrollTop`.
+    expect(scrollTop).toBe(4000);
+
+    fireEvent.keyDown(textarea, { key: "Escape" });
+
+    // Back on `main`, the exact offset the user had scrolled to survives the
+    // keyboard round trip — the same single scroll-memory implementation
+    // (#23) the composer picker already exercises, not a second one.
     expect(scrollTop).toBe(1000);
   });
 });

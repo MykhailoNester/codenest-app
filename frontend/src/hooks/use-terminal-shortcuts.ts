@@ -31,15 +31,16 @@ export function useTerminalShortcuts(): void {
       // a pane is maximized; otherwise the keystroke flows to xterm/shell.
       if (e.key === "Escape" && store.maximizedLeafId !== null) {
         // Bail out if any modal-ish overlay — or the composer / permission
-        // dialog, which each own Escape themselves (interrupt / deny) — owns
-        // the keypress already.
+        // dialog / activity dock, each of which owns Escape themselves
+        // (interrupt or back-to-main / deny / back-to-main) — owns the
+        // keypress already.
         const t = e.target as HTMLElement | null;
         const isInModal =
           t?.closest?.(
-            "[data-modal], [data-agent-composer], [data-permission-dialog]",
+            "[data-modal], [data-agent-composer], [data-permission-dialog], [data-agent-dock]",
           ) !== null &&
           t?.closest?.(
-            "[data-modal], [data-agent-composer], [data-permission-dialog]",
+            "[data-modal], [data-agent-composer], [data-permission-dialog], [data-agent-dock]",
           ) !== undefined;
         if (!isInModal) {
           e.preventDefault();

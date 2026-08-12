@@ -85,6 +85,7 @@ import { slashRowToSuggest, mentionRowToSuggest, type SuggestRow } from "../../l
 import { SuggestPanel, MentionSourceProbe } from "./composer-suggest";
 import { focusComposerAt, resizeComposerEditor } from "../../lib/composer-focus";
 import {
+  MAIN_VIEW,
   parseViewKey,
   viewKey,
   type AgentViewId,
@@ -111,6 +112,11 @@ interface AgentComposerProps {
   views?: AgentViewOption[];
   selectedView?: AgentViewId;
   onSelectView?: (id: AgentViewId) => void;
+  /** `Ctrl+↑` / `Ctrl+↓`: ask the pane to move the dock cursor by `delta` and
+   *  give the dock focus. Absent = the pane is not wired for it (the six test
+   *  files that render `<AgentComposer/>` on its own), and the key falls
+   *  through to the textarea's native caret movement untouched. */
+  onEnterDock?: (delta: -1 | 1) => void;
 }
 
 const MAX_HISTORY_PILLS = 6;
@@ -702,6 +708,7 @@ export function AgentComposer({
   views,
   selectedView,
   onSelectView,
+  onEnterDock,
 }: AgentComposerProps): ReactElement {
   const pane = useComposerStore((s) => s.panes[leafId]);
   const draft = pane?.draft ?? "";
@@ -1189,6 +1196,40 @@ export function AgentComposer({
       setPopover(null);
       return;
     }
+    // Ctrl+↑ / Ctrl+↓ — hand the dock a cursor and the focus. Below the menu
+    // branches on purpose: while the `/`- or `@`-menu is open it owns the
+    // arrows (it ignores modifiers), and dismissing it with Escape first is
+    // one keystroke. Never fires with ⌘/⌥/⇧ held, so it cannot shadow a
+    // system or future chord. Nothing here reads or writes the draft — that
+    // is the whole "draft untouched" guarantee (plan D8). `preventDefault`
+    // does suppress paragraph-wise caret movement on Windows/Linux textareas;
+    // accepted on the macOS target.
+    if (
+      e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      (e.key === "ArrowUp" || e.key === "ArrowDown") &&
+      onEnterDock
+    ) {
+      e.preventDefault();
+      onEnterDock(e.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
+    // Escape while Zone A shows a drill-in view: leave the view before
+    // considering an interrupt — the same layering the popover branch above
+    // already applies, and a second Escape still interrupts. Reachable from
+    // the picker path too, because the picker returns focus here (D16).
+    if (
+      e.key === "Escape" &&
+      selectedView !== undefined &&
+      selectedView.kind !== "main" &&
+      onSelectView
+    ) {
+      e.preventDefault();
+      onSelectView(MAIN_VIEW);
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -1312,7 +1353,20 @@ export function AgentComposer({
             className={styles.viewPick}
             aria-label="Show which agent"
             value={viewKey(selectedView ?? { kind: "main" })}
-            onChange={(e) => onSelectView(parseViewKey(e.currentTarget.value))}
+            onChange={(e) => {
+              onSelectView(parseViewKey(e.currentTarget.value));
+              // Hand focus back to the editor, exactly as the recall pill
+              // does below. Without this the caret is left on the <select>,
+              // where Escape reaches no handler at all — `handleKeyDown` is
+              // bound only on the textarea and the window-level Escape bails
+              // on `[data-agent-composer]` — so "Escape while viewing a
+              // sub-agent returns to the main transcript" would silently not
+              // hold for the pointer user, who is the likeliest one to be
+              // standing here (plan D16). The caret is read off the blurred
+              // textarea, which retains its selection, so a pick costs the
+              // user neither their draft nor their place.
+              focusComposerAt(leafId, textareaRef.current?.selectionStart ?? undefined);
+            }}
             data-testid="composer-view-picker"
           >
             {views.map((v) => (
@@ -1538,7 +1592,12 @@ export function AgentComposer({
               <span className={styles.kbd}>/</span> commands ·{" "}
               <span className={styles.kbd}>@</span> mention ·{" "}
               <span className={styles.kbd}>⇧↩</span> newline ·{" "}
-              <span className={styles.kbd}>esc</span> interrupt ·{" "}
+              <span className={styles.kbd}>⌃↑↓</span> agents ·{" "}
+              <span className={styles.kbd}>esc</span>{" "}
+              {selectedView !== undefined && selectedView.kind !== "main"
+                ? "back to main"
+                : "interrupt"}{" "}
+              ·{" "}
               <span className={styles.kbd}>⌘Z</span> undo
             </>
           )}

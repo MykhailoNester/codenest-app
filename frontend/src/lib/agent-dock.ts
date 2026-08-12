@@ -392,3 +392,61 @@ export function combinedOrchestrationCounts(
     { phases: 0, agentsDone: 0, agentsTotal: 0 },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Keyboard navigation over the dock rows (#22). A `DockNavRow` is the
+// cursor's currency — a flat list in the exact order the dock renders rows,
+// so walking it with the arrow keys can never disagree with what the user
+// sees. Phase-agent rows are excluded: they carry no `AgentViewId`
+// (`agent-activity-dock.tsx` passes `view={null}` for them), so there is
+// nothing for Enter to open.
+// ---------------------------------------------------------------------------
+
+/** One keyboard-navigable dock row, in the order the dock renders them: every
+ *  Agents row, then every Workflows *run* row (never a phase-agent row). */
+export interface DockNavRow {
+  /** `viewKey(view)` — the cursor's currency. */
+  key: string;
+  view: AgentViewId;
+  /** For the option's accessible name. */
+  label: string;
+  /** Which collapse flag must be open for this row to be on screen. */
+  group: "agents" | "workflows";
+}
+
+/** The dock's rows in render order: every Agents row, then every Workflows
+ *  run row. No sort — it must match render order exactly. */
+export function dockNavRows(state: ConversationState): DockNavRow[] {
+  const agents: DockNavRow[] = dockAgentRows(state).map((row) => ({
+    key: row.key,
+    view: row.view,
+    label: row.label,
+    group: "agents",
+  }));
+  const workflows: DockNavRow[] = dockWorkflowRows(state).map((row) => ({
+    key: row.key,
+    view: row.view,
+    label: row.label,
+    group: "workflows",
+  }));
+  return [...agents, ...workflows];
+}
+
+/** The row a cursor move lands on. Clamped, never wrapping (plan D10):
+ *  forward at the last row and backward at the first both return that same
+ *  key. `current` that names no row (the entity aged out) is treated as "no
+ *  cursor" — a forward move enters at the first row, a backward one at the
+ *  last. `null` only for an empty list. */
+export function nextDockNavKey(
+  rows: readonly DockNavRow[],
+  current: string | null,
+  delta: -1 | 1,
+): string | null {
+  if (rows.length === 0) return null;
+  const index = current === null ? -1 : rows.findIndex((r) => r.key === current);
+  if (index === -1) {
+    return delta === 1 ? (rows[0]?.key ?? null) : (rows[rows.length - 1]?.key ?? null);
+  }
+  const next = Math.max(0, Math.min(rows.length - 1, index + delta));
+  return rows[next]?.key ?? null;
+}
