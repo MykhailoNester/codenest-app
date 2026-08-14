@@ -97,7 +97,17 @@ interface ComposerStore {
   setDraft: (paneId: string, draft: string) => void;
   /** Place a launch-composed prompt into a pane's draft without sending it
    *  (#32). Never clobbers text the user already typed: an empty draft is
-   *  replaced, a non-empty one gets the prompt appended after a blank line. */
+   *  replaced, a non-empty one gets the prompt appended after a blank line.
+   *
+   *  **Not sending is the contract, not an omission.** The PTY path this
+   *  replaced pasted the prompt into the TUI's input and deliberately left the
+   *  Enter to the user (`terminal-store.ts`'s bracketed-paste comment says so
+   *  outright); a native pane makes auto-submit a one-line change, which is
+   *  exactly why the restraint has to be written down. A seeded prompt is a
+   *  draft the launcher composed *for* the user — from a ticket body they may
+   *  not have re-read — and firing it lands an agent with edit permissions on
+   *  work nobody confirmed. Keep the human beat: seed the draft, let them press
+   *  Enter. */
   seedDraft: (paneId: string, text: string) => void;
   addPills: (paneId: string, pills: ContextPill[]) => void;
   removePill: (paneId: string, pillId: string) => void;
