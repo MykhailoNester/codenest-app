@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { enqueue, consume, subscribe } from "../pending-launch-store";
-import type { LaunchSpec } from "../../lib/launch";
+import {
+  isPaneLaunchSpec,
+  type LaunchSpec,
+  type PaneLaunchSpec,
+} from "../../lib/launch";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,6 +20,16 @@ function makeSpec(target: "embedded" | "popout" = "embedded"): LaunchSpec {
     cols: 1,
     target,
     profileId: null,
+  };
+}
+
+function makePaneSpec(
+  target: "embedded" | "popout" = "embedded",
+): PaneLaunchSpec {
+  return {
+    panes: [{ kind: "agent", providerId: 1 }],
+    split: "cols",
+    target,
   };
 }
 
@@ -89,7 +103,30 @@ describe("pending-launch-store", () => {
     enqueue(spec1);
     enqueue(spec2);
     const result = consume("embedded");
-    expect(result?.cwd).toBe("/other/path");
+    // Narrowed for the union (D14): `LaunchSpec` has no `panes`/`split`, so
+    // `result.cwd` is TS2339 on `AnyLaunchSpec` without this check first. This
+    // also pins that a `LaunchSpec` does not accidentally satisfy
+    // `isPaneLaunchSpec` — not just "the second enqueue wins".
+    if (result === null || isPaneLaunchSpec(result)) {
+      throw new Error("expected the legacy LaunchSpec back");
+    }
+    expect(result.cwd).toBe("/other/path");
+  });
+
+  it("a PaneLaunchSpec round-trips through the popout slot and is recognised by isPaneLaunchSpec", () => {
+    const spec = makePaneSpec("popout");
+    enqueue(spec);
+    const result = consume("popout");
+    expect(result).toEqual(spec);
+    expect(result !== null && isPaneLaunchSpec(result)).toBe(true);
+  });
+
+  it("a legacy LaunchSpec still round-trips and is not recognised as a pane spec", () => {
+    const spec = makeSpec("embedded");
+    enqueue(spec);
+    const result = consume("embedded");
+    expect(result).toEqual(spec);
+    expect(result !== null && isPaneLaunchSpec(result)).toBe(false);
   });
 
   // ─── subscribe ────────────────────────────────────────────────────────────

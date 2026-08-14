@@ -385,12 +385,21 @@ describe("useTerminalStore", () => {
 
   describe("persistToStorage", () => {
     it("keeps kind on a leaf that also carries initCommand (stripInitCommands regression)", () => {
+      // `providerId`/`permissionMode` pin the fix `stripLaunchOnlyFields`'s
+      // copy-and-delete rewrite makes for free: the field-by-field rebuild it
+      // replaced enumerated fields to keep and had silently dropped
+      // `permissionMode` from that list — dormant only because no leaf had
+      // both `initCommand` and `permissionMode` at once until this test.
+      // `seed` pins the new field this rewrite was written to strip.
       const leaf: PaneLeaf = {
         type: "leaf",
         terminalId: "agent-1",
         title: "claude",
         kind: "agent",
+        providerId: 3,
+        permissionMode: "plan",
         initCommand: "claude\n",
+        seed: { projectId: 7, promptPreview: "fix the flaky test" },
       };
       useTerminalStore.setState({
         tabs: [{ id: "tab-1", title: "Tab", layout: leaf }],
@@ -407,7 +416,10 @@ describe("useTerminalStore", () => {
       };
       const persistedLeaf = parsed.tabs[0]!.layout;
       expect(persistedLeaf.kind).toBe("agent");
+      expect(persistedLeaf.providerId).toBe(3);
+      expect(persistedLeaf.permissionMode).toBe("plan");
       expect(persistedLeaf.initCommand).toBeUndefined();
+      expect(persistedLeaf.seed).toBeUndefined();
     });
   });
 

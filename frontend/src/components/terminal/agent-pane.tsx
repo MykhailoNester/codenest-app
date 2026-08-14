@@ -25,6 +25,7 @@ import {
   type AgentFrame,
 } from "../../lib/ipc";
 import { useAgentSessionStore } from "../../stores/agent-session-store";
+import type { PaneLaunchSeed } from "../../lib/layout-tree";
 import { useComposerStore, CODENEST_PATHS_MIME } from "../../stores/composer-store";
 import { useTerminalStore } from "../../stores/terminal-store";
 import {
@@ -89,6 +90,17 @@ interface AgentPaneProps {
   /** The permission mode persisted on this leaf, if the user has picked one.
    *  Absent means no `--permission-mode` flag at spawn: the CLI's own default. */
   permissionMode?: string;
+  /**
+   * Launch-time telemetry attribution (project/profile/source/prompt-preview)
+   * from a programmatic launch's leaf (`buildPaneLayout`, `lib/launch.ts`).
+   * Spread into the boot effect's `recordAgentLaunch` call below on every
+   * boot — including a `retryToken` restart, which correctly re-stamps the
+   * same attribution onto the new session since it is the same launch.
+   * Never persisted: `terminal-store.persistToStorage` strips `seed` off the
+   * leaf before it reaches localStorage, so a *rehydrated* tab starts with no
+   * seed at all rather than re-crediting a launch from a previous run.
+   */
+  seed?: PaneLaunchSeed;
 }
 
 /**
@@ -230,6 +242,7 @@ export function AgentPane({
   providerId,
   model,
   permissionMode,
+  seed,
 }: AgentPaneProps): ReactElement {
   const conversation = useAgentSessionStore((s) => s.panes[leafId]);
   const markStarting = useAgentSessionStore((s) => s.markStarting);
@@ -417,6 +430,21 @@ export function AgentPane({
           cwd: resolvedCwd,
           model: selection.model,
           target: currentPaneTarget(),
+          // Launch attribution from a programmatic launch's leaf seed — absent
+          // for a hand-split agent pane, which stamps none of this (D5/D7 in
+          // the ordered-pane-list plan; the sidecar already parses all four).
+          ...(seed?.projectId !== undefined
+            ? { project_id: seed.projectId }
+            : {}),
+          ...(seed?.profileName !== undefined
+            ? { profile: seed.profileName }
+            : {}),
+          ...(seed?.sourceKind !== undefined
+            ? { source_kind: seed.sourceKind, source_id: seed.sourceId ?? null }
+            : {}),
+          ...(seed?.promptPreview !== undefined
+            ? { prompt_preview: seed.promptPreview }
+            : {}),
         });
       } catch (err) {
         startedPanes.delete(bootKey);
@@ -463,7 +491,9 @@ export function AgentPane({
     // `leafId` and a user-clicked Restart should re-run this lifecycle.
     // `permissionMode` in particular must stay out: it changes on every live
     // mode switch, and re-running this effect would restart the session the
-    // control channel just switched in place.
+    // control channel just switched in place. `seed` is read from the closure
+    // for the same reason — it never changes for a mounted pane, and adding
+    // it here would only invite a future edit to depend on its identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leafId, retryToken]);
 

@@ -32,9 +32,11 @@ import {
 } from "../lib/layout-tree";
 import {
   buildGridLayout,
+  buildPaneLayout,
   safeInjectClaudeArgs,
   type LaunchCell,
   type LaunchSpec,
+  type PaneLaunchSpec,
 } from "../lib/launch";
 
 // Tauri's `listen` reads `window.__TAURI_INTERNALS__`, which is absent outside
@@ -70,6 +72,19 @@ const STORAGE_KEY = "codenest.terminal.state";
 /** Result returned by `applyGridLayout`. */
 export interface ApplyGridLayoutResult {
   openedCount: number;
+  failedCount: number;
+}
+
+/** Result returned by `applyPaneLayout`. */
+export interface ApplyPaneLayoutResult {
+  /**
+   * Leaves successfully placed — an agent leaf counts here too, even though
+   * it has no PTY behind it (`<AgentPane/>` starts the session on mount): it
+   * *did* mount successfully, which is the thing this count answers for.
+   * Only a shell pane can ever land in `failedCount` instead.
+   */
+  openedCount: number;
+  /** Shell panes whose `open_terminal` rejected — rendered as `<EmptyPane/>`. */
   failedCount: number;
 }
 
@@ -180,6 +195,27 @@ export interface TerminalStore {
    * placeholders (`leaf.empty === true`).
    */
   applyGridLayout: (spec: LaunchSpec) => Promise<ApplyGridLayoutResult>;
+  /**
+   * Build a pane-list layout from `spec` (`buildPaneLayout`), open one PTY per
+   * shell pane, add the resulting tab as the active tab, and return
+   * `{ openedCount, failedCount }`.
+   *
+   * An agent leaf gets no PTY and no `recordAgentLaunch` call from here —
+   * `<AgentPane/>` starts the session and posts its own launch telemetry on
+   * mount, using the leaf's `seed` for attribution. `spec.prompt` and every
+   * pane's `sendPrompt` are transported onto the built layout (as a
+   * `promptPreview` on an agent leaf's `seed`) but not otherwise acted on —
+   * prompt delivery is `feature/launch-prompt-seed` (#32), not this action.
+   *
+   * Individual shell-pane failures do NOT abort siblings (`Promise.allSettled`);
+   * a failed leaf becomes an `<EmptyPane/>` (`empty: true`) rather than a dead
+   * reference to a PTY that was never opened.
+   *
+   * Throws `RangeError` (via `buildPaneLayout`) before touching any state or
+   * IPC when `spec.panes.length` is out of range — a rejected spec leaves no
+   * half-built tab.
+   */
+  applyPaneLayout: (spec: PaneLaunchSpec) => Promise<ApplyPaneLayoutResult>;
   /**
    * Replace an empty-pane placeholder with a real PTY.
    *
@@ -769,14 +805,18 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         tabs: tabs.map((t) => ({
           id: t.id,
           title: t.title,
-          // Strip initCommand from every leaf before persisting.  Provider CLI
-          // commands (written by applyGridLayout) must not be re-issued when the
-          // embedded Terminal page is opened after a previous Launch session:
-          // hydrateFromStorage calls sendTerminalInput for any leaf that carries
-          // initCommand, which would auto-spawn claude (or another provider) in
-          // every restored pane.  Plain shell tabs never set initCommand, so
-          // this strip is a no-op for them.
-          layout: stripInitCommands(t.layout),
+          // Strip initCommand and seed from every leaf before persisting.
+          // Provider CLI commands (written by applyGridLayout/applyPaneLayout)
+          // must not be re-issued when the embedded Terminal page is opened
+          // after a previous Launch session: hydrateFromStorage calls
+          // sendTerminalInput for any leaf that carries initCommand, which
+          // would auto-spawn claude (or another provider) in every restored
+          // pane. A rehydrated agent leaf must not re-stamp its launch
+          // attribution either — `seed` is read once by `<AgentPane/>` on the
+          // mount that actually launched it, not by a restart days later.
+          // Plain shell tabs never set either field, so this strip is a
+          // no-op for them.
+          layout: stripLaunchOnlyFields(t.layout),
         })),
         activeTabId,
       };
@@ -1071,6 +1111,103 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     return { openedCount, failedCount };
   },
 
+  applyPaneLayout: async (spec) => {
+    // Throws before any side effect (RangeError for an out-of-range pane
+    // count) — a rejected spec leaves no half-built tab.
+    const layoutTemplate = buildPaneLayout(spec);
+    const placeholders = collectLeaves(layoutTemplate);
+
+    // `i` ↔ `spec.panes[i]`: both splits `buildPaneLayout` can produce are
+    // built left/top-first, so `collectLeaves` returns leaves in the same
+    // order the spec's `panes` array was given in.
+    const results = await Promise.allSettled(
+      placeholders.map(async (placeholder, i) => {
+        const pane = spec.panes[i];
+        if (pane === undefined) {
+          // Unreachable — `buildPaneLayout` emits exactly one leaf per pane.
+          throw new Error(`applyPaneLayout: no pane at index ${i}`);
+        }
+
+        if (pane.kind === "agent") {
+          // No IPC at all — `<AgentPane/>` starts the duplex `claude` session
+          // (and posts its own `recordAgentLaunch`, with this leaf's `seed`
+          // for attribution) on mount.
+          return { placeholderId: placeholder.terminalId, realId: genId() };
+        }
+
+        const env =
+          pane.env !== undefined && Object.keys(pane.env).length > 0
+            ? pane.env
+            : undefined;
+        const handle = await openTerminal({
+          ...(pane.cwd !== undefined ? { cwd: pane.cwd } : {}),
+          ...(env !== undefined ? { env } : {}),
+          ...(pane.shell !== undefined ? { shell: pane.shell } : {}),
+        });
+        // `placeholder.initCommand` (not `pane.command`) — it already carries
+        // the trailing-newline normalisation `buildPaneLayout` applied.
+        if (placeholder.initCommand !== undefined) {
+          await sendTerminalInput(handle.id, placeholder.initCommand);
+        }
+        return { placeholderId: placeholder.terminalId, realId: handle.id };
+      }),
+    );
+
+    // Apply all replacements sequentially — same reason as `applyGridLayout`
+    // above: concurrent writes to one `layout` variable would race.
+    let layout: LayoutNode = layoutTemplate;
+    let openedCount = 0;
+    let failedCount = 0;
+
+    results.forEach((result, i) => {
+      if (result.status === "fulfilled") {
+        layout = replaceLeafId(
+          layout,
+          result.value.placeholderId,
+          result.value.realId,
+        );
+        openedCount++;
+        return;
+      }
+      failedCount++;
+      // A rejected shell pane keeps its `pending-N` id and is tagged empty
+      // instead, so it renders `<EmptyPane/>` with a working retry rather
+      // than a `<TerminalPane/>` bound to a PTY that was never opened.
+      const placeholder = placeholders[i];
+      if (placeholder !== undefined) {
+        layout = _setLeafEmpty(layout, placeholder.terminalId, true);
+      }
+    });
+
+    const tabId = genId();
+    const newTab: Tab = {
+      id: tabId,
+      // No meaning for "rows×cols" here — a pane list has no dimensions. A
+      // per-kind label (e.g. "2 agents + 1 shell") is a UI concern the
+      // composer (#30) can rename this into.
+      title: `Launch ${spec.panes.length}`,
+      layout,
+    };
+
+    // Focus the first non-empty leaf, if any.
+    const firstRealId =
+      collectLeaves(layout).find((l) => !l.empty)?.terminalId ??
+      collectLeafIds(layout)[0] ??
+      null;
+
+    set((state) => ({
+      tabs: [...state.tabs, newTab],
+      activeTabId: tabId,
+      focusedLeafId: firstRealId,
+      maximizedLeafId: null,
+      // Mark hydrated for the same reason `applyGridLayout` does above: stop
+      // `TerminalsLayout` replacing this tab with the persisted ones.
+      hydrated: true,
+    }));
+
+    return { openedCount, failedCount };
+  },
+
   replaceEmptyLeaf: async (leafId, { cwd, initCommand }) => {
     const { tabs, activeTabId } = get();
     const tab = findActiveTab(tabs, activeTabId);
@@ -1110,36 +1247,35 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 // ---------------------------------------------------------------------------
 
 /**
- * Recursively strip `initCommand` from every leaf in the layout tree.
+ * Recursively strip `initCommand` and `seed` from every leaf in the layout
+ * tree.
  *
- * Used by `persistToStorage` to prevent provider CLI commands (e.g. the
- * `claude` invocation written by `applyGridLayout`) from being replayed when
- * the embedded Terminal page next calls `hydrateFromStorage`.  Plain shell
- * tabs never set `initCommand`, so this is a no-op for them.
+ * Used by `persistToStorage` so neither survives into localStorage: a
+ * provider CLI command (e.g. the `claude` invocation written by
+ * `applyGridLayout`, or a shell pane's command from `applyPaneLayout`) must
+ * not be replayed when the embedded Terminal page next calls
+ * `hydrateFromStorage`, and an agent leaf's launch attribution (`seed`) must
+ * not be re-stamped onto a run a rehydrate restarts days later. Plain shell
+ * tabs never set either field, so this is a no-op for them.
+ *
+ * Copy-and-delete rather than the field-by-field rebuild this replaced: that
+ * rebuild enumerated every field it wanted to keep and had silently dropped
+ * `permissionMode` from the list (dormant only because no leaf had both
+ * `initCommand` and `permissionMode` at once) — a second stripped field would
+ * have made that trap worse. `{...node}` plus `delete` cannot forget a field
+ * that already exists on `PaneLeaf`, which is the same idiom
+ * `updateLeafAgentConfig` (`layout-tree.ts`) uses.
  */
-function stripInitCommands(node: LayoutNode): LayoutNode {
+function stripLaunchOnlyFields(node: LayoutNode): LayoutNode {
   if (node.type === "leaf") {
-    if (node.initCommand === undefined) return node;
-    // Return a new leaf with initCommand omitted so it is not written to
-    // localStorage and therefore not re-issued by hydrateFromStorage.
-    return {
-      type: node.type,
-      terminalId: node.terminalId,
-      title: node.title,
-      ...(node.cwd !== undefined ? { cwd: node.cwd } : {}),
-      ...(node.profileId !== undefined ? { profileId: node.profileId } : {}),
-      ...(node.kind !== undefined ? { kind: node.kind } : {}),
-      ...(node.providerId !== undefined ? { providerId: node.providerId } : {}),
-      ...(node.model !== undefined ? { model: node.model } : {}),
-      ...(node.empty !== undefined ? { empty: node.empty } : {}),
-      ...(node.manualTitle !== undefined
-        ? { manualTitle: node.manualTitle }
-        : {}),
-      ...(node.exited !== undefined ? { exited: node.exited } : {}),
-    } satisfies PaneLeaf;
+    if (node.initCommand === undefined && node.seed === undefined) return node;
+    const next: PaneLeaf = { ...node };
+    delete next.initCommand;
+    delete next.seed;
+    return next;
   }
-  const left = stripInitCommands(node.children[0]);
-  const right = stripInitCommands(node.children[1]);
+  const left = stripLaunchOnlyFields(node.children[0]);
+  const right = stripLaunchOnlyFields(node.children[1]);
   if (left === node.children[0] && right === node.children[1]) return node;
   return { ...node, children: [left, right] };
 }

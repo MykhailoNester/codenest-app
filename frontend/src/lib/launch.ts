@@ -26,7 +26,13 @@
  * operators who fat-finger a template get visible feedback.
  */
 
-import type { LayoutNode, PaneLeaf, Split } from "./layout-tree";
+import type {
+  Direction,
+  LayoutNode,
+  PaneLeaf,
+  PaneLaunchSeed,
+  Split,
+} from "./layout-tree";
 import type { LaunchSource, PromptFanout } from "./launch-seed";
 
 // ---------------------------------------------------------------------------
@@ -560,4 +566,277 @@ export function buildGridLayout({
   }
 
   return buildRows(rows);
+}
+
+// ---------------------------------------------------------------------------
+// buildPaneLayout — ordered typed pane list
+// ---------------------------------------------------------------------------
+//
+// The programmatic launch path this section adds sits beside `buildGridLayout`
+// above, not in place of it: `buildGridLayout` stays the launch modal's path
+// until the modal itself is replaced (see the plan for ticket #31, "ordered
+// typed pane list"). Where `buildGridLayout` produces a rows×cols grid of PTYs
+// each running one uniform provider CLI string, `buildPaneLayout` takes an
+// ordered list of *individually typed* panes — some native `<AgentPane/>`
+// sessions with their own provider/model/permission mode, some PTY shells with
+// their own command — and lays them out under a `cols` / `rows` / `grid` split.
+
+/** How a `PaneLaunchSpec`'s pane list is arranged. Unrelated to
+ *  `buildGridLayout`'s `rows`/`cols`: a pane list has no dimensions to bound,
+ *  only a total count (`MAX_LAUNCH_PANES` below); `"grid"` derives its own
+ *  column count from that count. */
+export type LaunchSplit = "cols" | "rows" | "grid";
+
+export interface LaunchPaneBase {
+  /** PTY / session working directory. Absent → the shell default for a shell
+   *  pane; the Command Center workspace for an agent pane (`<AgentPane/>`
+   *  resolves it, `agent-pane.tsx`). */
+  cwd?: string;
+  /** `profiles.id` this pane runs under. Carried for round-tripping and
+   *  presets; the store does not write it onto the leaf (`PaneLeaf.profileId`
+   *  is an unrelated `string` field, read by nobody today). */
+  profileId?: number | null;
+  /** Profile display name — what `agent_runs.profile` stores. */
+  profileName?: string;
+  /** Env overlay for this pane only. For a shell pane it is passed to
+   *  `openTerminal({env})`; for an agent pane the provider's own env is
+   *  applied Rust-side from the catalog, so this is currently unused there. */
+  env?: Record<string, string>;
+}
+
+export interface LaunchAgentPane extends LaunchPaneBase {
+  kind: "agent";
+  providerId?: number;
+  model?: string;
+  /** One of `src-tauri/src/agent/mod.rs` `PERMISSION_MODES`; absent → no flag. */
+  permissionMode?: string;
+  /** The composer's per-pane "send the shared prompt on open" toggle
+   *  (`feature/launch-composer-ui`, #30). Carried on the spec so #30 has a
+   *  field to bind and `feature/launch-prompt-seed` (#32) has one to read;
+   *  **this ticket never reads it** — prompt delivery is #32's, not this
+   *  builder's. */
+  sendPrompt?: boolean;
+}
+
+export interface LaunchShellPane extends LaunchPaneBase {
+  kind: "shell";
+  /** Shell binary override → `openTerminal({shell})`. */
+  shell?: string;
+  /** Written to stdin once the PTY is open. Verbatim apart from a trailing
+   *  newline, which `buildPaneLayout` normalises onto `initCommand`. */
+  command?: string;
+}
+
+/** A single leaf in a programmatic launch. Deliberately admits only `"agent"`
+ *  and `"shell"` — `"agent-tui"` exists on `PaneKind` but renders exactly like
+ *  a shell today, so admitting it here would be a launch-spec kind the
+ *  composer UI would have to honour before it means anything. */
+export type LaunchPane = LaunchAgentPane | LaunchShellPane;
+
+export interface PaneLaunchSpec {
+  panes: LaunchPane[];
+  split: LaunchSplit;
+  /** Routing only — which window consumes this spec. Agent panes derive their
+   *  own `target` from the window they mount in
+   *  (`window-target.ts:currentPaneTarget`), so this field is never stamped
+   *  onto telemetry; it exists purely for `pending-launch-store` to route the
+   *  spec to the right window. */
+  target: "embedded" | "popout";
+  /** Stamped onto each agent pane's `agent_runs` row via the leaf seed. */
+  projectId?: number;
+  source?: LaunchSource;
+  /** The one prompt shared by the launch (the composer's right column). This
+   *  builder uses it only to derive the 120-char `prompt_preview` telemetry
+   *  string — delivering it into a pane is `feature/launch-prompt-seed` (#32).
+   *  Mirrors `LaunchSpec.prompt` above. */
+  prompt?: string;
+}
+
+/**
+ * Maximum number of panes allowed in a single `buildPaneLayout` spec, matching
+ * `GRID_MAX_PANES`'s value. Declared as its own constant rather than an alias
+ * — a pane list has no `rows`/`cols` successor to `GRID_MAX_DIM`/
+ * `GRID_MIN_DIM`, so this is the only cap the new path needs, and keeping it
+ * separate means deleting the old modal's constants later doesn't touch it.
+ */
+export const MAX_LAUNCH_PANES = 8;
+
+/**
+ * Narrows the union `pending-launch-store` hands back from one localStorage
+ * slot that can hold either shape. A `LaunchSpec` has no `panes` array, so
+ * checking for one is enough to tell the two apart without a discriminant
+ * field on either type.
+ */
+export function isPaneLaunchSpec(
+  spec: LaunchSpec | PaneLaunchSpec,
+): spec is PaneLaunchSpec {
+  return Array.isArray((spec as { panes?: unknown }).panes);
+}
+
+/**
+ * Build the leaf for one `LaunchPane`, at its list index `i`.
+ *
+ * The placeholder id (`pending-${i}`) is what ties this leaf back to
+ * `spec.panes[i]` after the tree is flattened by `collectLeaves` — both
+ * splits below are built left/top-first, so `collectLeaves(tree)[i]` is
+ * always `panes[i]`.
+ *
+ * None of the PTY command machinery from `renderProviderCommand` /
+ * `safeInjectClaudeArgs` / `{session_id}` substitution applies here: an agent
+ * pane has no command string at all (`agent_start` assembles argv in Rust),
+ * and a shell pane's command is opaque user text written verbatim apart from
+ * the trailing-newline normalisation below.
+ */
+function buildPaneLeaf(
+  pane: LaunchPane,
+  i: number,
+  spec: Pick<PaneLaunchSpec, "projectId" | "source" | "prompt">,
+): PaneLeaf {
+  const terminalId = `pending-${i}`;
+
+  if (pane.kind === "agent") {
+    const promptPreview =
+      spec.prompt !== undefined && spec.prompt.length > 0
+        ? spec.prompt.slice(0, 120)
+        : undefined;
+    // A seed is set only when there is attribution worth stamping — a pane
+    // with none of these gets no `seed` key at all, keeping it byte-identical
+    // to a hand-split agent leaf. `sendPrompt` is deliberately never copied
+    // onto the leaf: the leaf has no field for it, and this builder delivers
+    // no prompt (see `LaunchAgentPane.sendPrompt`'s own doc comment).
+    const seed: PaneLaunchSeed | undefined =
+      spec.projectId !== undefined ||
+      pane.profileName !== undefined ||
+      spec.source !== undefined ||
+      promptPreview !== undefined
+        ? {
+            ...(spec.projectId !== undefined
+              ? { projectId: spec.projectId }
+              : {}),
+            ...(pane.profileName !== undefined
+              ? { profileName: pane.profileName }
+              : {}),
+            ...(spec.source !== undefined
+              ? { sourceKind: spec.source.kind, sourceId: spec.source.id }
+              : {}),
+            ...(promptPreview !== undefined ? { promptPreview } : {}),
+          }
+        : undefined;
+    return {
+      type: "leaf",
+      terminalId,
+      // Matches `splitPane`'s agent sibling (`terminal-store.ts`).
+      title: "claude",
+      kind: "agent",
+      ...(pane.cwd !== undefined ? { cwd: pane.cwd } : {}),
+      ...(pane.providerId !== undefined ? { providerId: pane.providerId } : {}),
+      ...(pane.model !== undefined ? { model: pane.model } : {}),
+      ...(pane.permissionMode !== undefined
+        ? { permissionMode: pane.permissionMode }
+        : {}),
+      ...(seed !== undefined ? { seed } : {}),
+    };
+  }
+
+  // shell — no `kind` key: absent means shell (`paneKind`, `layout-tree.ts`),
+  // which keeps this leaf byte-identical to what every other shell-creating
+  // path produces. No `seed` either — a shell pane posts no telemetry.
+  const initCommand =
+    pane.command !== undefined && pane.command.length > 0
+      ? pane.command.endsWith("\n")
+        ? pane.command
+        : `${pane.command}\n`
+      : undefined;
+  return {
+    type: "leaf",
+    terminalId,
+    title: "zsh",
+    ...(pane.cwd !== undefined ? { cwd: pane.cwd } : {}),
+    ...(initCommand !== undefined ? { initCommand } : {}),
+  };
+}
+
+/**
+ * Right-nested chain of binary splits over `nodes`, in list order — the same
+ * shape `buildGridLayout`'s `buildRow`/`buildRows` build for a uniform grid
+ * (`Split.ratio` is always `1 / remaining`).
+ */
+function chainSplits(nodes: LayoutNode[], direction: Direction): LayoutNode {
+  function build(from: number): LayoutNode {
+    const remaining = nodes.length - from;
+    const node = nodes[from];
+    if (node === undefined) {
+      throw new Error(`chainSplits: index ${from} out of range`);
+    }
+    if (remaining === 1) return node;
+    const split: Split = {
+      type: "split",
+      direction,
+      children: [node, build(from + 1)],
+      ratio: 1 / remaining,
+    };
+    return split;
+  }
+  return build(0);
+}
+
+/**
+ * Build a `LayoutNode` tree from an ordered pane list.
+ *
+ * - `n === 1` → the bare leaf, no split (the common composer case: no
+ *   degenerate single-child split node).
+ * - `"cols"` → a right-nested chain of horizontal (`"h"`) splits, leaves in
+ *   list order.
+ * - `"rows"` → the same, chained vertically (`"v"`).
+ * - `"grid"` → `cols = ceil(sqrt(n))`, panes filled row-major; the last row is
+ *   ragged when `n` isn't a multiple of `cols` (`n=5` → rows of 3 and 2). Each
+ *   row is its own horizontal chain; rows are chained vertically. A short
+ *   last row divides only its own row's width, so its panes are wider than
+ *   the rows above — the alternative (padding with `empty` leaves so every
+ *   row has the same column count) is rejected: a pane list of `n` panes must
+ *   produce exactly `n` leaves, no placeholders.
+ *
+ * Emits placeholder ids (`pending-0`, `pending-1`, …) for every leaf — this is
+ * a pure function in `lib/` and must not mint the UUIDs the store's `genId()`
+ * does. The caller (`applyPaneLayout` in `stores/terminal-store.ts`) replaces
+ * every one of them: a shell's with the real PTY handle id, an agent's with a
+ * fresh `genId()` — never with a `pending-N` id, which is also the leaf's
+ * session-registry key (`agent_frame:{leafId}`) and would collide across two
+ * tabs launched from the same spec shape.
+ *
+ * @throws {RangeError} when `panes.length < 1` or `> MAX_LAUNCH_PANES`.
+ */
+export function buildPaneLayout(
+  spec: Pick<
+    PaneLaunchSpec,
+    "panes" | "split" | "projectId" | "source" | "prompt"
+  >,
+): LayoutNode {
+  const { panes, split } = spec;
+
+  if (panes.length < 1) {
+    throw new RangeError(
+      `panes.length must be at least 1, got ${panes.length}`,
+    );
+  }
+  if (panes.length > MAX_LAUNCH_PANES) {
+    throw new RangeError(
+      `panes.length (${panes.length}) exceeds the maximum of ${MAX_LAUNCH_PANES} panes per launch`,
+    );
+  }
+
+  const leaves = panes.map((pane, i) => buildPaneLeaf(pane, i, spec));
+  if (leaves.length === 1) return leaves[0]!;
+
+  if (split === "cols" || split === "rows") {
+    return chainSplits(leaves, split === "cols" ? "h" : "v");
+  }
+
+  // "grid": row-major fill, ceil(sqrt(n)) columns, ragged last row.
+  const cols = Math.ceil(Math.sqrt(leaves.length));
+  const rowNodes: LayoutNode[] = [];
+  for (let i = 0; i < leaves.length; i += cols) {
+    rowNodes.push(chainSplits(leaves.slice(i, i + cols), "h"));
+  }
+  return rowNodes.length === 1 ? rowNodes[0]! : chainSplits(rowNodes, "v");
 }
