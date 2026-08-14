@@ -8,7 +8,13 @@
  *
  * Slot: `localStorage.getItem("codenest.pendingLaunch")`
  *   - null  → no pending launch
- *   - JSON  → serialized LaunchSpec waiting for the matching target window
+ *   - JSON  → serialized `AnyLaunchSpec` waiting for the matching target window
+ *
+ * One slot holds either launch shape (`LaunchSpec`, the rows×cols grid; or
+ * `PaneLaunchSpec`, the ordered typed pane list) — never two slots. A second
+ * slot would mean `hasPendingPopoutLaunch` has to check both and the two
+ * would have to stay in step forever; `isPaneLaunchSpec` (`lib/launch.ts`) is
+ * what a consumer narrows the union with.
  *
  * Atomic CAS in `consume`:
  *   Read the slot, write `null` back atomically.  Only the first reader
@@ -20,7 +26,12 @@
  *   A mismatch leaves the slot intact so the correct window can claim it.
  */
 
-import type { LaunchSpec } from "../lib/launch";
+import type { LaunchSpec, PaneLaunchSpec } from "../lib/launch";
+
+/** Either shape the one pending-launch slot can hold. Both members declare
+ *  `target` as a required field, so every function below can read it without
+ *  narrowing first. */
+export type AnyLaunchSpec = LaunchSpec | PaneLaunchSpec;
 
 const STORAGE_KEY = "codenest.pendingLaunch";
 
@@ -32,7 +43,7 @@ const STORAGE_KEY = "codenest.pendingLaunch";
  * Write `spec` into the pending-launch slot.
  * Overwrites any previously queued spec.
  */
-export function enqueue(spec: LaunchSpec): void {
+export function enqueue(spec: AnyLaunchSpec): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(spec));
   } catch {
@@ -48,7 +59,7 @@ export function enqueue(spec: LaunchSpec): void {
 /**
  * Atomically read and clear the pending-launch slot.
  *
- * Returns the queued `LaunchSpec` if:
+ * Returns the queued `AnyLaunchSpec` if:
  *   - a spec is present, AND
  *   - `spec.target === target`.
  *
@@ -57,7 +68,7 @@ export function enqueue(spec: LaunchSpec): void {
  *
  * Returns `null` when the slot is empty or contains invalid JSON.
  */
-export function consume(target: "embedded" | "popout"): LaunchSpec | null {
+export function consume(target: "embedded" | "popout"): AnyLaunchSpec | null {
   let raw: string | null;
   try {
     raw = localStorage.getItem(STORAGE_KEY);
@@ -67,9 +78,9 @@ export function consume(target: "embedded" | "popout"): LaunchSpec | null {
 
   if (raw === null) return null;
 
-  let spec: LaunchSpec;
+  let spec: AnyLaunchSpec;
   try {
-    spec = JSON.parse(raw) as LaunchSpec;
+    spec = JSON.parse(raw) as AnyLaunchSpec;
   } catch {
     // Corrupt slot — clear it and return null.
     try {
@@ -122,7 +133,7 @@ export function hasPendingPopoutLaunch(): boolean {
 // subscribe
 // ---------------------------------------------------------------------------
 
-type LaunchCallback = (spec: LaunchSpec) => void;
+type LaunchCallback = (spec: AnyLaunchSpec) => void;
 
 /**
  * Subscribe to future cross-window launch broadcasts for the given `target`.
@@ -141,9 +152,9 @@ export function subscribe(
     if (event.key !== STORAGE_KEY) return;
     if (event.newValue === null) return; // slot was cleared, not written
 
-    let spec: LaunchSpec;
+    let spec: AnyLaunchSpec;
     try {
-      spec = JSON.parse(event.newValue) as LaunchSpec;
+      spec = JSON.parse(event.newValue) as AnyLaunchSpec;
     } catch {
       return;
     }

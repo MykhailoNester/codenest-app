@@ -589,6 +589,60 @@ describe("agent pane render", () => {
     });
   });
 
+  it("a launch seed's attribution reaches recordAgentLaunch", async () => {
+    // Pins D7 / #31's "Telemetry parity": a leaf built by `buildPaneLayout`
+    // carries this attribution as `seed`, and `<AgentPane/>` must spread it
+    // into the same launch row a hand-split pane posts — with none of it
+    // (see the test above), so a programmatic launch does not silently drop
+    // source/project/prompt attribution the old PTY path used to stamp.
+    seedCatalog();
+    const leafId = "agent-run-seed";
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: `tab-${leafId}`,
+          title: "Agent 1",
+          layout: {
+            type: "leaf",
+            terminalId: leafId,
+            title: "claude",
+            kind: "agent",
+            cwd: "/workspace/proj",
+            seed: {
+              projectId: 7,
+              profileName: "work",
+              sourceKind: "task",
+              sourceId: 31,
+              promptPreview: "fix the flaky test",
+            },
+          },
+        },
+      ],
+      activeTabId: `tab-${leafId}`,
+      focusedLeafId: leafId,
+      hydrated: true,
+      hydrating: false,
+      maximizedLeafId: null,
+    });
+
+    render(<TerminalsLayout />);
+    await waitFor(() => expect(recordAgentLaunchMock).toHaveBeenCalledTimes(1));
+
+    expect(recordAgentLaunchMock).toHaveBeenCalledWith({
+      pane_id: leafId,
+      session_id: "session-1",
+      provider: 1,
+      cwd: "/workspace/proj",
+      model: "claude-opus-5",
+      target: "embedded",
+      project_id: 7,
+      profile: "work",
+      source_kind: "task",
+      source_id: 31,
+      prompt_preview: "fix the flaky test",
+    });
+  });
+
   it("does not register a run when the session fails to start", async () => {
     // A phantom "running" row with no child behind it would offer a Focus that
     // goes nowhere and a Stop that stops nothing.

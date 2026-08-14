@@ -57,6 +57,7 @@ export function SplitContainer({
             {...(node.permissionMode !== undefined
               ? { permissionMode: node.permissionMode }
               : {})}
+            {...(node.seed !== undefined ? { seed: node.seed } : {})}
             showHeader={showHeader || isMaximized}
             active={active}
           />

@@ -18,8 +18,24 @@ import { collectLeaves, paneKind } from "../lib/layout-tree";
 import { recordAgentExitedAndWait } from "../lib/agent-run-telemetry";
 import { useAgentSessionStore } from "../stores/agent-session-store";
 import * as pendingLaunchStore from "../stores/pending-launch-store";
+import type { AnyLaunchSpec } from "../stores/pending-launch-store";
+import { isPaneLaunchSpec } from "../lib/launch";
 import styles from "./terminal-window-root.module.css";
 import { listen } from "@tauri-apps/api/event";
+
+/**
+ * Apply either launch shape to this window's terminal store — the popout's
+ * half of the branch `App.tsx`'s embedded consume effect also makes. Reads
+ * the store fresh via `getState()` (the same pattern `handleCloseTab` below
+ * uses) rather than closing over a hook value, so both call sites below (the
+ * mount consume and the `subscribe` callback) can share one implementation.
+ */
+function applySpec(spec: AnyLaunchSpec): Promise<unknown> {
+  const store = useTerminalStore.getState();
+  return isPaneLaunchSpec(spec)
+    ? store.applyPaneLayout(spec)
+    : store.applyGridLayout(spec);
+}
 
 /**
  * Root of the detached "terminals" window. Mounted when
@@ -38,12 +54,11 @@ export function TerminalWindowRoot(): ReactElement {
   // can pass `skipHydration` to TerminalsLayout.  React runs child effects
   // before parent effects on mount, so the TerminalsLayout hydrateFromStorage
   // useEffect would otherwise create a default "Terminal 1" tab before our
-  // own effect runs and calls applyGridLayout with the launch spec.
+  // own effect runs and calls `applySpec` with the launch spec.
   const hasPendingLaunch = pendingLaunchStore.hasPendingPopoutLaunch();
 
   const [sidecarDown, setSidecarDown] = useState(false);
   const closeUnlistenRef = useRef<UnlistenFn | null>(null);
-  const terminalStore = useTerminalStore();
   // The detached window gets the workspace navigator as well as the ⌘P palette.
   // This deliberately supersedes the original popout rule ("a detached window
   // never gets the 262 px panel, only the palette"): a popped-out pane is where
@@ -89,21 +104,22 @@ export function TerminalWindowRoot(): ReactElement {
     const spec = pendingLaunchStore.consume("popout");
     if (spec) {
       // A fresh launch is queued: wipe any stale persisted terminal state so
-      // TerminalsLayout's hydrateFromStorage doesn't race against applyGridLayout
-      // by replaying old initCommands into the same PTY stream (Bug A fix).
+      // TerminalsLayout's hydrateFromStorage doesn't race against the apply
+      // below by replaying old initCommands into the same PTY stream (Bug A
+      // fix).
       try {
         localStorage.removeItem(TERMINAL_STORAGE_KEY);
       } catch {
         // ignore — localStorage unavailable in this WebView context
       }
-      void terminalStore.applyGridLayout(spec).catch(() => undefined);
+      void applySpec(spec).catch(() => undefined);
     }
     const unsub = pendingLaunchStore.subscribe("popout", (incoming) => {
-      void terminalStore.applyGridLayout(incoming).catch(() => undefined);
+      void applySpec(incoming).catch(() => undefined);
     });
     return unsub;
-    // terminalStore reference is stable from Zustand; omitting from deps is safe.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // pendingLaunchStore and applySpec are module-level, stable references;
+    // an empty deps array is the correct "run once on mount" for both.
   }, []);
 
   useEffect(() => {

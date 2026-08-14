@@ -11,8 +11,11 @@
 // xterm, the explorer's filesystem calls and the whole pane tree.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { TerminalWindowRoot } from "../terminal-window-root";
+import { useTerminalStore } from "../../stores/terminal-store";
+import { enqueue } from "../../stores/pending-launch-store";
+import type { LaunchSpec, PaneLaunchSpec } from "../../lib/launch";
 
 const { layoutProps, destroyMock, onCloseRequestedMock } = vi.hoisted(() => ({
   layoutProps: [] as Array<Record<string, unknown>>,
@@ -88,5 +91,99 @@ describe("TerminalWindowRoot", () => {
     });
 
     expect(typeof layoutProps[0]?.onCloseTab).toBe("function");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The popout half of the ordered-typed-pane-list AC: both entry points branch
+// on `isPaneLaunchSpec` and call the same store action embedded does. The
+// store's own `applyPaneLayout`/`applyGridLayout` are stubbed here — this
+// file's job is only to prove *which* one gets called, not to re-exercise
+// either action's own PTY/agent behaviour (covered elsewhere).
+// ---------------------------------------------------------------------------
+
+// A plain `Map`-backed stub — jsdom's own `localStorage` collides with Node's
+// `--localstorage-file` implementation in this repo's test runner (see the
+// warning vitest prints), same reason every other file that touches
+// `localStorage` stubs one instead of using the real global.
+function installLocalStorage(): void {
+  const store = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      store.set(key, String(value));
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+  });
+}
+
+describe("TerminalWindowRoot — popout launch routing", () => {
+  const applyPaneLayoutMock = vi.fn(async () => ({
+    openedCount: 1,
+    failedCount: 0,
+  }));
+  const applyGridLayoutMock = vi.fn(async () => ({
+    openedCount: 1,
+    failedCount: 0,
+  }));
+
+  beforeEach(() => {
+    installLocalStorage();
+    applyPaneLayoutMock.mockClear();
+    applyGridLayoutMock.mockClear();
+    useTerminalStore.setState({
+      applyPaneLayout: applyPaneLayoutMock,
+      applyGridLayout: applyGridLayoutMock,
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("a queued popout PaneLaunchSpec is applied through applyPaneLayout", async () => {
+    const spec: PaneLaunchSpec = {
+      panes: [{ kind: "agent", providerId: 1 }],
+      split: "cols",
+      target: "popout",
+    };
+    enqueue(spec);
+
+    await act(async () => {
+      render(<TerminalWindowRoot />);
+    });
+
+    await waitFor(() => expect(applyPaneLayoutMock).toHaveBeenCalledTimes(1));
+    expect(applyPaneLayoutMock).toHaveBeenCalledWith(spec);
+    expect(applyGridLayoutMock).not.toHaveBeenCalled();
+  });
+
+  it("a queued popout LaunchSpec still goes to applyGridLayout", async () => {
+    const spec: LaunchSpec = {
+      projectId: 1,
+      cwd: "/tmp/proj",
+      providerId: 1,
+      providerCommand: "claude\n",
+      rows: 1,
+      cols: 1,
+      target: "popout",
+      profileId: null,
+    };
+    enqueue(spec);
+
+    await act(async () => {
+      render(<TerminalWindowRoot />);
+    });
+
+    await waitFor(() => expect(applyGridLayoutMock).toHaveBeenCalledTimes(1));
+    expect(applyGridLayoutMock).toHaveBeenCalledWith(spec);
+    expect(applyPaneLayoutMock).not.toHaveBeenCalled();
   });
 });

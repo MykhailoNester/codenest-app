@@ -12,6 +12,25 @@ export type Direction = "h" | "v";
  */
 export type PaneKind = "shell" | "agent" | "agent-tui";
 
+/** Launch-time *telemetry attribution* for a leaf, read once by the pane that
+ *  mounts on it (`<AgentPane/>`, which spreads it into `recordAgentLaunch`) and
+ *  never persisted — `terminal-store.persistToStorage` strips it for the same
+ *  reason it strips `initCommand`: a rehydrated tab must not re-stamp source
+ *  attribution onto a restarted run.
+ *
+ *  Deliberately carries no prompt *text* to deliver — only a preview string for
+ *  `agent_runs.prompt_preview`. Prompt delivery into a pane is
+ *  `feature/launch-prompt-seed` (#32), which picks its own channel. */
+export interface PaneLaunchSeed {
+  projectId?: number;
+  profileName?: string;
+  sourceKind?: "task" | "inbox";
+  sourceId?: number;
+  /** Already truncated to 120 chars; the router re-truncates anyway
+   *  (`app/routers/agents.py:404-405`). */
+  promptPreview?: string;
+}
+
 export interface PaneLeaf {
   type: "leaf";
   terminalId: string;
@@ -51,10 +70,11 @@ export interface PaneLeaf {
   permissionMode?: string;
   /**
    * Command written to the PTY stdin after the shell is ready (e.g. a
-   * provider CLI invocation from `applyGridLayout`).  Held in the in-memory
-   * store for reference but intentionally stripped by `persistToStorage` before
-   * the layout is written to localStorage, so the command is NOT re-issued when
-   * the embedded Terminal page rehydrates on next open.
+   * provider CLI invocation from `applyGridLayout`, or a shell pane's command
+   * from `applyPaneLayout`).  Held in the in-memory store for reference but
+   * intentionally stripped by `persistToStorage` before the layout is written
+   * to localStorage, so the command is NOT re-issued when the embedded
+   * Terminal page rehydrates on next open.
    */
   initCommand?: string;
   /**
@@ -76,6 +96,13 @@ export interface PaneLeaf {
    * read final output; the tab strip shows a subtle dim indicator.
    */
   exited?: boolean;
+  /**
+   * Launch-time attribution for an agent leaf, set only by `buildPaneLayout`
+   * (`lib/launch.ts`). Read once by `<AgentPane/>` on mount and stripped by
+   * `persistToStorage` before the leaf reaches localStorage — see
+   * `PaneLaunchSeed`'s own doc comment for why.
+   */
+  seed?: PaneLaunchSeed;
 }
 
 export interface Split {

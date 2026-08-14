@@ -3,8 +3,13 @@ import {
   renderProviderCommand,
   safeInjectClaudeArgs,
   buildGridLayout,
+  buildPaneLayout,
   mergeEnv,
   GRID_MAX_PANES,
+  MAX_LAUNCH_PANES,
+  type LaunchAgentPane,
+  type LaunchShellPane,
+  type LaunchPane,
 } from "../launch";
 import { collectLeaves } from "../layout-tree";
 
@@ -685,5 +690,190 @@ describe("buildGridLayout", () => {
 
   it("2×4 = 8 panes does NOT throw (boundary is inclusive)", () => {
     expect(() => buildGridLayout({ rows: 2, cols: 4 })).not.toThrow();
+  });
+});
+
+// =============================================================================
+// buildPaneLayout
+// =============================================================================
+
+describe("buildPaneLayout", () => {
+  function agentPane(
+    overrides: Partial<LaunchAgentPane> = {},
+  ): LaunchAgentPane {
+    return { kind: "agent", ...overrides };
+  }
+  function shellPane(
+    overrides: Partial<LaunchShellPane> = {},
+  ): LaunchShellPane {
+    return { kind: "shell", ...overrides };
+  }
+
+  it("1 pane produces a bare PaneLeaf, not a split", () => {
+    const layout = buildPaneLayout({ panes: [agentPane()], split: "cols" });
+    expect(layout.type).toBe("leaf");
+  });
+
+  it("cols split of 3 chains horizontal splits with 1/3 then 1/2 ratios", () => {
+    const layout = buildPaneLayout({
+      panes: [agentPane(), agentPane(), agentPane()],
+      split: "cols",
+    });
+    expect(layout.type).toBe("split");
+    if (layout.type !== "split") return;
+    expect(layout.direction).toBe("h");
+    expect(layout.ratio).toBeCloseTo(1 / 3);
+    const inner = layout.children[1];
+    expect(inner.type).toBe("split");
+    if (inner.type !== "split") return;
+    expect(inner.direction).toBe("h");
+    expect(inner.ratio).toBeCloseTo(1 / 2);
+  });
+
+  it("rows split of 3 chains vertical splits", () => {
+    const layout = buildPaneLayout({
+      panes: [agentPane(), agentPane(), agentPane()],
+      split: "rows",
+    });
+    expect(layout.type).toBe("split");
+    if (layout.type !== "split") return;
+    expect(layout.direction).toBe("v");
+    const inner = layout.children[1];
+    expect(inner.type).toBe("split");
+    if (inner.type !== "split") return;
+    expect(inner.direction).toBe("v");
+  });
+
+  it("grid split of 4 is two rows of two", () => {
+    const layout = buildPaneLayout({
+      panes: [agentPane(), agentPane(), agentPane(), agentPane()],
+      split: "grid",
+    });
+    expect(layout.type).toBe("split");
+    if (layout.type !== "split") return;
+    expect(layout.direction).toBe("v");
+    for (const child of layout.children) {
+      expect(child.type).toBe("split");
+      if (child.type === "split") expect(child.direction).toBe("h");
+    }
+  });
+
+  it("grid split of 5 uses ceil(sqrt(5)) = 3 columns and a ragged last row of 2", () => {
+    const layout = buildPaneLayout({
+      panes: [agentPane(), agentPane(), agentPane(), agentPane(), agentPane()],
+      split: "grid",
+    });
+    expect(layout.type).toBe("split");
+    if (layout.type !== "split") return;
+    expect(layout.direction).toBe("v");
+    const [row0, row1] = layout.children;
+    expect(collectLeaves(row0)).toHaveLength(3);
+    expect(collectLeaves(row1)).toHaveLength(2);
+  });
+
+  it("leaves come back in pane-list order", () => {
+    const panes: LaunchPane[] = [
+      agentPane({ providerId: 1 }),
+      shellPane({ command: "npm run dev" }),
+      agentPane({ providerId: 2 }),
+    ];
+    const layout = buildPaneLayout({ panes, split: "cols" });
+    const leaves = collectLeaves(layout);
+    expect(leaves.map((l) => l.title)).toEqual(["claude", "zsh", "claude"]);
+    expect(leaves[0]?.providerId).toBe(1);
+    expect(leaves[2]?.providerId).toBe(2);
+  });
+
+  it("an agent pane's leaf carries kind/providerId/model/permissionMode and no initCommand", () => {
+    const layout = buildPaneLayout({
+      panes: [
+        agentPane({
+          providerId: 3,
+          model: "claude-sonnet-5",
+          permissionMode: "plan",
+          cwd: "/tmp/proj",
+        }),
+      ],
+      split: "cols",
+    });
+    const leaf = collectLeaves(layout)[0]!;
+    expect(leaf.kind).toBe("agent");
+    expect(leaf.providerId).toBe(3);
+    expect(leaf.model).toBe("claude-sonnet-5");
+    expect(leaf.permissionMode).toBe("plan");
+    expect(leaf.cwd).toBe("/tmp/proj");
+    expect(leaf.initCommand).toBeUndefined();
+  });
+
+  it("a shell pane's leaf carries no kind, and its command with exactly one trailing newline", () => {
+    const layoutNoNewline = buildPaneLayout({
+      panes: [shellPane({ command: "npm run dev" })],
+      split: "cols",
+    });
+    const leafNoNewline = collectLeaves(layoutNoNewline)[0]!;
+    expect(leafNoNewline.kind).toBeUndefined();
+    expect(leafNoNewline.initCommand).toBe("npm run dev\n");
+
+    const layoutWithNewline = buildPaneLayout({
+      panes: [shellPane({ command: "npm run dev\n" })],
+      split: "cols",
+    });
+    const leafWithNewline = collectLeaves(layoutWithNewline)[0]!;
+    expect(leafWithNewline.initCommand).toBe("npm run dev\n");
+  });
+
+  it("sendPrompt and spec.prompt never reach a leaf; only promptPreview does", () => {
+    const prompt = "x".repeat(300);
+    const layout = buildPaneLayout({
+      panes: [
+        agentPane({ sendPrompt: true }),
+        agentPane({ sendPrompt: false }),
+      ],
+      split: "cols",
+      prompt,
+    });
+    const [leafA, leafB] = collectLeaves(layout);
+    expect(leafA?.seed?.promptPreview).toBe(prompt.slice(0, 120));
+    expect(leafB?.seed?.promptPreview).toBe(prompt.slice(0, 120));
+    for (const leaf of [leafA, leafB]) {
+      expect(leaf !== undefined && "sendPrompt" in leaf).toBe(false);
+      expect(leaf !== undefined && "prompt" in leaf).toBe(false);
+    }
+  });
+
+  it("a shell pane never gets a seed, even under a spec with a prompt and a source", () => {
+    const layout = buildPaneLayout({
+      panes: [shellPane({ command: "npm run dev" })],
+      split: "cols",
+      prompt: "hello",
+      projectId: 1,
+      source: { kind: "task", id: 5 },
+    });
+    const leaf = collectLeaves(layout)[0]!;
+    expect(leaf.seed).toBeUndefined();
+  });
+
+  it("a pane with no project/profile/source/prompt gets no seed key", () => {
+    const layout = buildPaneLayout({ panes: [agentPane()], split: "cols" });
+    const leaf = collectLeaves(layout)[0]!;
+    expect("seed" in leaf).toBe(false);
+  });
+
+  it("throws RangeError for 0 panes and for MAX_LAUNCH_PANES + 1, and accepts exactly MAX_LAUNCH_PANES", () => {
+    expect(() => buildPaneLayout({ panes: [], split: "cols" })).toThrow(
+      RangeError,
+    );
+    expect(() =>
+      buildPaneLayout({
+        panes: Array.from({ length: MAX_LAUNCH_PANES + 1 }, () => agentPane()),
+        split: "grid",
+      }),
+    ).toThrow(RangeError);
+    expect(() =>
+      buildPaneLayout({
+        panes: Array.from({ length: MAX_LAUNCH_PANES }, () => agentPane()),
+        split: "grid",
+      }),
+    ).not.toThrow();
   });
 });
