@@ -39,12 +39,23 @@
  *   `Provider` carries `models`/`default_model` but no rates, and cost is
  *   only ever written *after* a session (`ProviderStats.cost_usd`); a made-up
  *   number in a launch dialog is worse than none.
- * - NOT PORTED — `.lp-ctx`, `.lp-ctxrow`, `.lp-ctxrow:hover`,
- *   `.lp-ctxrow.is-on`, `.lp-ctxrow input`, `.lp-ctxrow__box`,
- *   `.lp-ctxrow.is-on .lp-ctxrow__box`, `.lp-ctxrow__t` (source `:98-106`) —
- *   the mockup's "Ticket context" section is mock data (invented token
- *   counts, a `subtasks` field the schema does not have) with no real data
- *   source behind it; not built.
+ * - PORTED — `.lp-ctx`, `.lp-ctxrow`, `.lp-ctxrow:hover`, `.lp-ctxrow.is-on`,
+ *   `.lp-ctxrow input`, `.lp-ctxrow__box`, `.lp-ctxrow.is-on .lp-ctxrow__box`,
+ *   `.lp-ctxrow__t` (source `:98-106`), verbatim. The "Ticket context"
+ *   section now has a real data source: `GET /api/v1/launch/seed`'s
+ *   `sections` field (task #33) backs five rows — Title + ref, Description,
+ *   Suggested action, Project, Labels — each with the sidecar's documented
+ *   `ceil(len/4)` token estimate in place of the mockup's invented counts.
+ *   The mockup's sixth row, `Subtasks (4)`, is still not built — no
+ *   subtasks table exists (task #27). `.lp-ctxrow__box` holds a text glyph
+ *   (`✓`) rather than `<Icon name="check" />`: `icon.tsx` has no `check`
+ *   entry, only `check-circle`, and an unknown name renders nothing. The
+ *   source has no `.lp-ctxrow__l` rule — the label occupies the grid's
+ *   `minmax(0,1fr)` column — so none is added here either.
+ * - ADDITION — `.lp-ctx.is-locked`, `.lp-ctx__note`: a hand-edited prompt
+ *   pauses the checkboxes rather than being silently overwritten by the
+ *   next toggle (D3 in the plan); the mockup never edits its prompt by hand,
+ *   so it has no locked state to port.
  * - COLOUR — verbatim. `d3-taskboard.css` and `d3-taskdetail.css` carry no
  *   raw hex, but this file's two background literals (`#0c0f18`, `#151a27`)
  *   are the same values `d3-taskdetail.css`'s own COLOUR deviation maps onto
@@ -607,6 +618,65 @@
   line-height: 1.6;
   resize: vertical;
   outline: none;
+}
+
+/* Ticket context */
+.lp-ctx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.lp-ctxrow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--fg-3);
+}
+.lp-ctxrow:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.lp-ctxrow.is-on {
+  color: var(--fg-1);
+}
+.lp-ctxrow input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.lp-ctxrow__box {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  border: 1px solid var(--line-3);
+  display: grid;
+  place-items: center;
+  color: transparent;
+}
+.lp-ctxrow.is-on .lp-ctxrow__box {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.lp-ctxrow__t {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+}
+.lp-ctx.is-locked {
+  opacity: 0.5;
+}
+.lp-ctx__note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 /* Popover */

@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { LaunchComposer } from "../launch-composer";
 import { useAgentCatalogStore, type CatalogProvider } from "../../../stores/agent-catalog-store";
+import { composeSectionPrompt } from "../../../lib/launch-composer";
 import type { LaunchComposerPlan } from "../../../lib/launch-composer";
+import type { LaunchPromptSection } from "../../../lib/launch-seed";
 
 // The module-mock pattern `components/__tests__/import-projects-modal.test.tsx:22-35`
 // already uses, kept *partial* (via `importOriginal`) rather than a full
@@ -92,6 +94,50 @@ function launchButton(): HTMLButtonElement {
   const btn = document.querySelector<HTMLButtonElement>(".lp-btn--primary");
   if (!btn) throw new Error("no primary launch button");
   return btn;
+}
+
+function promptSection(overrides: Partial<LaunchPromptSection> = {}): LaunchPromptSection {
+  return {
+    id: "title",
+    label: "Title + ref",
+    text: "You are working on task #7: Investigate CI",
+    tokens: 11,
+    default_on: true,
+    ...overrides,
+  };
+}
+
+/** The prompt's current text, whichever of the view/edit pair is rendered. */
+function promptText(): string {
+  const pre = document.querySelector(".lp-promptview pre");
+  if (pre) return pre.textContent ?? "";
+  const textarea = document.querySelector<HTMLTextAreaElement>(".lp-prompt");
+  return textarea?.value ?? "";
+}
+
+/** The Ticket context header's `~X.XXk tokens` total — distinct from the
+ *  Prompt section's own `.lp-h__meta` ("N of M agent panes"). */
+function ticketContextTotal(): string {
+  const heading = Array.from(document.querySelectorAll(".lp-h--row")).find(
+    (el) => el.querySelector("span")?.textContent === "Ticket context",
+  );
+  const meta = heading?.querySelector(".lp-h__meta");
+  if (!meta) throw new Error("no Ticket context header");
+  return meta.textContent ?? "";
+}
+
+function ctxRow(label: string): HTMLElement {
+  const row = Array.from(document.querySelectorAll<HTMLElement>(".lp-ctxrow")).find(
+    (el) => el.querySelector(".lp-ctxrow__l")?.textContent === label,
+  );
+  if (!row) throw new Error(`no .lp-ctxrow labelled "${label}"`);
+  return row;
+}
+
+function ctxCheckbox(label: string): HTMLInputElement {
+  const input = ctxRow(label).querySelector<HTMLInputElement>('input[type="checkbox"]');
+  if (!input) throw new Error(`no checkbox in the "${label}" row`);
+  return input;
 }
 
 beforeEach(() => {
@@ -298,5 +344,197 @@ describe("LaunchComposer", () => {
     expect(onLaunchKey).toHaveBeenCalledTimes(1);
 
     expect(onLaunchButton.mock.calls[0]?.[0]).toEqual(onLaunchKey.mock.calls[0]?.[0]);
+  });
+});
+
+describe("LaunchComposer — Ticket context sections (task #33)", () => {
+  it("renders no Ticket context section without sections, and keeps initialPrompt verbatim", () => {
+    render(
+      <LaunchComposer
+        open
+        onClose={vi.fn()}
+        onLaunch={vi.fn()}
+        initialPrompt="hand-typed prompt, no ticket"
+      />,
+    );
+    expect(document.querySelector(".lp-ctx")).toBeNull();
+    expect(promptText()).toBe("hand-typed prompt, no ticket");
+  });
+
+  it("renders one row per section with its ~tokens and the header total", () => {
+    const sections: LaunchPromptSection[] = [
+      promptSection({ id: "title", label: "Title + ref", text: "t".repeat(4 * 28), tokens: 28 }),
+      promptSection({
+        id: "description",
+        label: "Description",
+        text: "d".repeat(4 * 12),
+        tokens: 12,
+      }),
+      promptSection({ id: "project", label: "Project", text: "p".repeat(4 * 8), tokens: 8 }),
+    ];
+    render(
+      <LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} sections={sections} />,
+    );
+
+    expect(document.querySelectorAll(".lp-ctxrow")).toHaveLength(3);
+    expect(ctxRow("Title + ref").querySelector(".lp-ctxrow__t")?.textContent).toBe("~28");
+    expect(ticketContextTotal()).toBe("~0.05k tokens");
+  });
+
+  it("unchecking Description removes exactly its text and drops the total", () => {
+    const sections: LaunchPromptSection[] = [
+      promptSection({ id: "title", label: "Title + ref", text: "title text", tokens: 3 }),
+      promptSection({
+        id: "description",
+        label: "Description",
+        text: "description text",
+        tokens: 5,
+      }),
+    ];
+    render(
+      <LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} sections={sections} />,
+    );
+
+    expect(promptText()).toContain("description text");
+    expect(promptText()).toContain("title text");
+
+    fireEvent.click(ctxCheckbox("Description"));
+
+    expect(promptText()).not.toContain("description text");
+    expect(promptText()).toContain("title text");
+    expect(ticketContextTotal()).toBe("~0.00k tokens"); // 3 tokens left
+  });
+
+  it("unchecking every section leaves an empty prompt and a ~0.00k total, Launch stays enabled", () => {
+    const sections: LaunchPromptSection[] = [
+      promptSection({ id: "title", label: "Title + ref", text: "title text", tokens: 3 }),
+      promptSection({
+        id: "description",
+        label: "Description",
+        text: "description text",
+        tokens: 5,
+      }),
+    ];
+    render(
+      <LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} sections={sections} />,
+    );
+
+    fireEvent.click(ctxCheckbox("Title + ref"));
+    fireEvent.click(ctxCheckbox("Description"));
+
+    expect(promptText()).toBe("");
+    expect(ticketContextTotal()).toBe("~0.00k tokens");
+    expect(launchButton().disabled).toBe(false);
+  });
+
+  it("a section with default_on false starts unchecked and is excluded from the prompt", () => {
+    const sections: LaunchPromptSection[] = [
+      promptSection({ id: "title", label: "Title + ref", text: "title text", tokens: 3 }),
+      promptSection({
+        id: "labels",
+        label: "Labels",
+        text: "Labels: Bug",
+        tokens: 4,
+        default_on: false,
+      }),
+    ];
+    render(
+      <LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} sections={sections} />,
+    );
+
+    expect(ctxCheckbox("Labels").checked).toBe(false);
+    expect(promptText()).not.toContain("Labels: Bug");
+    expect(promptText()).toBe("title text");
+  });
+
+  it("hand-editing the prompt pauses the toggles and says so", () => {
+    const sections: LaunchPromptSection[] = [
+      promptSection({ id: "title", label: "Title + ref", text: "title text", tokens: 3 }),
+      promptSection({
+        id: "description",
+        label: "Description",
+        text: "description text",
+        tokens: 5,
+      }),
+    ];
+    render(
+      <LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} sections={sections} />,
+    );
+
+    fireEvent.click(ghostButton("Edit"));
+    const textarea = document.querySelector<HTMLTextAreaElement>(".lp-prompt");
+    if (!textarea) throw new Error("expected the prompt textarea");
+    fireEvent.change(textarea, { target: { value: "a hand edit" } });
+
+    const checkboxes = Array.from(
+      document.querySelectorAll<HTMLInputElement>(".lp-ctxrow input"),
+    );
+    expect(checkboxes.length).toBeGreaterThan(0);
+    expect(checkboxes.every((cb) => cb.disabled)).toBe(true);
+    expect(document.querySelector(".lp-ctx")?.className).toContain("is-locked");
+    expect(document.querySelector(".lp-ctx__note")?.textContent).toContain(
+      "Prompt edited — toggles paused",
+    );
+  });
+
+  it("Reset from ticket re-composes and re-enables the toggles", () => {
+    const sections: LaunchPromptSection[] = [
+      promptSection({ id: "title", label: "Title + ref", text: "title text", tokens: 3 }),
+      promptSection({
+        id: "description",
+        label: "Description",
+        text: "description text",
+        tokens: 5,
+      }),
+    ];
+    render(
+      <LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} sections={sections} />,
+    );
+
+    fireEvent.click(ghostButton("Edit"));
+    const textarea = document.querySelector<HTMLTextAreaElement>(".lp-prompt");
+    if (!textarea) throw new Error("expected the prompt textarea");
+    fireEvent.change(textarea, { target: { value: "a hand edit" } });
+    expect(document.querySelector(".lp-ctx")?.className).toContain("is-locked");
+
+    fireEvent.click(ghostButton("Reset from ticket"));
+
+    const expected = composeSectionPrompt(sections, new Set(["title", "description"]));
+    expect(promptText()).toBe(expected);
+    const checkboxes = Array.from(
+      document.querySelectorAll<HTMLInputElement>(".lp-ctxrow input"),
+    );
+    expect(checkboxes.every((cb) => !cb.disabled)).toBe(true);
+    expect(document.querySelector(".lp-ctx")?.className).not.toContain("is-locked");
+  });
+
+  it("typing the composed text back un-pauses the toggles", () => {
+    const sections: LaunchPromptSection[] = [
+      promptSection({ id: "title", label: "Title + ref", text: "title text", tokens: 3 }),
+      promptSection({
+        id: "description",
+        label: "Description",
+        text: "description text",
+        tokens: 5,
+      }),
+    ];
+    render(
+      <LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} sections={sections} />,
+    );
+
+    const composed = composeSectionPrompt(sections, new Set(["title", "description"]));
+    fireEvent.click(ghostButton("Edit"));
+    const textarea = document.querySelector<HTMLTextAreaElement>(".lp-prompt");
+    if (!textarea) throw new Error("expected the prompt textarea");
+
+    fireEvent.change(textarea, { target: { value: "a hand edit" } });
+    expect(document.querySelector(".lp-ctx")?.className).toContain("is-locked");
+
+    fireEvent.change(textarea, { target: { value: composed } });
+    expect(document.querySelector(".lp-ctx")?.className).not.toContain("is-locked");
+    const checkboxes = Array.from(
+      document.querySelectorAll<HTMLInputElement>(".lp-ctxrow input"),
+    );
+    expect(checkboxes.every((cb) => !cb.disabled)).toBe(true);
   });
 });

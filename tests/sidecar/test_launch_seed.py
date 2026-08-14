@@ -20,7 +20,12 @@ from fastapi.testclient import TestClient
 import app.database as db_module
 from app.models.launch import LaunchOverrideUpsert
 from app.routers import launch_seed as seed_router
-from app.services import launch_override_service, launch_seed_service
+from app.services import (
+    launch_override_service,
+    launch_seed_service,
+    task_service,
+    taxonomy_service,
+)
 
 # ---------------------------------------------------------------------------
 # Test app fixture
@@ -88,6 +93,16 @@ async def _insert_inbox(
     )
     await db.commit()
     return cur.lastrowid  # type: ignore[return-value]
+
+
+async def _assign_labels(
+    db: aiosqlite.Connection, task_id: int, slugs: list[str]
+) -> None:
+    """Resolve label slugs to ids and assign them, replacing any existing set —
+    the same pattern as `tests/sidecar/test_task_labels.py:26-29`."""
+    rows = await taxonomy_service.list_by_kind(db, "task_label")
+    label_ids = [next(r["id"] for r in rows if r["slug"] == slug) for slug in slugs]
+    await task_service.set_task_labels(db, task_id, label_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +202,154 @@ async def test_build_seed_null_project_returns_none(
 
 
 # ---------------------------------------------------------------------------
+# Prompt sections (task #33)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sections_are_only_those_with_data(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A task with a description and a project, no labels, gets exactly
+    title + description + project — never an `action` row (no such column
+    on tasks) and never an empty row."""
+    tid = await _insert_task(migrated_db)
+
+    seed = await launch_seed_service.build_seed(migrated_db, "task", tid)
+
+    assert [s.id for s in seed.sections] == ["title", "description", "project"]
+
+
+@pytest.mark.asyncio
+async def test_no_description_yields_no_description_section(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """The guard is truthiness, not `is not None`: both `None` and `""` yield
+    no `description` section."""
+    for description in (None, ""):
+        tid = await _insert_task(migrated_db, description=description)
+        seed = await launch_seed_service.build_seed(migrated_db, "task", tid)
+        ids = [s.id for s in seed.sections]
+        assert "description" not in ids
+
+
+@pytest.mark.asyncio
+async def test_inbox_sections_include_suggested_action(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    iid = await _insert_inbox(
+        migrated_db,
+        action_text="repro on staging then file fix",
+    )
+
+    seed = await launch_seed_service.build_seed(migrated_db, "inbox", iid)
+
+    assert [s.id for s in seed.sections] == ["title", "description", "action"]
+    action_section = next(s for s in seed.sections if s.id == "action")
+    assert action_section.text == "Suggested action: repro on staging then file fix"
+
+
+@pytest.mark.asyncio
+async def test_task_labels_section_is_present_and_off_by_default(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Pins D2 (off by default) and the display-name choice, in `sort_order`
+    (`bug` is 10, `feature` 20)."""
+    tid = await _insert_task(migrated_db)
+    await _assign_labels(migrated_db, tid, ["bug", "feature"])
+
+    seed = await launch_seed_service.build_seed(migrated_db, "task", tid)
+
+    labels_section = next(s for s in seed.sections if s.id == "labels")
+    assert labels_section.default_on is False
+    assert labels_section.text == "Labels: Bug, Feature"
+
+
+@pytest.mark.asyncio
+async def test_deactivated_label_is_excluded(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """The read path inherits `_labels_by_task`'s `is_active = 1` filter
+    rather than reimplementing it."""
+    tid = await _insert_task(migrated_db)
+    await _assign_labels(migrated_db, tid, ["bug", "feature"])
+    rows = await taxonomy_service.list_by_kind(migrated_db, "task_label")
+    feature_id = next(r["id"] for r in rows if r["slug"] == "feature")
+    await taxonomy_service.delete(migrated_db, feature_id)
+
+    seed = await launch_seed_service.build_seed(migrated_db, "task", tid)
+
+    labels_section = next(s for s in seed.sections if s.id == "labels")
+    assert labels_section.text == "Labels: Bug"
+
+
+@pytest.mark.asyncio
+async def test_prompt_is_the_join_of_default_on_sections(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Contract invariant 1."""
+    tid = await _insert_task(migrated_db)
+    seed = await launch_seed_service.build_seed(migrated_db, "task", tid)
+    assert seed.prompt == "\n\n".join(s.text for s in seed.sections if s.default_on)
+
+    iid = await _insert_inbox(migrated_db, action_text="repro on staging")
+    seed = await launch_seed_service.build_seed(migrated_db, "inbox", iid)
+    assert seed.prompt == "\n\n".join(s.text for s in seed.sections if s.default_on)
+
+
+@pytest.mark.asyncio
+async def test_prompt_byte_identical_for_a_labelled_task(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Regression guard for `LaunchModal`: fails the moment anyone flips
+    Labels to `default_on=True` without deleting the old modal."""
+    tid = await _insert_task(migrated_db)
+    await _assign_labels(migrated_db, tid, ["bug"])
+
+    seed = await launch_seed_service.build_seed(migrated_db, "task", tid)
+
+    assert seed.prompt == (
+        f"You are working on task #{tid}: Investigate CI\n\n"
+        "logs at /tmp/ci.log\n\n"
+        "Project: TestProject (/Users/test/TestProject)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_compose_prompt_drops_exactly_the_unchecked_section(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """The acceptance criterion: unchecking a section removes exactly that
+    text and the total drops by that row's count."""
+    tid = await _insert_task(migrated_db)
+    seed = await launch_seed_service.build_seed(migrated_db, "task", tid)
+    sections = seed.sections
+    all_ids = {s.id for s in sections}
+    description_section = next(s for s in sections if s.id == "description")
+
+    full = launch_seed_service.compose_prompt(sections, all_ids)
+    without_description = launch_seed_service.compose_prompt(
+        sections, all_ids - {"description"}
+    )
+
+    # `full` minus exactly the description block and the one separator that
+    # led into it (the description-to-project separator survives).
+    assert without_description == full.replace(f"\n\n{description_section.text}", "", 1)
+
+    total_before = sum(s.tokens for s in sections if s.id in all_ids)
+    total_after = sum(s.tokens for s in sections if s.id in (all_ids - {"description"}))
+    assert total_before - total_after == description_section.tokens
+
+
+@pytest.mark.asyncio
+async def test_estimate_tokens_is_documented_ceil_of_chars_over_four() -> None:
+    assert launch_seed_service.estimate_tokens("") == 0
+    assert launch_seed_service.estimate_tokens("abc") == 1
+    assert launch_seed_service.estimate_tokens("a" * 8) == 2
+    assert launch_seed_service.estimate_tokens("a" * 9) == 3
+
+
+# ---------------------------------------------------------------------------
 # Router (HTTP) layer
 # ---------------------------------------------------------------------------
 
@@ -231,3 +394,25 @@ async def test_http_seed_null_project_returns_200(test_app) -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert data["project"] is None
+
+
+@pytest.mark.asyncio
+async def test_http_seed_returns_sections(test_app) -> None:
+    """The 200 body's `sections` list has objects with exactly the
+    {id, label, text, tokens, default_on} keys, and `prompt` equals the
+    join of the `default_on` texts."""
+    client, db = test_app
+    tid = await _insert_task(db)
+
+    resp = client.get(f"/api/v1/launch/seed?source_kind=task&source_id={tid}")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert isinstance(data["sections"], list)
+    assert len(data["sections"]) > 0
+    for section in data["sections"]:
+        assert set(section.keys()) == {"id", "label", "text", "tokens", "default_on"}
+
+    assert data["prompt"] == "\n\n".join(
+        s["text"] for s in data["sections"] if s["default_on"]
+    )

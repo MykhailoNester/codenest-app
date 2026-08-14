@@ -11,24 +11,46 @@ field access logic.
 
 from __future__ import annotations
 
+from collections.abc import Collection, Sequence
+
 import aiosqlite
 from fastapi import HTTPException
 
-from app.models.launch import LaunchSeed, LaunchSeedProject, LaunchSeedSource
-from app.services import agent_override_service, launch_override_service
+from app.models.launch import (
+    LaunchPromptSection,
+    LaunchSeed,
+    LaunchSeedProject,
+    LaunchSeedSource,
+)
+from app.services import agent_override_service, launch_override_service, task_service
 from app.services.provider_service import list_providers
 
+_CHARS_PER_TOKEN = 4
 
-def compose_prompt(
+
+def estimate_tokens(text: str) -> int:
+    """Approximate the token count of `text`.
+
+    Deliberately NOT a tokenizer: `ceil(len(text) / 4)`, the ~4-characters-per-
+    token rule of thumb for English prose. This decorates a pre-flight checkbox
+    list; it is never used for billing, truncation or a context-window decision,
+    so it does not justify a tokenizer dependency or a network round trip. Every
+    surface that renders it prefixes a tilde. Section separators are not counted.
+    """
+    return (len(text) + _CHARS_PER_TOKEN - 1) // _CHARS_PER_TOKEN
+
+
+async def build_sections(
+    db: aiosqlite.Connection,
+    *,
+    source_kind: str,
+    source_id: int,
     title: str,
     description: str | None,
     action_text: str | None,
     project: LaunchSeedProject | None,
-    *,
-    source_kind: str,
-    source_id: int,
-) -> str:
-    """Build the seeded prompt string from source fields.
+) -> list[LaunchPromptSection]:
+    """Build the ordered, toggleable prompt sections for a source.
 
     Format (per design D1):
 
@@ -39,23 +61,102 @@ def compose_prompt(
         Suggested action: {action_text}   ← only when action_text is present
 
         Project: {name} ({path})           ← only when project is non-null
+
+        Labels: {names}                    ← task only, off by default (D2)
+
+    Each entry is present only when it has text — a task with no description
+    yields no `description` section, never one with `text=""`. The guards
+    are the same truthiness checks `compose_prompt` used before this split.
     """
-    lines: list[str] = [f"You are working on {source_kind} #{source_id}: {title}"]
+    sections: list[LaunchPromptSection] = []
+
+    title_text = f"You are working on {source_kind} #{source_id}: {title}"
+    sections.append(
+        LaunchPromptSection(
+            id="title",
+            label="Title + ref",
+            text=title_text,
+            tokens=estimate_tokens(title_text),
+            default_on=True,
+        )
+    )
 
     if description:
-        lines.append("")
-        lines.append(description)
+        sections.append(
+            LaunchPromptSection(
+                id="description",
+                label="Description",
+                text=description,
+                tokens=estimate_tokens(description),
+                default_on=True,
+            )
+        )
 
     if action_text:
-        lines.append("")
-        lines.append(f"Suggested action: {action_text}")
+        action_text_full = f"Suggested action: {action_text}"
+        sections.append(
+            LaunchPromptSection(
+                id="action",
+                label="Suggested action",
+                text=action_text_full,
+                tokens=estimate_tokens(action_text_full),
+                default_on=True,
+            )
+        )
 
     if project:
         path_part = f" ({project.path})" if project.path else ""
-        lines.append("")
-        lines.append(f"Project: {project.name}{path_part}")
+        project_text = f"Project: {project.name}{path_part}"
+        sections.append(
+            LaunchPromptSection(
+                id="project",
+                label="Project",
+                text=project_text,
+                tokens=estimate_tokens(project_text),
+                default_on=True,
+            )
+        )
 
-    return "\n".join(lines)
+    if source_kind == "task":
+        labels = await task_service.list_task_labels(db, source_id)
+        names = [str(row["label"]) for row in labels]
+        if names:
+            labels_text = f"Labels: {', '.join(names)}"
+            sections.append(
+                LaunchPromptSection(
+                    id="labels",
+                    label="Labels",
+                    text=labels_text,
+                    tokens=estimate_tokens(labels_text),
+                    # D2: off by default — a default-on Labels row would
+                    # change `prompt` for every labelled task that exists
+                    # today, breaking the "all-enabled composition is
+                    # byte-identical to today's compose_prompt" invariant
+                    # and drifting every saved prompt_override written from
+                    # it. Flip once LaunchModal is deleted (see Follow-ups).
+                    default_on=False,
+                )
+            )
+
+    return sections
+
+
+def default_enabled_ids(sections: Sequence[LaunchPromptSection]) -> list[str]:
+    return [s.id for s in sections if s.default_on]
+
+
+def compose_prompt(
+    sections: Sequence[LaunchPromptSection],
+    enabled_ids: Collection[str],
+) -> str:
+    """Join the enabled sections, in section order, with a blank line between.
+
+    The separator is "\\n\\n" and it is duplicated in
+    frontend/src/lib/launch-composer.ts (SECTION_SEPARATOR); the two are pinned
+    against the same expected strings on both sides. Unknown ids in `enabled_ids`
+    are ignored; the caller cannot reorder by reordering `enabled_ids`.
+    """
+    return "\n\n".join(s.text for s in sections if s.id in enabled_ids)
 
 
 async def build_seed(
@@ -109,15 +210,17 @@ async def build_seed(
                 path=proj_row["path"],
             )
 
-    # ── Compose prompt ────────────────────────────────────────────────────────
-    prompt = compose_prompt(
+    # ── Build sections and compose prompt ─────────────────────────────────────
+    sections = await build_sections(
+        db,
+        source_kind=source_kind,
+        source_id=source_id,
         title=title,
         description=description,
         action_text=action_text,
         project=project,
-        source_kind=source_kind,
-        source_id=source_id,
     )
+    prompt = compose_prompt(sections, default_enabled_ids(sections))
 
     # ── Load per-source override ──────────────────────────────────────────────
     override = await launch_override_service.get_override(db, source_kind, source_id)
@@ -189,6 +292,7 @@ async def build_seed(
         ),
         project=project,
         prompt=prompt,
+        sections=sections,
         provider_id=provider_id,
         model=model,
         rows=rows,

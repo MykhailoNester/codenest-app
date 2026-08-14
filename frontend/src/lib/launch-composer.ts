@@ -18,7 +18,7 @@
  */
 
 import type { CSSProperties } from "react";
-import type { SourceKind, LaunchTarget } from "./launch-seed";
+import type { SourceKind, LaunchTarget, LaunchPromptSection } from "./launch-seed";
 
 // ---------------------------------------------------------------------------
 // Pane types
@@ -478,4 +478,44 @@ export interface LaunchComposerSource {
   kind: SourceKind;
   id: number;
   title: string;
+}
+
+// ---------------------------------------------------------------------------
+// Prompt sections (task #33) — the composer's "Ticket context" checkboxes.
+// ---------------------------------------------------------------------------
+
+/** Must equal `compose_prompt`'s separator in
+ *  app/services/launch_seed_service.py. */
+export const SECTION_SEPARATOR = "\n\n";
+
+export function defaultEnabledSectionIds(
+  sections: readonly LaunchPromptSection[],
+): string[] {
+  return sections.filter((s) => s.default_on).map((s) => s.id);
+}
+
+/** Joins the enabled sections in *section* order — `enabled` is a membership
+ *  test, never an ordering. */
+export function composeSectionPrompt(
+  sections: readonly LaunchPromptSection[],
+  enabled: ReadonlySet<string>,
+): string {
+  return sections
+    .filter((s) => enabled.has(s.id))
+    .map((s) => s.text)
+    .join(SECTION_SEPARATOR);
+}
+
+export function sectionTokenTotal(
+  sections: readonly LaunchPromptSection[],
+  enabled: ReadonlySet<string>,
+): number {
+  return sections
+    .filter((s) => enabled.has(s.id))
+    .reduce((total, s) => total + s.tokens, 0);
+}
+
+/** `~0.54k tokens` — the design's format verbatim (d3-launch.jsx:278). */
+export function formatTokenTotal(tokens: number): string {
+  return `~${(tokens / 1000).toFixed(2)}k tokens`;
 }

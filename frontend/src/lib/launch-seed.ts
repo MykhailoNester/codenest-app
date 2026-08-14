@@ -35,11 +35,26 @@ export interface LaunchSeedProject {
   path: string | null;
 }
 
+/** One toggleable block of the seeded prompt. Mirrors
+ *  `app/models/launch.py:LaunchPromptSection`. `id` is typed `string`, not a
+ *  union, so a newer sidecar's extra section (e.g. subtasks, task #27) renders
+ *  from an unchanged frontend. `tokens` is an approximation — render it with a
+ *  tilde. */
+export interface LaunchPromptSection {
+  id: string;
+  label: string;
+  text: string;
+  tokens: number;
+  default_on: boolean;
+}
+
 /** Full launch seed returned by GET /api/v1/launch/seed. */
 export interface LaunchSeed {
   source: LaunchSeedSource;
   project: LaunchSeedProject | null;
   prompt: string;
+  /** Ordered; `prompt` is the join of the entries with `default_on`. */
+  sections: LaunchPromptSection[];
   provider_id: number;
   model: string | null;
   rows: number;

@@ -1,14 +1,19 @@
 import { describe, it, expect } from "vitest";
 import {
   composerReducer,
+  composeSectionPrompt,
+  defaultEnabledSectionIds,
+  formatTokenTotal,
   initialComposerState,
   previewGridStyle,
+  sectionTokenTotal,
   summarizeComposer,
   type AgentPane,
   type ComposerCatalogProvider,
   type ComposerPane,
   type ComposerState,
 } from "../launch-composer";
+import type { LaunchPromptSection } from "../launch-seed";
 
 /** Minimal shell panes — `previewGridStyle` only reads `panes.length`. */
 function dummyPanes(n: number): ComposerPane[] {
@@ -340,5 +345,86 @@ describe("catalogResolved (D13)", () => {
     expect(addedPane).toMatchObject({ providerId: 7, model: "d7" });
 
     expect(resolved.recipe).toBe("custom");
+  });
+});
+
+function section(overrides: Partial<LaunchPromptSection> = {}): LaunchPromptSection {
+  return {
+    id: "title",
+    label: "Title + ref",
+    text: "You are working on task #7: Investigate CI",
+    tokens: 11,
+    default_on: true,
+    ...overrides,
+  };
+}
+
+describe("prompt sections", () => {
+  const title = section({ id: "title", text: "title text", tokens: 3 });
+  const description = section({
+    id: "description",
+    label: "Description",
+    text: "description text",
+    tokens: 5,
+    default_on: true,
+  });
+  const labels = section({
+    id: "labels",
+    label: "Labels",
+    text: "Labels: Bug",
+    tokens: 4,
+    default_on: false,
+  });
+  const all = [title, description, labels];
+
+  it("composeSectionPrompt joins enabled sections in section order with a blank line", () => {
+    const enabled = new Set(["labels", "title", "description"]);
+    expect(composeSectionPrompt(all, enabled)).toBe(
+      "title text\n\ndescription text\n\nLabels: Bug",
+    );
+  });
+
+  it("reordering `enabled` does not reorder the output", () => {
+    const forward = new Set(["title", "description"]);
+    const backward = new Set(["description", "title"]);
+    expect(composeSectionPrompt(all, forward)).toBe(
+      composeSectionPrompt(all, backward),
+    );
+  });
+
+  it("unchecking a section removes exactly its text", () => {
+    const withAll = new Set(["title", "description"]);
+    const withoutDescription = new Set(["title"]);
+    const full = composeSectionPrompt(all, withAll);
+    const reduced = composeSectionPrompt(all, withoutDescription);
+    expect(full).toBe(reduced + "\n\ndescription text");
+  });
+
+  it("sectionTokenTotal drops by exactly the unchecked row's tokens", () => {
+    const withAll = new Set(["title", "description"]);
+    const withoutDescription = new Set(["title"]);
+    const before = sectionTokenTotal(all, withAll);
+    const after = sectionTokenTotal(all, withoutDescription);
+    expect(before - after).toBe(description.tokens);
+  });
+
+  it("defaultEnabledSectionIds honours default_on", () => {
+    expect(defaultEnabledSectionIds(all)).toEqual(["title", "description"]);
+  });
+
+  it("formatTokenTotal(540) === '~0.54k tokens'", () => {
+    expect(formatTokenTotal(540)).toBe("~0.54k tokens");
+  });
+
+  it("formatTokenTotal(0) === '~0.00k tokens'", () => {
+    expect(formatTokenTotal(0)).toBe("~0.00k tokens");
+  });
+
+  it("composeSectionPrompt([], new Set()) === ''", () => {
+    expect(composeSectionPrompt([], new Set())).toBe("");
+  });
+
+  it("sectionTokenTotal([], …) === 0", () => {
+    expect(sectionTokenTotal([], new Set())).toBe(0);
   });
 });
