@@ -17,7 +17,9 @@
  *  - persistToStorage strips initCommand/seed but keeps kind/providerId/model/
  *    permissionMode.
  *  - two calls produce disjoint leaf ids (no cross-tab session collision).
- *  - this ticket ships no prompt delivery at all (D6).
+ *  - the prompt is staged into `pending-prompt-store` for exactly the agent
+ *    panes `resolvePromptTargets` names — delivery into a pane's composer is
+ *    `feature/launch-prompt-seed` (#32), read by `<AgentPane/>`'s boot effect.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -47,6 +49,11 @@ import { useTerminalStore, TERMINAL_STORAGE_KEY } from "../terminal-store";
 import { collectLeaves, paneKind } from "../../lib/layout-tree";
 import type { LayoutNode } from "../../lib/layout-tree";
 import type { LaunchPane, PaneLaunchSpec } from "../../lib/launch";
+import {
+  clearPendingPrompts,
+  consumePendingPrompt,
+  pendingPromptCount,
+} from "../pending-prompt-store";
 import * as ipc from "../../lib/ipc";
 import * as api from "../../lib/api";
 
@@ -109,6 +116,7 @@ describe("applyPaneLayout", () => {
   beforeEach(() => {
     installLocalStorage();
     resetStore();
+    clearPendingPrompts();
     let counter = 0;
     openTerminalMock.mockClear();
     sendTerminalInputMock.mockClear();
@@ -290,23 +298,69 @@ describe("applyPaneLayout", () => {
     expect(idA).not.toBe(idB);
   });
 
-  it("a spec with a prompt writes nothing to any composer or terminal beyond the shell command", async () => {
+  it("the prompt is staged for exactly the agent panes whose sendPrompt is on", async () => {
     const spec = makeSpec(
       [
         { kind: "agent", providerId: 1, sendPrompt: true },
+        { kind: "agent", providerId: 2, sendPrompt: false },
         { kind: "shell", command: "npm run dev" },
       ],
       { prompt: "please run the tests" },
     );
     await useTerminalStore.getState().applyPaneLayout(spec);
 
-    // Exactly one write: the shell pane's own command. Nothing delivers the
-    // prompt anywhere — that is `feature/launch-prompt-seed` (#32), not this
-    // ticket (D6).
+    const [leafA, leafB, leafShell] = collectLeaves(
+      useTerminalStore.getState().tabs[0]!.layout,
+    );
+    expect(consumePendingPrompt(leafA!.terminalId)).toBe(
+      "please run the tests",
+    );
+    expect(consumePendingPrompt(leafB!.terminalId)).toBeNull();
+    expect(consumePendingPrompt(leafShell!.terminalId)).toBeNull();
+
+    // Nothing delivers the prompt into a PTY: exactly one write, the shell
+    // pane's own command. Delivery into a composer draft is
+    // `<AgentPane/>`'s job (#32), not the store's.
     expect(sendTerminalInputMock).toHaveBeenCalledTimes(1);
     expect(sendTerminalInputMock).toHaveBeenCalledWith(
       expect.stringMatching(/^pty-/),
       "npm run dev\n",
     );
+  });
+
+  it("a launch with no prompt stages nothing", async () => {
+    const spec = makeSpec([
+      { kind: "agent", providerId: 1, sendPrompt: true },
+      { kind: "shell", command: "npm run dev" },
+    ]);
+    await useTerminalStore.getState().applyPaneLayout(spec);
+    expect(pendingPromptCount()).toBe(0);
+  });
+
+  it("the staged key is the leaf's real id, never a pending-N placeholder", async () => {
+    const spec = makeSpec([{ kind: "agent", providerId: 1, sendPrompt: true }], {
+      prompt: "hello",
+    });
+    await useTerminalStore.getState().applyPaneLayout(spec);
+
+    expect(consumePendingPrompt("pending-0")).toBeNull();
+    const realId = collectLeaves(useTerminalStore.getState().tabs[0]!.layout)[0]!
+      .terminalId;
+    expect(consumePendingPrompt(realId)).toBe("hello");
+  });
+
+  it("two launches from the same spec stage under disjoint ids", async () => {
+    const spec = makeSpec([{ kind: "agent", providerId: 1, sendPrompt: true }], {
+      prompt: "hello",
+    });
+    await useTerminalStore.getState().applyPaneLayout(spec);
+    await useTerminalStore.getState().applyPaneLayout(spec);
+
+    const { tabs } = useTerminalStore.getState();
+    const idA = collectLeaves(tabs[0]!.layout)[0]!.terminalId;
+    const idB = collectLeaves(tabs[1]!.layout)[0]!.terminalId;
+    expect(idA).not.toBe(idB);
+    expect(consumePendingPrompt(idA)).toBe("hello");
+    expect(consumePendingPrompt(idB)).toBe("hello");
   });
 });

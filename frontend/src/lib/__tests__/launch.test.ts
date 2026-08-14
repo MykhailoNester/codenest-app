@@ -5,6 +5,7 @@ import {
   buildGridLayout,
   buildPaneLayout,
   mergeEnv,
+  resolvePromptTargets,
   GRID_MAX_PANES,
   MAX_LAUNCH_PANES,
   type LaunchAgentPane,
@@ -875,5 +876,80 @@ describe("buildPaneLayout", () => {
         split: "grid",
       }),
     ).not.toThrow();
+  });
+});
+
+describe("resolvePromptTargets", () => {
+  function agentPane(
+    overrides: Partial<LaunchAgentPane> = {},
+  ): LaunchAgentPane {
+    return { kind: "agent", ...overrides };
+  }
+  function shellPane(
+    overrides: Partial<LaunchShellPane> = {},
+  ): LaunchShellPane {
+    return { kind: "shell", ...overrides };
+  }
+
+  it("three agent panes with the toggle on for two target exactly those two", () => {
+    const targets = resolvePromptTargets({
+      panes: [
+        agentPane({ sendPrompt: true }),
+        agentPane({ sendPrompt: false }),
+        agentPane({ sendPrompt: true }),
+      ],
+      prompt: "do the thing",
+    });
+    expect(targets).toEqual([0, 2]);
+  });
+
+  it("a shell pane is never a target, even under promptFanout 'every'", () => {
+    const targets = resolvePromptTargets({
+      panes: [shellPane(), agentPane(), shellPane()],
+      prompt: "do the thing",
+      promptFanout: "every",
+    });
+    expect(targets).toEqual([1]);
+  });
+
+  it("an absent or empty prompt targets nothing", () => {
+    const panes: LaunchPane[] = [agentPane({ sendPrompt: true })];
+    expect(resolvePromptTargets({ panes })).toEqual([]);
+    expect(resolvePromptTargets({ panes, prompt: "" })).toEqual([]);
+  });
+
+  it("legacy 'primary' targets the first agent pane, not leaf 0", () => {
+    const targets = resolvePromptTargets({
+      panes: [shellPane(), agentPane(), agentPane()],
+      prompt: "do the thing",
+      promptFanout: "primary",
+    });
+    expect(targets).toEqual([1]);
+  });
+
+  it("legacy 'every' targets every agent pane and 'none' targets none", () => {
+    const panes: LaunchPane[] = [agentPane(), shellPane(), agentPane()];
+    expect(
+      resolvePromptTargets({ panes, prompt: "x", promptFanout: "every" }),
+    ).toEqual([0, 2]);
+    expect(
+      resolvePromptTargets({ panes, prompt: "x", promptFanout: "none" }),
+    ).toEqual([]);
+  });
+
+  it("an explicit sendPrompt disables the legacy fallback entirely", () => {
+    const targets = resolvePromptTargets({
+      panes: [
+        agentPane({ sendPrompt: true }),
+        agentPane(),
+        agentPane(),
+      ],
+      prompt: "do the thing",
+      promptFanout: "every",
+    });
+    // Only the one pane that stated its own flag — the other two, with no
+    // flag of their own, are excluded even though `promptFanout` says
+    // "every" (Design decision 8).
+    expect(targets).toEqual([0]);
   });
 });

@@ -33,11 +33,13 @@ import {
 import {
   buildGridLayout,
   buildPaneLayout,
+  resolvePromptTargets,
   safeInjectClaudeArgs,
   type LaunchCell,
   type LaunchSpec,
   type PaneLaunchSpec,
 } from "../lib/launch";
+import { stagePendingPrompt } from "./pending-prompt-store";
 
 // Tauri's `listen` reads `window.__TAURI_INTERNALS__`, which is absent outside
 // the webview (e.g. vitest), where it rejects with a `transformCallback` error
@@ -202,10 +204,15 @@ export interface TerminalStore {
    *
    * An agent leaf gets no PTY and no `recordAgentLaunch` call from here —
    * `<AgentPane/>` starts the session and posts its own launch telemetry on
-   * mount, using the leaf's `seed` for attribution. `spec.prompt` and every
-   * pane's `sendPrompt` are transported onto the built layout (as a
-   * `promptPreview` on an agent leaf's `seed`) but not otherwise acted on —
-   * prompt delivery is `feature/launch-prompt-seed` (#32), not this action.
+   * mount, using the leaf's `seed` for attribution. `spec.prompt` is also
+   * transported onto the built layout as a `promptPreview` on an agent leaf's
+   * `seed`, unconditionally.
+   *
+   * This action's other side effect: for every index `resolvePromptTargets`
+   * resolves off `spec` (honouring each pane's `sendPrompt`, or the legacy
+   * `promptFanout` when no pane states one), the prompt is staged under that
+   * leaf's real id via `stagePendingPrompt` before the tab is committed to
+   * state — `<AgentPane/>`'s boot effect is the reader (#32).
    *
    * Individual shell-pane failures do NOT abort siblings (`Promise.allSettled`);
    * a failed leaf becomes an `<EmptyPane/>` (`empty: true`) rather than a dead
@@ -1159,6 +1166,13 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     let openedCount = 0;
     let failedCount = 0;
 
+    // Launch prompt handoff (#32): which pane indices get `spec.prompt`, and
+    // the text itself (empty when absent — `resolvePromptTargets` already
+    // returns `[]` for that case, so `promptText.length > 0` below is the
+    // single guard both conditions share).
+    const promptText = spec.prompt ?? "";
+    const promptTargets = new Set(resolvePromptTargets(spec));
+
     results.forEach((result, i) => {
       if (result.status === "fulfilled") {
         layout = replaceLeafId(
@@ -1167,6 +1181,16 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
           result.value.realId,
         );
         openedCount++;
+        // Only the fulfilled branch: a rejected pane keeps its `pending-N`
+        // id and becomes an `<EmptyPane/>` below, which never mounts an
+        // `<AgentPane/>` — staging for it would leak an entry that can never
+        // be consumed. Agent panes never reject (they do no IPC here), so in
+        // practice every target is fulfilled. Staged under the leaf's real
+        // id, before the `set(...)` below commits the tab, so the entry is
+        // in place before React can mount the pane.
+        if (promptText.length > 0 && promptTargets.has(i)) {
+          stagePendingPrompt(result.value.realId, promptText);
+        }
         return;
       }
       failedCount++;

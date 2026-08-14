@@ -650,6 +650,11 @@ export interface PaneLaunchSpec {
    *  string — delivering it into a pane is `feature/launch-prompt-seed` (#32).
    *  Mirrors `LaunchSpec.prompt` above. */
   prompt?: string;
+  /** Legacy fallback for a spec whose panes declare no `sendPrompt` — the
+   *  value read off `launch_source_overrides.prompt_fanout` via
+   *  `GET /api/v1/launch/seed` (`launch-seed.ts:50`). Never consulted when any
+   *  agent pane states its own flag (see `resolvePromptTargets`). */
+  promptFanout?: PromptFanout;
 }
 
 /**
@@ -839,4 +844,59 @@ export function buildPaneLayout(
     rowNodes.push(chainSplits(leaves.slice(i, i + cols), "h"));
   }
   return rowNodes.length === 1 ? rowNodes[0]! : chainSplits(rowNodes, "v");
+}
+
+// ---------------------------------------------------------------------------
+// resolvePromptTargets
+// ---------------------------------------------------------------------------
+
+/**
+ * Which panes in `spec.panes` receive `spec.prompt`, as ascending indices
+ * into that array. Pure — no imports beyond the existing types, and no
+ * effect on `LaunchSpec.promptFanout` / `applyGridLayout`'s bracketed-paste
+ * path, which stay exactly as they are.
+ *
+ * Rules, in order:
+ *   1. No prompt (absent or empty) → `[]`.
+ *   2. A shell pane is never a target — this is the "shell panes never
+ *      receive the prompt" acceptance criterion, enforced in the one place
+ *      every caller goes through.
+ *   3. If *any* agent pane in the spec declares `sendPrompt`, every agent
+ *      pane is resolved from its own flag (absent means `false`); the legacy
+ *      `promptFanout` is not consulted at all. This is Design decision 8:
+ *      the alternative — a per-pane `pane.sendPrompt ?? fanoutDefault(i)` —
+ *      makes "I ticked one box, two panes got it" reachable from a
+ *      half-populated spec.
+ *   4. Otherwise (no pane states its own flag) fall back to
+ *      `spec.promptFanout ?? "primary"`: `"none"` targets nothing, `"every"`
+ *      targets every agent pane, `"primary"` targets the *first agent pane*
+ *      — not leaf index 0, which may be a shell. `"primary"` is the default
+ *      when neither is stated, matching both the sidecar
+ *      (`app/models/launch.py:232`) and `applyGridLayout`
+ *      (`terminal-store.ts:1015`).
+ */
+export function resolvePromptTargets(
+  spec: Pick<PaneLaunchSpec, "panes" | "prompt" | "promptFanout">,
+): number[] {
+  if (spec.prompt === undefined || spec.prompt.length === 0) return [];
+
+  const agentIndices = spec.panes
+    .map((pane, i) => ({ pane, i }))
+    .filter(({ pane }) => pane.kind === "agent");
+
+  const anyExplicit = agentIndices.some(
+    ({ pane }) => (pane as LaunchAgentPane).sendPrompt !== undefined,
+  );
+  if (anyExplicit) {
+    return agentIndices
+      .filter(({ pane }) => (pane as LaunchAgentPane).sendPrompt === true)
+      .map(({ i }) => i);
+  }
+
+  const fanout = spec.promptFanout ?? "primary";
+  if (fanout === "none") return [];
+  if (fanout === "every") return agentIndices.map(({ i }) => i);
+  // "primary": the first agent pane only.
+  const first = agentIndices[0];
+  return first !== undefined ? [first.i] : [];
 }
