@@ -30,7 +30,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useProjects, useLookups } from "../../lib/api";
-import type { LaunchTarget } from "../../lib/launch-seed";
+import type { LaunchTarget, LaunchPromptSection } from "../../lib/launch-seed";
 import { useAgentCatalogStore } from "../../stores/agent-catalog-store";
 import { useEscapeKey } from "../../hooks/use-escape-key";
 import { Icon } from "../icon";
@@ -38,10 +38,14 @@ import { LpSelect, type LpSelectItem } from "./lp-popover";
 import { LIVE_PERMISSION_MODES } from "../../lib/permission-modes";
 import {
   RECIPES,
+  composeSectionPrompt,
   composerReducer,
+  defaultEnabledSectionIds,
+  formatTokenTotal,
   initialComposerState,
   paneLabel,
   previewGridStyle,
+  sectionTokenTotal,
   summarizeComposer,
   type AgentPane,
   type ComposerAction,
@@ -53,6 +57,10 @@ import {
   type ShellPane,
   type SplitMode,
 } from "../../lib/launch-composer";
+
+/** Stable identity so an unspecified `sections` prop does not change per
+ *  render — the lazy `useState` initialisers below read it once (D7). */
+const NO_SECTIONS: readonly LaunchPromptSection[] = [];
 
 const SPLIT_OPTIONS: ReadonlyArray<{ id: SplitMode; label: string }> = [
   { id: "cols", label: "Columns" },
@@ -356,6 +364,9 @@ export interface LaunchComposerProps {
   initialPrompt?: string;
   /** Seeded project; falls back to the first launchable project. */
   initialProjectId?: number | null;
+  /** Seeded prompt sections; read once at mount (see D7). Empty from the top
+   *  bar, where there is no ticket. */
+  sections?: readonly LaunchPromptSection[];
   /** Fired by the Launch button and by Cmd/Ctrl+Enter. */
   onLaunch: (plan: LaunchComposerPlan) => void;
 }
@@ -366,6 +377,7 @@ export function LaunchComposer({
   source = null,
   initialPrompt = "",
   initialProjectId = null,
+  sections = NO_SECTIONS,
   onLaunch,
 }: LaunchComposerProps): ReactElement | null {
   const providers = useAgentCatalogStore((s) => s.providers);
@@ -399,8 +411,17 @@ export function LaunchComposer({
 
   const [state, dispatch] = useReducer(composerReducer, catalog, initialComposerState);
 
-  const [prompt, setPrompt] = useState(initialPrompt);
+  const hasSections = sections.length > 0;
+  const [enabledSections, setEnabledSections] = useState<Set<string>>(
+    () => new Set(defaultEnabledSectionIds(sections)),
+  );
+  const [prompt, setPrompt] = useState(() =>
+    sections.length > 0
+      ? composeSectionPrompt(sections, new Set(defaultEnabledSectionIds(sections)))
+      : initialPrompt,
+  );
   const [promptEditing, setPromptEditing] = useState(false);
+  const [promptDirty, setPromptDirty] = useState(false);
   const [projectId, setProjectId] = useState<number | null>(initialProjectId);
   const [profileId, setProfileId] = useState<number | null>(null);
   const [target, setTarget] = useState<LaunchTarget>("embedded");
@@ -424,6 +445,20 @@ export function LaunchComposer({
       target,
       source: source !== null ? { kind: source.kind, id: source.id } : null,
     });
+  }
+
+  function toggleSection(id: string): void {
+    if (promptDirty) return; // belt and braces; the inputs are disabled
+    const next = new Set(enabledSections);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setEnabledSections(next);
+    setPrompt(composeSectionPrompt(sections, next));
+  }
+
+  function resetPromptFromSections(): void {
+    setPrompt(composeSectionPrompt(sections, enabledSections));
+    setPromptDirty(false);
   }
 
   // D13.3 — assigning `handleLaunchRef.current` in the render body would be
@@ -637,7 +672,15 @@ export function LaunchComposer({
                 <textarea
                   className="lp-prompt mono"
                   value={prompt}
-                  onChange={(e) => setPrompt(e.currentTarget.value)}
+                  onChange={(e) => {
+                    const next = e.currentTarget.value;
+                    setPrompt(next);
+                    if (hasSections) {
+                      setPromptDirty(
+                        next !== composeSectionPrompt(sections, enabledSections),
+                      );
+                    }
+                  }}
                   rows={7}
                   // This text is executed by an agent — never substituted,
                   // corrected or expanded on the way in.
@@ -674,6 +717,49 @@ export function LaunchComposer({
                 </div>
               )}
             </section>
+
+            {hasSections ? (
+              <section>
+                <div className="lp-h lp-h--row">
+                  <span>Ticket context</span>
+                  <span className="lp-h__meta tabular">
+                    {formatTokenTotal(sectionTokenTotal(sections, enabledSections))}
+                  </span>
+                </div>
+                <div className={`lp-ctx${promptDirty ? " is-locked" : ""}`}>
+                  {sections.map((s) => (
+                    <label
+                      key={s.id}
+                      className={`lp-ctxrow${enabledSections.has(s.id) ? " is-on" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={enabledSections.has(s.id)}
+                        disabled={promptDirty}
+                        onChange={() => toggleSection(s.id)}
+                      />
+                      <span className="lp-ctxrow__box" aria-hidden="true">
+                        ✓
+                      </span>
+                      <span className="lp-ctxrow__l">{s.label}</span>
+                      <span className="lp-ctxrow__t tabular">~{s.tokens}</span>
+                    </label>
+                  ))}
+                </div>
+                {promptDirty ? (
+                  <div className="lp-ctx__note">
+                    <span className="lp-h__meta">Prompt edited — toggles paused</span>
+                    <button
+                      type="button"
+                      className="lp-ghost"
+                      onClick={resetPromptFromSections}
+                    >
+                      Reset from ticket
+                    </button>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
 
             <section>
               <div className="lp-h">Session</div>

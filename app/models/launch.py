@@ -216,12 +216,31 @@ class LaunchSeedProject(BaseModel):
     path: str | None = None
 
 
+LaunchSectionId = Literal["title", "description", "action", "project", "labels"]
+
+
+class LaunchPromptSection(BaseModel):
+    """One toggleable block of the seeded prompt.
+
+    `tokens` is an approximation — see `launch_seed_service.estimate_tokens`.
+    A section is only ever emitted when it has text, so `text` is never "".
+    """
+
+    id: LaunchSectionId
+    label: str
+    text: str
+    tokens: int
+    default_on: bool
+
+
 class LaunchSeed(BaseModel):
     """Complete launch seed payload returned by GET /api/v1/launch/seed."""
 
     source: LaunchSeedSource
     project: LaunchSeedProject | None = None
-    prompt: str
+    prompt: str  # == "\n\n".join(s.text for s in sections if s.default_on).
+    # Kept for LaunchModal, which has no section UI; delete with it.
+    sections: list[LaunchPromptSection] = []
     provider_id: int
     model: str | None = None
     rows: int = 1
