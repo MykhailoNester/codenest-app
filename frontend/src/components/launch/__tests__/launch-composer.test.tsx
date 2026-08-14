@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { LaunchComposer } from "../launch-composer";
 import {
   useAgentCatalogStore,
@@ -29,11 +30,13 @@ const {
   mockUseLookups,
   mockUseLaunchPresets,
   mockUseCreateLaunchPreset,
+  mockUseDeleteLaunchPreset,
 } = vi.hoisted(() => ({
   mockUseProjects: vi.fn(),
   mockUseLookups: vi.fn(),
   mockUseLaunchPresets: vi.fn(),
   mockUseCreateLaunchPreset: vi.fn(),
+  mockUseDeleteLaunchPreset: vi.fn(),
 }));
 
 vi.mock("../../../lib/api", async (importOriginal) => {
@@ -44,6 +47,7 @@ vi.mock("../../../lib/api", async (importOriginal) => {
     useLookups: () => mockUseLookups(),
     useLaunchPresets: () => mockUseLaunchPresets(),
     useCreateLaunchPreset: () => mockUseCreateLaunchPreset(),
+    useDeleteLaunchPreset: () => mockUseDeleteLaunchPreset(),
   };
 });
 
@@ -201,6 +205,7 @@ function ctxCheckbox(label: string): HTMLInputElement {
 }
 
 let createPresetMutateAsync: ReturnType<typeof vi.fn>;
+let deletePresetMutateAsync: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   mockUseProjects.mockReturnValue({ data: [project()] });
@@ -216,6 +221,11 @@ beforeEach(() => {
   createPresetMutateAsync = vi.fn().mockResolvedValue(fakePreset());
   mockUseCreateLaunchPreset.mockReturnValue({
     mutateAsync: createPresetMutateAsync,
+    isPending: false,
+  });
+  deletePresetMutateAsync = vi.fn().mockResolvedValue({ ok: true });
+  mockUseDeleteLaunchPreset.mockReturnValue({
+    mutateAsync: deletePresetMutateAsync,
     isPending: false,
   });
 });
@@ -799,5 +809,114 @@ describe("LaunchComposer — Ticket context sections (task #33)", () => {
       document.querySelectorAll<HTMLInputElement>(".lp-ctxrow input"),
     );
     expect(checkboxes.every((cb) => !cb.disabled)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Composer additions (task #35)
+// ---------------------------------------------------------------------------
+
+function sessionRow(label: string): HTMLElement {
+  const row = Array.from(
+    document.querySelectorAll<HTMLElement>(".lp-rows .lp-row"),
+  ).find((el) => el.querySelector(".lp-row__l")?.textContent === label);
+  if (!row) throw new Error(`no .lp-row labelled "${label}"`);
+  return row;
+}
+
+describe("LaunchComposer — initialTarget / initialProfileId (task #35)", () => {
+  it("seed the Session block", () => {
+    mockUseLookups.mockReturnValue({
+      data: { profiles: [{ id: 5, name: "Work profile" }] },
+    });
+    render(
+      <LaunchComposer
+        open
+        onClose={vi.fn()}
+        onLaunch={vi.fn()}
+        initialTarget="popout"
+        initialProfileId={5}
+      />,
+    );
+
+    const profileRow = sessionRow("Profile");
+    expect(profileRow.querySelector(".lp-select__v")?.textContent).toBe(
+      "Work profile",
+    );
+
+    const popoutButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".lp-seg button"),
+    ).find((b) => b.textContent === "Popout window");
+    expect(popoutButton?.className).toContain("is-on");
+  });
+});
+
+describe("LaunchComposer — MAX_LAUNCH_PANES cap (task #35)", () => {
+  it("Launch is disabled above the cap, with a matching tooltip", () => {
+    render(<LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} />);
+    // devpair starts at 2 panes (1 agent, 1 shell) — 7 more agent panes push
+    // the composition to 9, one past MAX_LAUNCH_PANES.
+    for (let i = 0; i < 7; i++) {
+      fireEvent.click(ghostButton("Agent"));
+    }
+    expect(document.querySelectorAll(".lp-pane")).toHaveLength(9);
+    expect(launchButton().disabled).toBe(true);
+    expect(launchButton().getAttribute("title")).toContain(
+      "at most 8 panes",
+    );
+  });
+});
+
+describe("LaunchComposer — preset delete (task #35)", () => {
+  it("deleting a saved preset chip calls useDeleteLaunchPreset and not applyPreset", () => {
+    const preset = fakePreset({ name: "My Preset" });
+    mockUseLaunchPresets.mockReturnValue({ data: [preset] });
+    render(<LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} />);
+
+    const chip = recipeButton("My Preset");
+    const deleteButton = chip.querySelector<HTMLButtonElement>(".lp-recipe__x");
+    if (!deleteButton) {
+      throw new Error("expected a delete button on the preset chip");
+    }
+
+    fireEvent.click(deleteButton);
+
+    expect(deletePresetMutateAsync).toHaveBeenCalledTimes(1);
+    expect(deletePresetMutateAsync).toHaveBeenCalledWith(preset.id);
+    // stopPropagation proof: the chip's own onClick (applyPreset) never
+    // fired — the built-in "Agent + shell" recipe is still the active one.
+    expect(recipeButton("Agent + shell").className).toContain("is-on");
+    expect(chip.className).not.toContain("is-on");
+  });
+
+  it("Enter/Space on the delete button deletes the preset instead of applying it", async () => {
+    // Regression test for the keydown-bubbling race: the outer chip is a
+    // `role="button"` div whose own onKeyDown applies the preset on
+    // Enter/Space. Without `stopPropagation` on the nested delete button's
+    // onKeyDown, that keydown bubbles up and fires `applyThisPreset()` —
+    // and the outer handler's `preventDefault()` suppresses the button's
+    // own native click activation, so the delete never happens.
+    const preset = fakePreset({ name: "My Preset" });
+    mockUseLaunchPresets.mockReturnValue({ data: [preset] });
+    render(<LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} />);
+
+    const chip = recipeButton("My Preset");
+    const deleteButton = chip.querySelector<HTMLButtonElement>(".lp-recipe__x");
+    if (!deleteButton) {
+      throw new Error("expected a delete button on the preset chip");
+    }
+
+    deleteButton.focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(deletePresetMutateAsync).toHaveBeenCalledTimes(1);
+    expect(deletePresetMutateAsync).toHaveBeenCalledWith(preset.id);
+    expect(recipeButton("Agent + shell").className).toContain("is-on");
+    expect(chip.className).not.toContain("is-on");
+
+    deleteButton.focus();
+    await userEvent.keyboard(" ");
+
+    expect(deletePresetMutateAsync).toHaveBeenCalledTimes(2);
   });
 });

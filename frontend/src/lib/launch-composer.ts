@@ -18,7 +18,13 @@
  */
 
 import type { CSSProperties } from "react";
+import {
+  MAX_LAUNCH_PANES,
+  type LaunchPane,
+  type PaneLaunchSpec,
+} from "./launch";
 import type {
+  LaunchSeed,
   SourceKind,
   LaunchTarget,
   LaunchPromptSection,
@@ -319,22 +325,58 @@ function zipDraftsOntoIds(
 // Reducer
 // ---------------------------------------------------------------------------
 
-export function initialComposerState(
-  catalog: ComposerCatalogProvider[],
-): ComposerState {
-  const def = RECIPES.find((r) => r.id === "devpair");
-  const made = def?.make(catalog) ?? {
-    panes: [] as PaneDraft[],
-    split: "cols" as SplitMode,
-  };
-  const { panes, nextId } = zipDraftsOntoIds(made.panes, [], 1);
+/** What seeds the reducer's lazy initialiser: the live catalog (unchanged
+ *  need), plus an optional pre-built pane list. `layout: null` is today's
+ *  cold-start case (the `devpair` recipe); a non-null layout is what a
+ *  `GET /api/v1/launch/seed` grid (`seedPanesFromGrid` below) or a restored
+ *  spec produces. */
+export interface ComposerInit {
+  catalog: ComposerCatalogProvider[];
+  layout: { panes: PaneDraft[]; split: SplitMode } | null;
+}
+
+/**
+ * The reducer's lazy `useReducer` initialiser. With `layout: null` this is
+ * byte-identical to the pre-#35 `initialComposerState` body: the `devpair`
+ * recipe, ids minted from 1. With a layout present, the drafts are zipped
+ * onto fresh ids the same way `applyPreset` does (decision 4 in the plan:
+ * a seeded pane list is `"custom"` — neither a built-in recipe nor a saved
+ * preset, so `applyCatalogResolved`'s per-pane fill branch is what converges
+ * it once a real catalog arrives, not the recipe-rebuild branch).
+ */
+export function initialComposerStateFrom(init: ComposerInit): ComposerState {
+  const { catalog, layout } = init;
+  if (layout === null) {
+    const def = RECIPES.find((r) => r.id === "devpair");
+    const made = def?.make(catalog) ?? {
+      panes: [] as PaneDraft[],
+      split: "cols" as SplitMode,
+    };
+    const { panes, nextId } = zipDraftsOntoIds(made.panes, [], 1);
+    return {
+      recipe: "devpair",
+      panes,
+      split: made.split,
+      selectedId: panes[0]?.id ?? null,
+      nextId,
+    };
+  }
+  const { panes, nextId } = zipDraftsOntoIds(layout.panes, [], 1);
   return {
-    recipe: "devpair",
+    recipe: "custom",
     panes,
-    split: made.split,
+    split: layout.split,
     selectedId: panes[0]?.id ?? null,
     nextId,
   };
+}
+
+/** One-line delegate kept so the ~25 `lib/__tests__/launch-composer.test.ts`
+ *  call sites that seed the reducer with just a catalog are untouched. */
+export function initialComposerState(
+  catalog: ComposerCatalogProvider[],
+): ComposerState {
+  return initialComposerStateFrom({ catalog, layout: null });
 }
 
 /**
@@ -630,10 +672,11 @@ export function paneLabel(
 // ---------------------------------------------------------------------------
 
 /**
- * What `onLaunch` receives. Deliberately not a `LaunchSpec`
- * (`lib/launch.ts:121-186`): building one needs `renderProviderCommand`,
- * project path resolution, `mergeEnv` and `pathsExist` — all of which is the
- * wiring ticket that switches an entry point to this dialog.
+ * What `onLaunch` receives. Deliberately not a `PaneLaunchSpec`
+ * (`lib/launch.ts:636-658`): building one needs project path resolution and
+ * `pathsExist` preflight, which the composer has no props for — that
+ * conversion is `composerPlanToSpec` below, called from
+ * `launch-composer-dialog.tsx`, the wrapper that owns the actual launch.
  */
 export interface LaunchComposerPlan {
   panes: ComposerPane[];
@@ -689,4 +732,110 @@ export function sectionTokenTotal(
 /** `~0.54k tokens` — the design's format verbatim (d3-launch.jsx:278). */
 export function formatTokenTotal(tokens: number): string {
   return `~${(tokens / 1000).toFixed(2)}k tokens`;
+}
+
+// ---------------------------------------------------------------------------
+// Seed -> composer pane list (task #35)
+// ---------------------------------------------------------------------------
+
+/**
+ * A `GET /api/v1/launch/seed` grid (`rows` × `cols`, one provider/model, one
+ * `prompt_fanout`) turned into the composer's pane list. Applied whenever a
+ * seed exists — not only when `has_override` (design decision 3 in the
+ * plan): a 1×1 seed is one agent pane, which is also the right default for
+ * "launch this ticket".
+ *
+ * `n` is clamped to `MAX_LAUNCH_PANES`: a saved 4×4 override is 16 cells, and
+ * `buildPaneLayout` throws above 8 rather than silently truncating.
+ */
+export function seedPanesFromGrid(
+  seed: Pick<
+    LaunchSeed,
+    "rows" | "cols" | "provider_id" | "model" | "prompt_fanout"
+  >,
+): { panes: PaneDraft[]; split: SplitMode } {
+  const n = Math.min(Math.max(seed.rows * seed.cols, 1), MAX_LAUNCH_PANES);
+  // Mirrors the sidecar's `_split_from_grid` (`launch_preset_service.py`).
+  const split: SplitMode =
+    seed.rows === 1 ? "cols" : seed.cols === 1 ? "rows" : "grid";
+  const panes: PaneDraft[] = Array.from({ length: n }, (_, i) => ({
+    kind: "agent",
+    providerId: seed.provider_id,
+    model: seed.model,
+    permissionMode: "",
+    // A stored `prompt_fanout` keeps its meaning as a per-pane flag:
+    // `resolvePromptTargets` (`lib/launch.ts`) prefers an explicit
+    // `sendPrompt` over the legacy fanout field the moment any pane states
+    // one.
+    sendPrompt:
+      seed.prompt_fanout === "every"
+        ? true
+        : seed.prompt_fanout === "none"
+          ? false
+          : i === 0,
+  }));
+  return { panes, split };
+}
+
+// ---------------------------------------------------------------------------
+// Plan -> spec (task #35) — what `launch-composer-dialog.tsx`'s `onLaunch`
+// hands to `terminalStore.applyPaneLayout` / `pendingLaunchStore.enqueue`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Converts a composed `LaunchComposerPlan` into the `PaneLaunchSpec`
+ * `applyPaneLayout` (`stores/terminal-store.ts`) understands. A pure
+ * function so the attribution/cwd/per-pane mapping is unit-testable without
+ * a router, a terminal store or an IPC mock.
+ *
+ * Deliberately never sets `promptFanout` on the returned spec: every agent
+ * pane already states its own `sendPrompt` (either from the composer's own
+ * toggle, or from `seedPanesFromGrid` above), and `resolvePromptTargets`
+ * ignores the legacy field the instant any pane does that — setting it here
+ * would just be dead weight on the spec.
+ */
+export function composerPlanToSpec(
+  plan: LaunchComposerPlan,
+  ctx: {
+    cwd: string;
+    /** Set on agent panes only — `buildPaneLeaf` reads it for `agent_runs`
+     *  attribution; a shell leaf posts no telemetry, so it has nothing to
+     *  read it. */
+    profileName?: string;
+    shellEnv?: Record<string, string>;
+  },
+): PaneLaunchSpec {
+  const panes: LaunchPane[] = plan.panes.map((pane) => {
+    if (pane.kind === "agent") {
+      return {
+        kind: "agent",
+        cwd: ctx.cwd,
+        ...(pane.providerId !== null ? { providerId: pane.providerId } : {}),
+        ...(pane.model !== null ? { model: pane.model } : {}),
+        ...(pane.permissionMode !== ""
+          ? { permissionMode: pane.permissionMode }
+          : {}),
+        sendPrompt: pane.sendPrompt,
+        ...(ctx.profileName !== undefined
+          ? { profileName: ctx.profileName }
+          : {}),
+      };
+    }
+    return {
+      kind: "shell",
+      cwd: ctx.cwd,
+      ...(pane.shell !== "" ? { shell: pane.shell } : {}),
+      ...(pane.command !== "" ? { command: pane.command } : {}),
+      ...(ctx.shellEnv !== undefined ? { env: ctx.shellEnv } : {}),
+    };
+  });
+
+  return {
+    panes,
+    split: plan.split,
+    target: plan.target,
+    ...(plan.projectId !== null ? { projectId: plan.projectId } : {}),
+    ...(plan.source !== null ? { source: plan.source } : {}),
+    ...(plan.prompt.length > 0 ? { prompt: plan.prompt } : {}),
+  };
 }

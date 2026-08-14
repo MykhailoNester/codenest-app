@@ -16,8 +16,7 @@ vi.mock("../../lib/ipc", () => {
 
 import { useTerminalStore, TERMINAL_STORAGE_KEY } from "../terminal-store";
 import type { LayoutNode, PaneLeaf, Split } from "../../lib/layout-tree";
-import { collectLeaves, paneKind } from "../../lib/layout-tree";
-import type { LaunchSpec } from "../../lib/launch";
+import { paneKind } from "../../lib/layout-tree";
 import * as ipc from "../../lib/ipc";
 
 const openTerminalMock = ipc.openTerminal as unknown as ReturnType<
@@ -484,80 +483,4 @@ describe("useTerminalStore", () => {
     });
   });
 
-  describe("applyGridLayout", () => {
-    function makeSpec(rows: number, cols: number): LaunchSpec {
-      return {
-        projectId: 1,
-        cwd: "/tmp/proj",
-        providerId: 1,
-        providerCommand: "claude\n",
-        rows,
-        cols,
-        target: "embedded",
-        profileId: null,
-      };
-    }
-
-    it("opens N PTYs for an N-leaf grid and writes N init commands", async () => {
-      const spec = makeSpec(2, 2); // 4 panes
-      const result = await useTerminalStore.getState().applyGridLayout(spec);
-
-      expect(result.openedCount).toBe(4);
-      expect(result.failedCount).toBe(0);
-      expect(openTerminalMock).toHaveBeenCalledTimes(4);
-      expect(sendTerminalInputMock).toHaveBeenCalledTimes(4);
-
-      // Each sendTerminalInput call should use the provider command.
-      // safeInjectClaudeArgs appends --session-id to claude commands, so the
-      // exact string is "claude --session-id <uuid>\n" rather than "claude\n".
-      for (const call of sendTerminalInputMock.mock.calls) {
-        const cmd = call[1] as string;
-        expect(cmd.startsWith("claude")).toBe(true);
-        expect(cmd.endsWith("\n")).toBe(true);
-        // The safety net must have injected --session-id.
-        expect(cmd).toMatch(/--session-id\s+\S+/);
-      }
-    });
-
-    it("adds a new tab and marks it active after a successful launch", async () => {
-      const spec = makeSpec(1, 2);
-      await useTerminalStore.getState().applyGridLayout(spec);
-      const { tabs, activeTabId } = useTerminalStore.getState();
-      expect(tabs).toHaveLength(1);
-      expect(activeTabId).toBe(tabs[0]!.id);
-    });
-
-    it("layout tree has the correct number of leaves after a 2×2 launch", async () => {
-      const spec = makeSpec(2, 2);
-      await useTerminalStore.getState().applyGridLayout(spec);
-      const { tabs } = useTerminalStore.getState();
-      const leaves = collectLeaves(tabs[0]!.layout);
-      expect(leaves).toHaveLength(4);
-    });
-
-    it("one failed openTerminal yields { openedCount: N-1, failedCount: 1 } without throwing", async () => {
-      let callCount = 0;
-      openTerminalMock.mockImplementation(async () => {
-        callCount += 1;
-        if (callCount === 2) {
-          throw new Error("PTY allocation failed");
-        }
-        return { id: `pty-${callCount}` };
-      });
-
-      const spec = makeSpec(1, 3); // 3 panes, second one fails
-      const result = await useTerminalStore.getState().applyGridLayout(spec);
-
-      expect(result.openedCount).toBe(2);
-      expect(result.failedCount).toBe(1);
-    });
-
-    it("passes cwd to every openTerminal call", async () => {
-      const spec = makeSpec(1, 3);
-      await useTerminalStore.getState().applyGridLayout(spec);
-      for (const call of openTerminalMock.mock.calls) {
-        expect((call[0] as { cwd: string }).cwd).toBe("/tmp/proj");
-      }
-    });
-  });
 });

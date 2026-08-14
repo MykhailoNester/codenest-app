@@ -15,7 +15,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { TerminalWindowRoot } from "../terminal-window-root";
 import { useTerminalStore } from "../../stores/terminal-store";
 import { enqueue } from "../../stores/pending-launch-store";
-import type { LaunchSpec, PaneLaunchSpec } from "../../lib/launch";
+import type { PaneLaunchSpec } from "../../lib/launch";
 
 const { layoutProps, destroyMock, onCloseRequestedMock } = vi.hoisted(() => ({
   layoutProps: [] as Array<Record<string, unknown>>,
@@ -95,11 +95,10 @@ describe("TerminalWindowRoot", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The popout half of the ordered-typed-pane-list AC: both entry points branch
-// on `isPaneLaunchSpec` and call the same store action embedded does. The
-// store's own `applyPaneLayout`/`applyGridLayout` are stubbed here — this
-// file's job is only to prove *which* one gets called, not to re-exercise
-// either action's own PTY/agent behaviour (covered elsewhere).
+// The popout half of the pane-list launch: the pending-launch slot holds one
+// shape now (task #35) — the store's own `applyPaneLayout` is stubbed here —
+// this file's job is only to prove it gets called with the queued spec, not
+// to re-exercise the action's own PTY/agent behaviour (covered elsewhere).
 // ---------------------------------------------------------------------------
 
 // A plain `Map`-backed stub — jsdom's own `localStorage` collides with Node's
@@ -129,18 +128,12 @@ describe("TerminalWindowRoot — popout launch routing", () => {
     openedCount: 1,
     failedCount: 0,
   }));
-  const applyGridLayoutMock = vi.fn(async () => ({
-    openedCount: 1,
-    failedCount: 0,
-  }));
 
   beforeEach(() => {
     installLocalStorage();
     applyPaneLayoutMock.mockClear();
-    applyGridLayoutMock.mockClear();
     useTerminalStore.setState({
       applyPaneLayout: applyPaneLayoutMock,
-      applyGridLayout: applyGridLayoutMock,
     });
   });
 
@@ -162,28 +155,31 @@ describe("TerminalWindowRoot — popout launch routing", () => {
 
     await waitFor(() => expect(applyPaneLayoutMock).toHaveBeenCalledTimes(1));
     expect(applyPaneLayoutMock).toHaveBeenCalledWith(spec);
-    expect(applyGridLayoutMock).not.toHaveBeenCalled();
   });
 
-  it("a queued popout LaunchSpec still goes to applyGridLayout", async () => {
-    const spec: LaunchSpec = {
-      projectId: 1,
-      cwd: "/tmp/proj",
-      providerId: 1,
-      providerCommand: "claude\n",
-      rows: 1,
-      cols: 1,
-      target: "popout",
-      profileId: null,
-    };
-    enqueue(spec);
+  it("a queued legacy grid spec applies no layout", async () => {
+    // A spec queued by a pre-#35 build of the app: no `panes` array, so
+    // `isPaneLaunchSpec` drops it at the pending-launch-store boundary
+    // rather than reaching this window's `applyPaneLayout` at all. Written
+    // as raw JSON — `enqueue` only accepts a `PaneLaunchSpec` now.
+    localStorage.setItem(
+      "codenest.pendingLaunch",
+      JSON.stringify({
+        projectId: 1,
+        cwd: "/tmp/proj",
+        providerId: 1,
+        providerCommand: "claude\n",
+        rows: 1,
+        cols: 1,
+        target: "popout",
+        profileId: null,
+      }),
+    );
 
     await act(async () => {
       render(<TerminalWindowRoot />);
     });
 
-    await waitFor(() => expect(applyGridLayoutMock).toHaveBeenCalledTimes(1));
-    expect(applyGridLayoutMock).toHaveBeenCalledWith(spec);
     expect(applyPaneLayoutMock).not.toHaveBeenCalled();
   });
 });

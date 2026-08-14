@@ -250,18 +250,20 @@ async def test_inbox_sections_include_suggested_action(
 
 
 @pytest.mark.asyncio
-async def test_task_labels_section_is_present_and_off_by_default(
+async def test_task_labels_section_is_on_by_default(
     migrated_db: aiosqlite.Connection,
 ) -> None:
-    """Pins D2 (off by default) and the display-name choice, in `sort_order`
-    (`bug` is 10, `feature` 20)."""
+    """Task #35 flips D2's `default_on=False` to `True`: the modal that read
+    the flat `prompt` string as a launch payload is deleted, so every
+    section's default is checked. Pins the display-name choice, in
+    `sort_order` (`bug` is 10, `feature` 20)."""
     tid = await _insert_task(migrated_db)
     await _assign_labels(migrated_db, tid, ["bug", "feature"])
 
     seed = await launch_seed_service.build_seed(migrated_db, "task", tid)
 
     labels_section = next(s for s in seed.sections if s.id == "labels")
-    assert labels_section.default_on is False
+    assert labels_section.default_on is True
     assert labels_section.text == "Labels: Bug, Feature"
 
 
@@ -298,11 +300,12 @@ async def test_prompt_is_the_join_of_default_on_sections(
 
 
 @pytest.mark.asyncio
-async def test_prompt_byte_identical_for_a_labelled_task(
+async def test_prompt_includes_labels_for_a_labelled_task(
     migrated_db: aiosqlite.Connection,
 ) -> None:
-    """Regression guard for `LaunchModal`: fails the moment anyone flips
-    Labels to `default_on=True` without deleting the old modal."""
+    """With Labels now `default_on=True` (task #35), the flat `prompt`
+    projection includes the Labels line for a labelled task — the join order
+    matches `sections`' own order (title, description, project, labels)."""
     tid = await _insert_task(migrated_db)
     await _assign_labels(migrated_db, tid, ["bug"])
 
@@ -311,7 +314,8 @@ async def test_prompt_byte_identical_for_a_labelled_task(
     assert seed.prompt == (
         f"You are working on task #{tid}: Investigate CI\n\n"
         "logs at /tmp/ci.log\n\n"
-        "Project: TestProject (/Users/test/TestProject)"
+        "Project: TestProject (/Users/test/TestProject)\n\n"
+        "Labels: Bug"
     )
 
 

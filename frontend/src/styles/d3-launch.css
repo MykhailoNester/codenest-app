@@ -78,6 +78,10 @@
  *   a preset" control and no notion of an unresolved provider on a recipe
  *   button — both are new to this dialog, not present in the design source
  *   to deviate from. See the block at the end of this file.
+ * - ADDITION — `.lp-recipe__x`. Preset delete moved into the composer
+ *   (task #35, its former standalone preset-strip component deleted): the
+ *   same "✕" corner control `.lp-pane__x` already gives a pane, applied to
+ *   a saved-preset chip instead. See the block at the end of this file.
  *
  * Everything else — including the `@media (max-width: 900px)` block at the
  * end — is a straight transcription.
@@ -846,4 +850,17 @@
 .lp-recipe__warn {
   font-size: 10px;
   color: var(--warn);
+}
+.lp-recipe__x {
+  margin-left: auto;
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--fg-4);
+}
+.lp-recipe__x:hover {
+  background: var(--err-soft);
+  color: var(--err);
 }

@@ -1,8 +1,9 @@
 """Launch preset service.
 
 CRUD for the ``launch_presets`` table.  A launch preset is a saved
-launch configuration that users can recall from the Launch modal to
-avoid re-typing the same form values every session.
+launch configuration that users can recall from the launch composer
+(``components/launch/launch-composer.tsx``) to avoid re-typing the
+same pane composition every session.
 """
 
 from __future__ import annotations
@@ -93,9 +94,10 @@ def _panes_from_grid(
     This intentionally drops each cell's `extra_args`, `env_overlay` and
     `project_id`: none has a pane equivalent (see the plan's Follow-ups), so
     a workspace preset whose cells span several projects reads back as panes
-    on the header project. Harmless today because the strip still routes
-    grid presets to `LaunchModal`, which reads `cells_json` directly — the
-    row on disk is never touched by this function.
+    on the header project. This is no longer a lossy *read path among two* —
+    the launch composer is the only surviving consumer of a saved preset
+    (task #35), so this projection is the sole way a legacy grid-shaped row
+    is ever read. `cells_json` on disk is never rewritten by this function.
     """
     by_coord = {(c.row, c.col): c for c in cells} if cells else {}
     panes: list[PresetPane] = []
@@ -251,7 +253,11 @@ async def create_preset(
         if first_agent is None:
             raise HTTPException(
                 status_code=400,
-                detail="a saved preset needs at least one agent pane",
+                detail=(
+                    "a saved preset needs at least one agent pane — "
+                    "launch_presets.provider_id/rows/cols are NOT NULL, so "
+                    "a shell-only preset needs a table rebuild (follow-up)"
+                ),
             )
 
         cur = await db.execute(

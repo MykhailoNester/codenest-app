@@ -128,11 +128,14 @@ with three org agents (Atlas, Orion, Vega) shared across the workspace.
 
 <br>
 
-**Launch Agent** — pick a project, provider, and profile, lay out a grid of
-panes, and launch embedded or as a popout window. Save any setup as a preset.
+**Launch Agent** — pick a built-in recipe or a saved preset, then edit an
+ordered list of agent and shell panes, each with its own provider, model, and
+permission mode. A shared prompt with per-section ticket-context toggles feeds
+every agent pane that opts in; pick a project, profile, and target (embedded
+tab or popout window), then launch or save the composition as a preset.
 
 <p align="center">
-  <img src="docs/media/launch-agent.png" alt="Launch Agent dialog — project, provider, pane grid, target, profile, and extra args" width="520">
+  <img src="docs/media/launch-agent.png" alt="Launch session composer — recipe row, editable agent/shell pane list, shared prompt with ticket-context toggles, project, profile, and target" width="520">
 </p>
 
 **Projects** — the repositories your agents work in. Imported projects stay

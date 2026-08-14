@@ -61,7 +61,7 @@ export function TerminalsLayout({
     if (hydrated) return;
     if (skipHydration) {
       // A programmatic launch is about to populate the store via
-      // applyGridLayout — mark the store as hydrated immediately so the
+      // applyPaneLayout — mark the store as hydrated immediately so the
       // persistence subscriber is active, but do not seed default tabs.
       setHydrated();
     } else {
