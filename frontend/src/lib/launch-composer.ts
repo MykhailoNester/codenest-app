@@ -19,13 +19,30 @@
 
 import type { CSSProperties } from "react";
 import type { SourceKind, LaunchTarget } from "./launch-seed";
+import type { LaunchPreset, LaunchPresetPane } from "./api";
 
 // ---------------------------------------------------------------------------
 // Pane types
 // ---------------------------------------------------------------------------
 
 export type SplitMode = "cols" | "rows" | "grid";
-export type RecipeId = "single" | "devpair" | "compare" | "devsetup" | "custom";
+/** The four fixed recipes in `RECIPES` — every `RecipeId` that is not
+ *  `"custom"` and not a saved preset (`` `preset:${number}` ``, D8). */
+export type BuiltinRecipeId = "single" | "devpair" | "compare" | "devsetup";
+/** `"custom"` = hand-edited; `` `preset:${id}` `` = applied from a saved
+ *  preset (D8) — a preset is just a named pane list, so the recipe row's
+ *  highlight and a saved preset's highlight are the same mechanism rather
+ *  than a parallel `presetId` field on `ComposerState`. */
+export type RecipeId = BuiltinRecipeId | "custom" | `preset:${number}`;
+
+/** Narrows `RecipeId` to a `RECIPES` member — used by `applyCatalogResolved`
+ *  so the recipe-rebuild branch is entered only for a built-in; a
+ *  `preset:${id}` composition falls into the per-pane fill branch instead
+ *  (a no-op for it in practice, since preset panes always resolve a
+ *  `providerId` at apply time — see `presetToDrafts`). */
+export function isBuiltinRecipe(id: RecipeId): id is BuiltinRecipeId {
+  return RECIPES.some((r) => r.id === id);
+}
 
 export interface AgentPane {
   id: string;
@@ -89,10 +106,14 @@ export interface ComposerState {
 export type ComposerAction =
   | {
       type: "applyRecipe";
-      recipe: Exclude<RecipeId, "custom">;
+      recipe: BuiltinRecipeId;
       catalog: ComposerCatalogProvider[];
     }
-  | { type: "addPane"; kind: ComposerPane["kind"]; catalog: ComposerCatalogProvider[] }
+  | {
+      type: "addPane";
+      kind: ComposerPane["kind"];
+      catalog: ComposerCatalogProvider[];
+    }
   | { type: "removePane"; id: string }
   | { type: "duplicatePane"; id: string }
   | { type: "patchPane"; pane: ComposerPane }
@@ -104,14 +125,29 @@ export type ComposerAction =
     }
   | { type: "selectPane"; id: string }
   | { type: "setSplit"; split: SplitMode }
-  | { type: "catalogResolved"; catalog: ComposerCatalogProvider[] };
+  | { type: "catalogResolved"; catalog: ComposerCatalogProvider[] }
+  | {
+      type: "applyPreset";
+      presetId: number;
+      panes: PaneDraft[];
+      split: SplitMode;
+    };
 
 // ---------------------------------------------------------------------------
 // Pane factories
 // ---------------------------------------------------------------------------
 
-function agentPaneWith(providerId: number | null, model: string | null): PaneDraft {
-  return { kind: "agent", providerId, model, permissionMode: "", sendPrompt: true };
+function agentPaneWith(
+  providerId: number | null,
+  model: string | null,
+): PaneDraft {
+  return {
+    kind: "agent",
+    providerId,
+    model,
+    permissionMode: "",
+    sendPrompt: true,
+  };
 }
 
 function defaultAgentPane(catalog: ComposerCatalogProvider[]): PaneDraft {
@@ -137,7 +173,9 @@ function defaultShellPane(): PaneDraft {
  * degrades rather than throwing, and `catalogResolved` converges it once a
  * real catalog arrives (D13).
  */
-function makeCompareAgentPanes(catalog: ComposerCatalogProvider[]): PaneDraft[] {
+function makeCompareAgentPanes(
+  catalog: ComposerCatalogProvider[],
+): PaneDraft[] {
   const panes: PaneDraft[] = [];
   const distinctProviders = catalog.slice(0, 3);
   for (const provider of distinctProviders) {
@@ -190,10 +228,13 @@ function makeCompareAgentPanes(catalog: ComposerCatalogProvider[]): PaneDraft[] 
  * the existing ids by index (D13).
  */
 export const RECIPES: ReadonlyArray<{
-  id: Exclude<RecipeId, "custom">;
+  id: BuiltinRecipeId;
   label: string;
   desc: string;
-  make: (catalog: ComposerCatalogProvider[]) => { panes: PaneDraft[]; split: SplitMode };
+  make: (catalog: ComposerCatalogProvider[]) => {
+    panes: PaneDraft[];
+    split: SplitMode;
+  };
 }> = [
   {
     id: "single",
@@ -214,7 +255,10 @@ export const RECIPES: ReadonlyArray<{
     id: "compare",
     label: "Compare 3",
     desc: "Same prompt, three models",
-    make: (catalog) => ({ panes: makeCompareAgentPanes(catalog), split: "cols" }),
+    make: (catalog) => ({
+      panes: makeCompareAgentPanes(catalog),
+      split: "cols",
+    }),
   },
   {
     id: "devsetup",
@@ -271,9 +315,14 @@ function zipDraftsOntoIds(
 // Reducer
 // ---------------------------------------------------------------------------
 
-export function initialComposerState(catalog: ComposerCatalogProvider[]): ComposerState {
+export function initialComposerState(
+  catalog: ComposerCatalogProvider[],
+): ComposerState {
   const def = RECIPES.find((r) => r.id === "devpair");
-  const made = def?.make(catalog) ?? { panes: [] as PaneDraft[], split: "cols" as SplitMode };
+  const made = def?.make(catalog) ?? {
+    panes: [] as PaneDraft[],
+    split: "cols" as SplitMode,
+  };
   const { panes, nextId } = zipDraftsOntoIds(made.panes, [], 1);
   return {
     recipe: "devpair",
@@ -307,12 +356,16 @@ function applyCatalogResolved(
   );
   if (!hasUnresolved) return state;
 
-  if (state.recipe !== "custom") {
+  if (isBuiltinRecipe(state.recipe)) {
     const def = RECIPES.find((r) => r.id === state.recipe);
     if (!def) return state;
     const made = def.make(catalog as ComposerCatalogProvider[]);
     const existingIds = state.panes.map((p) => p.id);
-    const { panes, nextId } = zipDraftsOntoIds(made.panes, existingIds, state.nextId);
+    const { panes, nextId } = zipDraftsOntoIds(
+      made.panes,
+      existingIds,
+      state.nextId,
+    );
     return { ...state, panes, nextId };
   }
 
@@ -347,7 +400,9 @@ export function composerReducer(
 
     case "addPane": {
       const draft =
-        action.kind === "agent" ? defaultAgentPane(action.catalog) : defaultShellPane();
+        action.kind === "agent"
+          ? defaultAgentPane(action.catalog)
+          : defaultShellPane();
       const { id, nextId } = mintOne(state.nextId);
       const pane = { ...draft, id } as ComposerPane;
       return {
@@ -400,7 +455,9 @@ export function composerReducer(
       const current = state.panes[idx];
       if (!current || current.kind === action.kind) return state;
       const draft =
-        action.kind === "agent" ? defaultAgentPane(action.catalog) : defaultShellPane();
+        action.kind === "agent"
+          ? defaultAgentPane(action.catalog)
+          : defaultShellPane();
       const panes = state.panes.slice();
       panes[idx] = { ...draft, id: action.id } as ComposerPane;
       return { ...state, panes, recipe: "custom" };
@@ -416,9 +473,116 @@ export function composerReducer(
     case "catalogResolved":
       return applyCatalogResolved(state, action.catalog);
 
+    case "applyPreset": {
+      // Defensive: the service rejects an empty pane list at save time, so
+      // this is unreachable in practice — the composer itself must never
+      // reach zero panes (cf. `removePane` above).
+      if (action.panes.length === 0) return state;
+      const { panes, nextId } = zipDraftsOntoIds(
+        action.panes,
+        [],
+        state.nextId,
+      );
+      return {
+        recipe: `preset:${action.presetId}`,
+        panes,
+        split: action.split,
+        selectedId: panes[0]?.id ?? null,
+        nextId,
+      };
+    }
+
     default:
       return state;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Presets — pane list <-> saved LaunchPreset conversions.
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire (snake_case, `LaunchPresetPane`) -> composer (camelCase, `PaneDraft`).
+ * A pure mapping with no id: callers mint ids through `applyPreset`'s
+ * reducer case (via `zipDraftsOntoIds`), exactly as a recipe's `make` does.
+ */
+function presetPaneToDraft(pane: LaunchPresetPane): PaneDraft {
+  if (pane.kind === "agent") {
+    return {
+      kind: "agent",
+      providerId: pane.provider_id,
+      model: pane.model,
+      permissionMode: pane.permission_mode,
+      sendPrompt: pane.send_prompt,
+    };
+  }
+  return { kind: "shell", shell: pane.shell, command: pane.command };
+}
+
+/** A saved preset's panes and split, converted to what `applyPreset` needs. */
+export function presetToDrafts(preset: LaunchPreset): {
+  panes: PaneDraft[];
+  split: SplitMode;
+} {
+  return { panes: preset.panes.map(presetPaneToDraft), split: preset.split };
+}
+
+/**
+ * Composer (camelCase, `ComposerPane`) -> wire (snake_case,
+ * `LaunchPresetPane`) — the inverse of `presetToDrafts`. Returns `null` when
+ * any agent pane has `providerId === null` (nothing storable), so the
+ * caller's "can I save?" check and its save payload come from one function.
+ */
+export function composerPanesToPresetPanes(
+  panes: readonly ComposerPane[],
+): LaunchPresetPane[] | null {
+  const result: LaunchPresetPane[] = [];
+  for (const pane of panes) {
+    if (pane.kind === "shell") {
+      result.push({ kind: "shell", shell: pane.shell, command: pane.command });
+      continue;
+    }
+    if (pane.providerId === null) return null;
+    result.push({
+      kind: "agent",
+      provider_id: pane.providerId,
+      model: pane.model,
+      permission_mode: pane.permissionMode,
+      send_prompt: pane.sendPrompt,
+    });
+  }
+  return result;
+}
+
+/** Ids of every agent pane whose provider is null or no longer in the live
+ *  catalog — feeds `canLaunch` (belt and braces alongside the sidecar's
+ *  read-time `unresolved`, since a provider can be deleted while the dialog
+ *  is open, after the preset was read). */
+export function unresolvedPaneIds(
+  panes: readonly ComposerPane[],
+  catalog: readonly ComposerCatalogProvider[],
+): string[] {
+  return panes
+    .filter(
+      (p) =>
+        p.kind === "agent" &&
+        (p.providerId === null || !catalog.some((c) => c.id === p.providerId)),
+    )
+    .map((p) => p.id);
+}
+
+/**
+ * The saved-preset recipe button's subtitle: `"2 panes · agent + shell"` for
+ * one of each kind, `"3 panes · 3 agents"` when every pane shares a kind.
+ */
+export function describePreset(preset: LaunchPreset): string {
+  const agents = preset.panes.filter((p) => p.kind === "agent").length;
+  const shells = preset.panes.filter((p) => p.kind === "shell").length;
+  const kinds: string[] = [];
+  if (agents > 0) kinds.push(agents === 1 ? "agent" : `${agents} agents`);
+  if (shells > 0) kinds.push(shells === 1 ? "shell" : `${shells} shells`);
+  const total = preset.panes.length;
+  return `${total} pane${total !== 1 ? "s" : ""} · ${kinds.join(" + ")}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -447,7 +611,10 @@ export function previewGridStyle(
   return { gridTemplateColumns: `repeat(${Math.ceil(Math.sqrt(n))},1fr)` };
 }
 
-export function paneLabel(panes: readonly ComposerPane[], pane: ComposerPane): string {
+export function paneLabel(
+  panes: readonly ComposerPane[],
+  pane: ComposerPane,
+): string {
   const sameKind = panes.filter((p) => p.kind === pane.kind);
   const idx = sameKind.findIndex((p) => p.id === pane.id);
   const n = idx === -1 ? sameKind.length : idx + 1;

@@ -29,8 +29,17 @@ async def api_list_launch_presets() -> JSONResponse:
 async def api_create_launch_preset(payload: LaunchPresetCreate) -> JSONResponse:
     """Create a new launch preset.
 
-    Returns ``201`` on success, ``409`` on name conflict, ``400`` when
-    ``project_id`` or ``provider_id`` do not exist.
+    Accepts two body shapes, distinguished by ``panes`` (see
+    ``app/models/launch.py`` and ``app/services/launch_preset_service.py``):
+    the new pane-list shape, or the existing grid shape (``rows``/``cols``/
+    ``provider_id``, optionally with ``cells``).
+
+    Returns ``201`` on success. ``409`` on name conflict. ``400`` when
+    ``project_id``/``provider_id`` do not exist (for panes, the message
+    names the pane index), when ``panes`` is empty, longer than 8, has no
+    agent pane, or is sent together with ``cells``. ``422`` for a malformed
+    pane object, or a grid-shape body missing ``provider_id`` or missing
+    ``rows``/``cols`` with no ``cells`` to derive them from.
     """
     db = await get_db()
     preset = await launch_preset_service.create_preset(db, payload)

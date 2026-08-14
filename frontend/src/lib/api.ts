@@ -3567,6 +3567,35 @@ export interface LaunchCellCreate {
   env_overlay: Record<string, string>;
 }
 
+/** Mirrors `app/models/launch.py:SplitMode`. */
+export type PresetSplit = "cols" | "rows" | "grid";
+
+/** Mirrors `app/models/launch.py:AgentPresetPane`. */
+export interface LaunchPresetAgentPane {
+  kind: "agent";
+  provider_id: number;
+  model: string | null;
+  permission_mode: string;
+  send_prompt: boolean;
+}
+
+/** Mirrors `app/models/launch.py:ShellPresetPane`. */
+export interface LaunchPresetShellPane {
+  kind: "shell";
+  shell: string;
+  command: string;
+}
+
+/** Mirrors `app/models/launch.py:PresetPane`. */
+export type LaunchPresetPane = LaunchPresetAgentPane | LaunchPresetShellPane;
+
+/** Mirrors `app/models/launch.py:PresetUnresolved`. */
+export interface LaunchPresetUnresolved {
+  pane_index: number;
+  provider_id: number;
+  reason: "missing" | "disabled";
+}
+
 /** Mirrors `app/models/launch.py:LaunchPreset`. */
 export interface LaunchPreset {
   id: number;
@@ -3580,19 +3609,25 @@ export interface LaunchPreset {
   profile_id: number | null;
   created_at: string;
   cells: LaunchCellCreate[] | null;
+  panes: LaunchPresetPane[];
+  split: PresetSplit;
+  shape: "panes" | "grid";
+  unresolved: LaunchPresetUnresolved[];
 }
 
 /** Mirrors `app/models/launch.py:LaunchPresetCreate`. */
 export interface LaunchPresetCreate {
   name: string;
   project_id: number;
-  provider_id: number;
-  rows: number;
-  cols: number;
+  provider_id?: number;
+  rows?: number;
+  cols?: number;
   extra_args: string;
   target: "embedded" | "popout";
   profile_id: number | null;
   cells?: LaunchCellCreate[] | null;
+  panes?: LaunchPresetPane[];
+  split?: PresetSplit;
 }
 
 export function useLaunchPresets(): UseQueryResult<

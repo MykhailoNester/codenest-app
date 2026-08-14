@@ -62,6 +62,11 @@
  *   file's own `var(--pc, var(--accent))` fallback (`:42`) already handles
  *   it. No new rule needed; noted here so the next reader knows it is
  *   deliberate.
+ * - ADDITION — `.lp-savebar`, `.lp-savebar .lp-input`, `.lp-saveerr`,
+ *   `.lp-recipe__warn`. The mockup has no "save the current composition as
+ *   a preset" control and no notion of an unresolved provider on a recipe
+ *   button — both are new to this dialog, not present in the design source
+ *   to deviate from. See the block at the end of this file.
  *
  * Everything else — including the `@media (max-width: 900px)` block at the
  * end — is a straight transcription.
@@ -746,4 +751,29 @@
   .lp-recipes {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* ADDED — not in the design source (see the header's deviation list). */
+.lp-savebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Puts the bar on its own footer row: `.lp-foot` is `flex-wrap: wrap`
+     with `justify-content: space-between` (`:665-676`), so a 100%-basis
+     child drops below `.lp-summary`/`.lp-foot__r` instead of squeezing
+     them. */
+  flex-basis: 100%;
+}
+.lp-savebar .lp-input {
+  /* `.lp-input` defaults to `width: 100%` (`:461`) — too wide once it sits
+     next to the Save/Cancel buttons. */
+  width: 200px;
+}
+.lp-saveerr {
+  font-size: 11px;
+  color: var(--err);
+}
+.lp-recipe__warn {
+  font-size: 10px;
+  color: var(--warn);
 }
