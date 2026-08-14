@@ -107,6 +107,7 @@ function seedCatalog(): void {
           },
         ],
         defaultModel: SEEDED_MODEL.value,
+        color: null,
       },
     ],
     loaded: true,

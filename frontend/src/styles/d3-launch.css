@@ -1,0 +1,749 @@
+/**
+ * d3-launch.css — presentation layer for the launch session composer dialog:
+ * the `.lp-scrim`/`.lp-modal` shell, the recipe row, the pane-list preview
+ * and per-pane inspector, the prompt view/edit pair, the session block, the
+ * footer summary, and the `.lp-pop__menu` popovers every selector opens.
+ *
+ * Design source: ported from the Claude Design project "CodeNest Task
+ * Detail" (019df8b6-803e-7526-b556-a0921b935a79), file `d3-launch.css`,
+ * fetched 2026-08-12 (`_artifacts/design-launch-composer/README.md`) — a
+ * transcription, not a derivation. Rules keep their source declarations
+ * verbatim except for the deviations below.
+ *
+ * Every rule reads only existing `tokens.css` custom properties: no new
+ * token, no `@import`, no remote `url()`, no `@font-face` — with the raw hex
+ * literals this file deliberately keeps (see COLOUR below).
+ *
+ * Deliberate deviations from the source file:
+ *
+ * - NOT PORTED — `.lp-pop:has(.lp-pop__menu){z-index:200}` (source `:110`).
+ *   It exists only to lift an in-flow absolute menu out of its siblings'
+ *   stacking order; the menu here is portalled to `document.body`, so it has
+ *   no siblings to beat.
+ * - CHANGED — `.lp-pop__menu` (source `:111`): `position: absolute` →
+ *   `position: fixed`, and the static `top: calc(100% + 5px); left: 0` are
+ *   dropped — offsets are computed inline in `components/launch/lp-popover.tsx`
+ *   from the anchor's `getBoundingClientRect()`. Everything else is verbatim:
+ *   `z-index: 300`, `background: #151a27`,
+ *   `border: 1px solid rgba(255,255,255,.16)`, `border-radius: 10px`,
+ *   `padding: 5px`, `box-shadow: 0 24px 60px rgba(0,0,0,.75)`,
+ *   `max-height: min(50vh, 300px)`, `overflow-y: auto`,
+ *   `overscroll-behavior: contain`.
+ * - NOT PORTED — `.lp-pop__menu.is-up` / `.is-right` (source `:112-113`).
+ *   Under `position: fixed` with inline offsets these rules are inert
+ *   (`bottom: calc(100% + 5px)` would resolve against the viewport, not the
+ *   trigger). `lp-popover.tsx` still **emits** the `is-up`/`is-right` class
+ *   names as state markers — the flip logic itself lives there and is
+ *   asserted by its own tests.
+ * - NOT PORTED — `.lp-sum--cost` (source `:124`) — no cost element is built.
+ *   `Provider` carries `models`/`default_model` but no rates, and cost is
+ *   only ever written *after* a session (`ProviderStats.cost_usd`); a made-up
+ *   number in a launch dialog is worse than none.
+ * - NOT PORTED — `.lp-ctx`, `.lp-ctxrow`, `.lp-ctxrow:hover`,
+ *   `.lp-ctxrow.is-on`, `.lp-ctxrow input`, `.lp-ctxrow__box`,
+ *   `.lp-ctxrow.is-on .lp-ctxrow__box`, `.lp-ctxrow__t` (source `:98-106`) —
+ *   the mockup's "Ticket context" section is mock data (invented token
+ *   counts, a `subtasks` field the schema does not have) with no real data
+ *   source behind it; not built.
+ * - COLOUR — verbatim. `d3-taskboard.css` and `d3-taskdetail.css` carry no
+ *   raw hex, but this file's two background literals (`#0c0f18`, `#151a27`)
+ *   are the same values `d3-taskdetail.css`'s own COLOUR deviation maps onto
+ *   `var(--bg-1)`/`var(--bg-3)`, and `#a855f7`/`#6e7cff` are the exact
+ *   gradient partners `d3-creative.css` already uses at the same values. The
+ *   ticket names `#151a27` specifically as a rule to keep, so every colour
+ *   here is transcribed as fetched rather than substituted.
+ * - ADDITION — `.lp-select:disabled`, `.lp-pop__i:disabled`:
+ *   `opacity: .45; cursor: not-allowed`. The mockup's catalog is never empty,
+ *   so it has no disabled state; the empty-catalog acceptance criterion
+ *   (zero providers, zero projects) needs one.
+ * - `.lp-dot` (source `:118`) has no `background` of its own — the component
+ *   supplies one inline, `var(--fg-4)` for a provider with `color: null`.
+ *   For a null-colour agent pane, `--pc` is simply left unset and this
+ *   file's own `var(--pc, var(--accent))` fallback (`:42`) already handles
+ *   it. No new rule needed; noted here so the next reader knows it is
+ *   deliberate.
+ *
+ * Everything else — including the `@media (max-width: 900px)` block at the
+ * end — is a straight transcription.
+ */
+
+.lp-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(4, 5, 10, 0.7);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  animation: lp-fade 140ms ease-out;
+}
+@keyframes lp-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.lp-modal {
+  width: min(1080px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #0c0f18;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.75);
+  animation: lp-rise 170ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+@keyframes lp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.lp-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--line-1);
+  flex: none;
+}
+.lp-head__l {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.lp-head__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  color: #fff;
+  flex: none;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+}
+.lp-head__t {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fg-0);
+}
+.lp-head__s {
+  font-size: 12px;
+  color: var(--fg-3);
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  max-width: 640px;
+}
+.lp-head__s > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lp-head__ref {
+  color: var(--fg-1);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.lp-x {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--fg-3);
+  flex: none;
+}
+.lp-x:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-0);
+}
+
+.lp-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+.lp-left {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line-1);
+}
+.lp-right {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.lp-h {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-weight: 600;
+  color: var(--fg-3);
+  margin-bottom: 9px;
+}
+.lp-h--row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.lp-h__meta {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.lp-custom {
+  color: var(--accent);
+  font-style: normal;
+  font-size: 9.5px;
+  background: rgba(59, 130, 246, 0.14);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 5px;
+}
+
+/* Recipes */
+.lp-recipes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.lp-recipe {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  color: var(--fg-3);
+  text-align: left;
+}
+.lp-recipe:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--line-2);
+}
+.lp-recipe b {
+  font-size: 12px;
+  color: var(--fg-1);
+  font-weight: 600;
+}
+.lp-recipe span {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  line-height: 1.35;
+}
+.lp-recipe.is-on {
+  background: rgba(59, 130, 246, 0.13);
+  border-color: rgba(59, 130, 246, 0.42);
+  color: var(--accent);
+}
+.lp-recipe.is-on b {
+  color: #fff;
+}
+.lp-recipe.is-on span {
+  color: var(--fg-2);
+}
+
+/* Layout preview */
+.lp-layoutctl {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.lp-prev {
+  display: grid;
+  gap: 6px;
+  height: 168px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line-1);
+  border-radius: 11px;
+}
+.lp-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 9px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  text-align: left;
+  overflow: hidden;
+  position: relative;
+}
+.lp-pane:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.lp-pane--agent {
+  border-left: 2px solid var(--pc, var(--accent));
+}
+.lp-pane--shell {
+  border-left: 2px solid var(--fg-4);
+  background: rgba(0, 0, 0, 0.3);
+}
+.lp-pane.is-sel {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+.lp-pane__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.lp-pane__n {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lp-pane__x {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  color: var(--fg-4);
+}
+.lp-pane__x:hover {
+  background: var(--err-soft);
+  color: var(--err);
+}
+.lp-pane__body {
+  font-size: 10px;
+  color: var(--fg-2);
+  line-height: 1.5;
+  overflow: hidden;
+}
+.lp-pane__dim {
+  color: var(--fg-4);
+}
+.lp-pane__tag {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(59, 130, 246, 0.18);
+  color: #8fb8ff;
+}
+.lp-prevhint {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  margin-top: 6px;
+}
+
+/* Inspector */
+.lp-insp {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--line-1);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.lp-insp--empty {
+  color: var(--fg-4);
+  font-size: 12px;
+  text-align: center;
+  padding: 22px;
+}
+.lp-insp__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.lp-insp__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+.lp-insp__acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Rows */
+.lp-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lp-row {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.lp-row__l {
+  font-size: 11.5px;
+  color: var(--fg-4);
+}
+
+.lp-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 9px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line-1);
+  border-radius: 7px;
+  color: var(--fg-1);
+  font-size: 12px;
+  text-align: left;
+}
+.lp-select:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--line-2);
+}
+.lp-select.is-open {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.42);
+}
+.lp-select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.lp-select__v {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lp-select__caret {
+  margin-left: auto;
+  opacity: 0.5;
+  flex: none;
+}
+.lp-input {
+  width: 100%;
+  padding: 6px 9px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line-1);
+  border-radius: 7px;
+  color: var(--fg-1);
+  font-size: 11.5px;
+  outline: none;
+}
+.lp-input:focus {
+  border-color: rgba(59, 130, 246, 0.42);
+  background: rgba(59, 130, 246, 0.05);
+}
+.lp-input::placeholder {
+  color: var(--fg-4);
+}
+
+.lp-seg {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line-1);
+  border-radius: 7px;
+  padding: 2px;
+  gap: 2px;
+}
+.lp-seg button {
+  background: transparent;
+  border: none;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 4px 9px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.lp-seg button:hover {
+  color: var(--fg-1);
+}
+.lp-seg button.is-on {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--fg-0);
+}
+.lp-seg--sm button {
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.lp-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--line-1);
+  color: var(--fg-3);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.lp-ghost:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-0);
+}
+
+.lp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+.lp-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.lp-toggle__t {
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--line-2);
+  position: relative;
+  flex: none;
+  transition: background 140ms;
+}
+.lp-toggle__t::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  transition:
+    transform 140ms,
+    background 140ms;
+}
+.lp-toggle input:checked + .lp-toggle__t {
+  background: var(--accent);
+  border-color: transparent;
+}
+.lp-toggle input:checked + .lp-toggle__t::after {
+  transform: translateX(13px);
+  background: #fff;
+}
+
+/* Prompt */
+.lp-promptview {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line-1);
+  border-left: 2px solid var(--accent);
+  border-radius: 9px;
+  padding: 10px 12px;
+  cursor: text;
+}
+.lp-promptview:hover {
+  border-color: var(--line-2);
+  border-left-color: var(--accent);
+}
+.lp-promptview pre {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: hidden;
+}
+.lp-promptview__foot {
+  display: flex;
+  gap: 5px;
+  margin-top: 8px;
+}
+.lp-prompt {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(59, 130, 246, 0.42);
+  border-radius: 9px;
+  padding: 10px 12px;
+  color: var(--fg-1);
+  font-size: 11px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+/* Popover */
+.lp-pop {
+  position: relative;
+  z-index: 0;
+}
+.lp-pop__menu {
+  position: fixed;
+  z-index: 300;
+  background: #151a27;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 5px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75);
+  max-height: min(50vh, 300px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.lp-pop__i {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--fg-1);
+  font-size: 12px;
+  text-align: left;
+}
+.lp-pop__i:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+.lp-pop__i.is-sel {
+  background: rgba(59, 130, 246, 0.2);
+  color: #fff;
+}
+.lp-pop__i:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.lp-pop__c {
+  margin-left: auto;
+  color: var(--accent);
+}
+.lp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* Footer */
+.lp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line-1);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 0 0 18px 18px;
+  flex: none;
+  flex-wrap: wrap;
+}
+.lp-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lp-sum {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+.lp-foot__r {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lp-kbd {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.lp-kbd kbd {
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line-1);
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: var(--fg-3);
+}
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  color: var(--fg-1);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.lp-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.lp-btn--primary {
+  background: linear-gradient(135deg, var(--accent), #6e7cff);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  box-shadow:
+    0 4px 16px rgba(59, 130, 246, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.lp-btn--primary:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .lp-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lp-left {
+    border-right: none;
+    border-bottom: 1px solid var(--line-1);
+  }
+  .lp-recipes {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
