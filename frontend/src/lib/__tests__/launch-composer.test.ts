@@ -1,13 +1,18 @@
 import { describe, it, expect } from "vitest";
+import type { LaunchPreset } from "../api";
 import {
+  composerPanesToPresetPanes,
   composerReducer,
   composeSectionPrompt,
   defaultEnabledSectionIds,
+  describePreset,
   formatTokenTotal,
   initialComposerState,
+  presetToDrafts,
   previewGridStyle,
   sectionTokenTotal,
   summarizeComposer,
+  unresolvedPaneIds,
   type AgentPane,
   type ComposerCatalogProvider,
   type ComposerPane,
@@ -25,7 +30,9 @@ function dummyPanes(n: number): ComposerPane[] {
   }));
 }
 
-function provider(overrides: Partial<ComposerCatalogProvider> = {}): ComposerCatalogProvider {
+function provider(
+  overrides: Partial<ComposerCatalogProvider> = {},
+): ComposerCatalogProvider {
   return {
     id: 1,
     displayName: "Provider 1",
@@ -38,8 +45,30 @@ function provider(overrides: Partial<ComposerCatalogProvider> = {}): ComposerCat
 
 function agentPaneAt(state: ComposerState, index: number): AgentPane {
   const pane = state.panes[index];
-  if (!pane || pane.kind !== "agent") throw new Error(`panes[${index}] is not an agent pane`);
+  if (!pane || pane.kind !== "agent")
+    throw new Error(`panes[${index}] is not an agent pane`);
   return pane;
+}
+
+function fakePreset(overrides: Partial<LaunchPreset> = {}): LaunchPreset {
+  return {
+    id: 7,
+    name: "Fake preset",
+    project_id: 1,
+    provider_id: 1,
+    rows: 1,
+    cols: 2,
+    extra_args: "",
+    target: "embedded",
+    profile_id: null,
+    created_at: "2026-01-01 00:00:00",
+    cells: null,
+    panes: [],
+    split: "cols",
+    shape: "panes",
+    unresolved: [],
+    ...overrides,
+  };
 }
 
 describe("initialComposerState", () => {
@@ -54,13 +83,19 @@ describe("initialComposerState", () => {
 
 describe("applyRecipe", () => {
   it("compare with three providers lands on three distinct providerIds", () => {
-    const catalog = [provider({ id: 1 }), provider({ id: 2 }), provider({ id: 3 })];
+    const catalog = [
+      provider({ id: 1 }),
+      provider({ id: 2 }),
+      provider({ id: 3 }),
+    ];
     const state = composerReducer(initialComposerState([]), {
       type: "applyRecipe",
       recipe: "compare",
       catalog,
     });
-    const ids = state.panes.map((p) => (p.kind === "agent" ? p.providerId : null));
+    const ids = state.panes.map((p) =>
+      p.kind === "agent" ? p.providerId : null,
+    );
     expect(ids).toHaveLength(3);
     expect(new Set(ids).size).toBe(3);
     expect(state.panes.every((p) => p.kind === "agent")).toBe(true);
@@ -84,9 +119,13 @@ describe("applyRecipe", () => {
       catalog,
     });
     expect(state.panes).toHaveLength(3);
-    const providerIds = new Set(state.panes.map((p) => (p.kind === "agent" ? p.providerId : null)));
+    const providerIds = new Set(
+      state.panes.map((p) => (p.kind === "agent" ? p.providerId : null)),
+    );
     expect(providerIds).toEqual(new Set([1]));
-    const models = state.panes.map((p) => (p.kind === "agent" ? p.model : null));
+    const models = state.panes.map((p) =>
+      p.kind === "agent" ? p.model : null,
+    );
     expect(new Set(models).size).toBe(3);
   });
 
@@ -97,7 +136,9 @@ describe("applyRecipe", () => {
       catalog: [],
     });
     expect(state.panes).toHaveLength(3);
-    expect(state.panes.every((p) => p.kind === "agent" && p.providerId === null)).toBe(true);
+    expect(
+      state.panes.every((p) => p.kind === "agent" && p.providerId === null),
+    ).toBe(true);
   });
 
   it("devsetup yields split grid, one agent + two shells with non-empty commands", () => {
@@ -120,12 +161,20 @@ describe("recipe -> custom transitions (D8)", () => {
   const base = initialComposerState([]);
 
   it("addPane flips recipe to custom", () => {
-    const state = composerReducer(base, { type: "addPane", kind: "shell", catalog: [] });
+    const state = composerReducer(base, {
+      type: "addPane",
+      kind: "shell",
+      catalog: [],
+    });
     expect(state.recipe).toBe("custom");
   });
 
   it("removePane flips recipe to custom", () => {
-    const withThird = composerReducer(base, { type: "addPane", kind: "shell", catalog: [] });
+    const withThird = composerReducer(base, {
+      type: "addPane",
+      kind: "shell",
+      catalog: [],
+    });
     const state = composerReducer(withThird, {
       type: "removePane",
       id: agentPaneAt(withThird, 0).id,
@@ -169,7 +218,10 @@ describe("recipe -> custom transitions (D8)", () => {
   it("selectPane leaves recipe unchanged", () => {
     const shellPane = base.panes[1];
     if (!shellPane) throw new Error("expected a second pane");
-    const state = composerReducer(base, { type: "selectPane", id: shellPane.id });
+    const state = composerReducer(base, {
+      type: "selectPane",
+      id: shellPane.id,
+    });
     expect(state.recipe).toBe("devpair");
     expect(state.selectedId).toBe(shellPane.id);
   });
@@ -197,8 +249,14 @@ describe("removePane", () => {
     });
     const middle = three.panes[1];
     if (!middle) throw new Error("expected three panes");
-    const selected = composerReducer(three, { type: "selectPane", id: middle.id });
-    const state = composerReducer(selected, { type: "removePane", id: middle.id });
+    const selected = composerReducer(three, {
+      type: "selectPane",
+      id: middle.id,
+    });
+    const state = composerReducer(selected, {
+      type: "removePane",
+      id: middle.id,
+    });
     expect(state.selectedId).not.toBeNull();
     expect(state.panes.some((p) => p.id === state.selectedId)).toBe(true);
   });
@@ -208,7 +266,10 @@ describe("duplicatePane", () => {
   it("appends a pane with a fresh id and identical config, and selects the copy", () => {
     const base = initialComposerState([]);
     const original = agentPaneAt(base, 0);
-    const state = composerReducer(base, { type: "duplicatePane", id: original.id });
+    const state = composerReducer(base, {
+      type: "duplicatePane",
+      id: original.id,
+    });
     expect(state.panes).toHaveLength(3);
     const copy = state.panes[state.panes.length - 1];
     if (!copy) throw new Error("expected a copy");
@@ -247,7 +308,11 @@ describe("summarizeComposer", () => {
       recipe: "devpair",
       catalog: [],
     });
-    state = composerReducer(state, { type: "addPane", kind: "shell", catalog: [] });
+    state = composerReducer(state, {
+      type: "addPane",
+      kind: "shell",
+      catalog: [],
+    });
     const agentId = state.panes.find((p) => p.kind === "agent")?.id;
     if (!agentId) throw new Error("expected an agent pane");
     state = composerReducer(state, { type: "removePane", id: agentId });
@@ -264,8 +329,12 @@ describe("summarizeComposer", () => {
 describe("previewGridStyle", () => {
   it("cols/rows map to N tracks", () => {
     const panes = dummyPanes(3);
-    expect(previewGridStyle(panes, "cols")).toEqual({ gridTemplateColumns: "repeat(3,1fr)" });
-    expect(previewGridStyle(panes, "rows")).toEqual({ gridTemplateRows: "repeat(3,1fr)" });
+    expect(previewGridStyle(panes, "cols")).toEqual({
+      gridTemplateColumns: "repeat(3,1fr)",
+    });
+    expect(previewGridStyle(panes, "rows")).toEqual({
+      gridTemplateRows: "repeat(3,1fr)",
+    });
   });
 
   it("grid maps 3 panes to 2 columns and 4 panes to 2 columns", () => {
@@ -281,7 +350,10 @@ describe("previewGridStyle", () => {
 describe("catalogResolved (D13)", () => {
   it("is an identity on an empty catalog (render-loop termination proof)", () => {
     const state = initialComposerState([]);
-    const next = composerReducer(state, { type: "catalogResolved", catalog: [] });
+    const next = composerReducer(state, {
+      type: "catalogResolved",
+      catalog: [],
+    });
     expect(next).toBe(state);
   });
 
@@ -298,7 +370,10 @@ describe("catalogResolved (D13)", () => {
 
   it("recipe rebuild keeps pane ids and selection, resolving providers onto them", () => {
     const state = initialComposerState([]); // devpair, providerId null
-    const catalog = [provider({ id: 5, defaultModel: "d5" }), provider({ id: 6 })];
+    const catalog = [
+      provider({ id: 5, defaultModel: "d5" }),
+      provider({ id: 6 }),
+    ];
     const before = state.panes.map((p) => p.id);
     const next = composerReducer(state, { type: "catalogResolved", catalog });
 
@@ -317,9 +392,18 @@ describe("catalogResolved (D13)", () => {
       recipe: "compare",
       catalog: [],
     });
-    const catalog = [provider({ id: 1 }), provider({ id: 2 }), provider({ id: 3 })];
-    const resolved = composerReducer(cold, { type: "catalogResolved", catalog });
-    const ids = resolved.panes.map((p) => (p.kind === "agent" ? p.providerId : null));
+    const catalog = [
+      provider({ id: 1 }),
+      provider({ id: 2 }),
+      provider({ id: 3 }),
+    ];
+    const resolved = composerReducer(cold, {
+      type: "catalogResolved",
+      catalog,
+    });
+    const ids = resolved.panes.map((p) =>
+      p.kind === "agent" ? p.providerId : null,
+    );
     expect(new Set(ids).size).toBe(3);
   });
 
@@ -331,12 +415,22 @@ describe("catalogResolved (D13)", () => {
       pane: { ...original, providerId: 42, model: "custom-model" },
     });
     expect(state.recipe).toBe("custom");
-    state = composerReducer(state, { type: "addPane", kind: "agent", catalog: [] });
+    state = composerReducer(state, {
+      type: "addPane",
+      kind: "agent",
+      catalog: [],
+    });
     const addedId = state.selectedId;
     if (!addedId) throw new Error("expected the added pane to be selected");
 
-    const catalog = [provider({ id: 7, defaultModel: "d7" }), provider({ id: 8 })];
-    const resolved = composerReducer(state, { type: "catalogResolved", catalog });
+    const catalog = [
+      provider({ id: 7, defaultModel: "d7" }),
+      provider({ id: 8 }),
+    ];
+    const resolved = composerReducer(state, {
+      type: "catalogResolved",
+      catalog,
+    });
 
     const editedPane = resolved.panes.find((p) => p.id === original.id);
     expect(editedPane).toMatchObject({ providerId: 42, model: "custom-model" });
@@ -426,5 +520,259 @@ describe("prompt sections", () => {
 
   it("sectionTokenTotal([], …) === 0", () => {
     expect(sectionTokenTotal([], new Set())).toBe(0);
+  });
+});
+
+describe("applyPreset (D8)", () => {
+  it("replaces the pane list, sets recipe to preset:<id>, split, and selects the first pane", () => {
+    const base = initialComposerState([]);
+    const state = composerReducer(base, {
+      type: "applyPreset",
+      presetId: 7,
+      panes: [
+        {
+          kind: "agent",
+          providerId: 3,
+          model: "opus",
+          permissionMode: "",
+          sendPrompt: true,
+        },
+        { kind: "shell", shell: "", command: "npm run dev" },
+      ],
+      split: "grid",
+    });
+
+    expect(state.recipe).toBe("preset:7");
+    expect(state.split).toBe("grid");
+    expect(state.panes.map((p) => p.kind)).toEqual(["agent", "shell"]);
+    expect(state.selectedId).toBe(state.panes[0]?.id);
+  });
+
+  it("mints fresh ids starting from state.nextId", () => {
+    const base = initialComposerState([]); // devpair: nextId already at 3
+    const state = composerReducer(base, {
+      type: "applyPreset",
+      presetId: 7,
+      panes: [
+        {
+          kind: "agent",
+          providerId: 1,
+          model: null,
+          permissionMode: "",
+          sendPrompt: true,
+        },
+      ],
+      split: "cols",
+    });
+    expect(state.panes.map((p) => p.id)).not.toEqual(
+      expect.arrayContaining(base.panes.map((p) => p.id)),
+    );
+    expect(state.nextId).toBeGreaterThan(base.nextId);
+  });
+
+  it("editing a pane afterwards flips recipe back to custom, un-highlighting the preset", () => {
+    const base = initialComposerState([]);
+    const applied = composerReducer(base, {
+      type: "applyPreset",
+      presetId: 7,
+      panes: [
+        {
+          kind: "agent",
+          providerId: 1,
+          model: null,
+          permissionMode: "",
+          sendPrompt: true,
+        },
+      ],
+      split: "cols",
+    });
+    expect(applied.recipe).toBe("preset:7");
+
+    const pane = agentPaneAt(applied, 0);
+    const edited = composerReducer(applied, {
+      type: "patchPane",
+      pane: { ...pane, sendPrompt: false },
+    });
+    expect(edited.recipe).toBe("custom");
+  });
+
+  it("with an empty pane list returns the same state object (reference equality)", () => {
+    const base = initialComposerState([]);
+    const state = composerReducer(base, {
+      type: "applyPreset",
+      presetId: 7,
+      panes: [],
+      split: "cols",
+    });
+    expect(state).toBe(base);
+  });
+});
+
+describe("presetToDrafts", () => {
+  it("maps snake_case -> camelCase for both pane kinds, including model: null and send_prompt: false", () => {
+    const preset = fakePreset({
+      panes: [
+        {
+          kind: "agent",
+          provider_id: 5,
+          model: null,
+          permission_mode: "acceptEdits",
+          send_prompt: false,
+        },
+        { kind: "shell", shell: "/bin/zsh", command: "npm test" },
+      ],
+      split: "rows",
+    });
+
+    const { panes, split } = presetToDrafts(preset);
+    expect(split).toBe("rows");
+    expect(panes).toEqual([
+      {
+        kind: "agent",
+        providerId: 5,
+        model: null,
+        permissionMode: "acceptEdits",
+        sendPrompt: false,
+      },
+      { kind: "shell", shell: "/bin/zsh", command: "npm test" },
+    ]);
+  });
+});
+
+describe("describePreset", () => {
+  const agent: LaunchPreset["panes"][number] = {
+    kind: "agent",
+    provider_id: 1,
+    model: null,
+    permission_mode: "",
+    send_prompt: true,
+  };
+  const shell: LaunchPreset["panes"][number] = {
+    kind: "shell",
+    shell: "",
+    command: "",
+  };
+
+  it("singular agent-only preset reads '1 pane · agent'", () => {
+    const preset = fakePreset({ panes: [agent] });
+    expect(describePreset(preset)).toBe("1 pane · agent");
+  });
+
+  it("plural agent-only preset reads '3 panes · 3 agents'", () => {
+    const preset = fakePreset({ panes: [agent, agent, agent] });
+    expect(describePreset(preset)).toBe("3 panes · 3 agents");
+  });
+
+  it("singular shell-only preset reads '1 pane · shell'", () => {
+    const preset = fakePreset({ panes: [shell] });
+    expect(describePreset(preset)).toBe("1 pane · shell");
+  });
+
+  it("plural shell-only preset reads '2 panes · 2 shells'", () => {
+    const preset = fakePreset({ panes: [shell, shell] });
+    expect(describePreset(preset)).toBe("2 panes · 2 shells");
+  });
+
+  it("mixed preset joins both kinds, agents first: '2 panes · agent + shell'", () => {
+    const preset = fakePreset({ panes: [agent, shell] });
+    expect(describePreset(preset)).toBe("2 panes · agent + shell");
+  });
+
+  it("mixed preset with multiples of each: '5 panes · 2 agents + 3 shells'", () => {
+    const preset = fakePreset({
+      panes: [agent, agent, shell, shell, shell],
+    });
+    expect(describePreset(preset)).toBe("5 panes · 2 agents + 3 shells");
+  });
+});
+
+describe("composerPanesToPresetPanes", () => {
+  it("returns null when an agent pane has providerId === null", () => {
+    const panes: ComposerPane[] = [
+      {
+        id: "p1",
+        kind: "agent",
+        providerId: null,
+        model: null,
+        permissionMode: "",
+        sendPrompt: true,
+      },
+    ];
+    expect(composerPanesToPresetPanes(panes)).toBeNull();
+  });
+
+  it("returns a faithful array otherwise, and round-trips through presetToDrafts (identity on pane fields)", () => {
+    const panes: ComposerPane[] = [
+      {
+        id: "p1",
+        kind: "agent",
+        providerId: 9,
+        model: "sonnet",
+        permissionMode: "plan",
+        sendPrompt: true,
+      },
+      { id: "p2", kind: "shell", shell: "/bin/bash", command: "" },
+    ];
+    const presetPanes = composerPanesToPresetPanes(panes);
+    expect(presetPanes).not.toBeNull();
+    if (presetPanes === null) throw new Error("unreachable");
+    expect(presetPanes).toEqual([
+      {
+        kind: "agent",
+        provider_id: 9,
+        model: "sonnet",
+        permission_mode: "plan",
+        send_prompt: true,
+      },
+      { kind: "shell", shell: "/bin/bash", command: "" },
+    ]);
+
+    const roundTripped = presetToDrafts(
+      fakePreset({ panes: presetPanes, split: "cols" }),
+    );
+    expect(roundTripped.panes).toEqual([
+      {
+        kind: "agent",
+        providerId: 9,
+        model: "sonnet",
+        permissionMode: "plan",
+        sendPrompt: true,
+      },
+      { kind: "shell", shell: "/bin/bash", command: "" },
+    ]);
+  });
+});
+
+describe("unresolvedPaneIds", () => {
+  it("flags an agent pane whose provider is absent from the catalog and ignores shell panes", () => {
+    const catalog = [provider({ id: 1 })];
+    const panes: ComposerPane[] = [
+      {
+        id: "p1",
+        kind: "agent",
+        providerId: 1,
+        model: null,
+        permissionMode: "",
+        sendPrompt: true,
+      },
+      {
+        id: "p2",
+        kind: "agent",
+        providerId: 99,
+        model: null,
+        permissionMode: "",
+        sendPrompt: true,
+      },
+      {
+        id: "p3",
+        kind: "agent",
+        providerId: null,
+        model: null,
+        permissionMode: "",
+        sendPrompt: true,
+      },
+      { id: "p4", kind: "shell", shell: "", command: "" },
+    ];
+    expect(unresolvedPaneIds(panes, catalog)).toEqual(["p2", "p3"]);
   });
 });

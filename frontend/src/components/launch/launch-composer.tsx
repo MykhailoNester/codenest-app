@@ -29,8 +29,17 @@ import {
   type ReactElement,
 } from "react";
 import { createPortal } from "react-dom";
-import { useProjects, useLookups } from "../../lib/api";
-import type { LaunchTarget, LaunchPromptSection } from "../../lib/launch-seed";
+import {
+  useProjects,
+  useLookups,
+  useLaunchPresets,
+  useCreateLaunchPreset,
+  SidecarError,
+} from "../../lib/api";
+import type {
+  LaunchTarget,
+  LaunchPromptSection,
+} from "../../lib/launch-seed";
 import { useAgentCatalogStore } from "../../stores/agent-catalog-store";
 import { useEscapeKey } from "../../hooks/use-escape-key";
 import { Icon } from "../icon";
@@ -39,21 +48,25 @@ import { LIVE_PERMISSION_MODES } from "../../lib/permission-modes";
 import {
   RECIPES,
   composeSectionPrompt,
+  composerPanesToPresetPanes,
   composerReducer,
   defaultEnabledSectionIds,
+  describePreset,
   formatTokenTotal,
   initialComposerState,
   paneLabel,
+  presetToDrafts,
   previewGridStyle,
   sectionTokenTotal,
   summarizeComposer,
+  unresolvedPaneIds,
   type AgentPane,
+  type BuiltinRecipeId,
   type ComposerAction,
   type ComposerCatalogProvider,
   type ComposerPane,
   type LaunchComposerPlan,
   type LaunchComposerSource,
-  type RecipeId,
   type ShellPane,
   type SplitMode,
 } from "../../lib/launch-composer";
@@ -91,12 +104,14 @@ function PaneKindIcon({
   return <span aria-hidden="true">▸</span>;
 }
 
-function RecipeIcon({ id }: { id: Exclude<RecipeId, "custom"> }): ReactElement {
+function RecipeIcon({ id }: { id: BuiltinRecipeId }): ReactElement {
   if (id === "devpair") return <Icon name="terminal" size={14} />;
   return <span aria-hidden="true">{id === "single" ? "▸" : "▦"}</span>;
 }
 
-function modelItemsFor(provider: ComposerCatalogProvider | null): LpSelectItem[] {
+function modelItemsFor(
+  provider: ComposerCatalogProvider | null,
+): LpSelectItem[] {
   if (provider === null) return [];
   if (provider.models.length > 0) {
     return provider.models.map((m) => ({ id: m.name, label: m.label }));
@@ -109,7 +124,9 @@ function modelItemsFor(provider: ComposerCatalogProvider | null): LpSelectItem[]
 
 function modeLabelFor(mode: string): string {
   if (mode === "") return "CLI default";
-  return LIVE_PERMISSION_MODES.find((m) => m.value === mode)?.label ?? "CLI default";
+  return (
+    LIVE_PERMISSION_MODES.find((m) => m.value === mode)?.label ?? "CLI default"
+  );
 }
 
 function AgentPaneBody({
@@ -119,9 +136,10 @@ function AgentPaneBody({
   pane: AgentPane;
   catalog: ComposerCatalogProvider[];
 }): ReactElement {
-  const provider = pane.providerId !== null
-    ? catalog.find((p) => p.id === pane.providerId) ?? null
-    : null;
+  const provider =
+    pane.providerId !== null
+      ? (catalog.find((p) => p.id === pane.providerId) ?? null)
+      : null;
   // Unreachable with a non-empty catalog once `catalogResolved` has
   // converged (D13) — reachable only with an empty catalog (`providerId`
   // stays null, D4) or a stale id no longer in the catalog (see the plan's
@@ -146,7 +164,9 @@ function AgentPaneBody({
 
 function ShellPaneBody({ pane }: { pane: ShellPane }): ReactElement {
   const text =
-    pane.command.trim() !== "" ? pane.command : `${pane.shell || "$SHELL"} — interactive`;
+    pane.command.trim() !== ""
+      ? pane.command
+      : `${pane.shell || "$SHELL"} — interactive`;
   return <span className="lp-pane__body mono">{text}</span>;
 }
 
@@ -170,10 +190,12 @@ function PanePreview({
       {panes.map((pane) => {
         const provider =
           pane.kind === "agent" && pane.providerId !== null
-            ? catalog.find((p) => p.id === pane.providerId) ?? null
+            ? (catalog.find((p) => p.id === pane.providerId) ?? null)
             : null;
         const style: CSSProperties | undefined =
-          provider?.color != null ? ({ "--pc": provider.color } as CSSProperties) : undefined;
+          provider?.color != null
+            ? ({ "--pc": provider.color } as CSSProperties)
+            : undefined;
         return (
           <div
             key={pane.id}
@@ -250,7 +272,11 @@ function AgentInspectorRows({
           value={pane.providerId !== null ? String(pane.providerId) : ""}
           items={providerItems}
           width={250}
-          placeholder={catalog.length === 0 ? "No providers configured" : "Select a provider"}
+          placeholder={
+            catalog.length === 0
+              ? "No providers configured"
+              : "Select a provider"
+          }
           onPick={(id) => {
             // Picking a provider resets `model` to that provider's own
             // default (`d3-launch.jsx:139`) — a model registered against
@@ -258,7 +284,11 @@ function AgentInspectorRows({
             const next = catalog.find((p) => String(p.id) === id) ?? null;
             dispatch({
               type: "patchPane",
-              pane: { ...pane, providerId: next?.id ?? null, model: next?.defaultModel ?? null },
+              pane: {
+                ...pane,
+                providerId: next?.id ?? null,
+                model: next?.defaultModel ?? null,
+              },
             });
           }}
         />
@@ -271,7 +301,9 @@ function AgentInspectorRows({
           items={modelItemsFor(provider)}
           width={200}
           placeholder="CLI default"
-          onPick={(id) => dispatch({ type: "patchPane", pane: { ...pane, model: id } })}
+          onPick={(id) =>
+            dispatch({ type: "patchPane", pane: { ...pane, model: id } })
+          }
         />
       </div>
       <div className="lp-row">
@@ -280,11 +312,17 @@ function AgentInspectorRows({
           <LpSelect
             label="Mode"
             value={pane.permissionMode}
-            items={LIVE_PERMISSION_MODES.map((m) => ({ id: m.value, label: m.label }))}
+            items={LIVE_PERMISSION_MODES.map((m) => ({
+              id: m.value,
+              label: m.label,
+            }))}
             width={210}
             placeholder="CLI default"
             onPick={(id) =>
-              dispatch({ type: "patchPane", pane: { ...pane, permissionMode: id } })
+              dispatch({
+                type: "patchPane",
+                pane: { ...pane, permissionMode: id },
+              })
             }
           />
         </div>
@@ -326,7 +364,9 @@ function ShellInspectorRows({
           value={pane.shell}
           items={SHELL_OPTIONS}
           width={150}
-          onPick={(id) => dispatch({ type: "patchPane", pane: { ...pane, shell: id } })}
+          onPick={(id) =>
+            dispatch({ type: "patchPane", pane: { ...pane, shell: id } })
+          }
         />
       </div>
       <div className="lp-row">
@@ -336,7 +376,10 @@ function ShellInspectorRows({
           placeholder="optional command, e.g. npm run dev"
           value={pane.command}
           onChange={(e) =>
-            dispatch({ type: "patchPane", pane: { ...pane, command: e.currentTarget.value } })
+            dispatch({
+              type: "patchPane",
+              pane: { ...pane, command: e.currentTarget.value },
+            })
           }
         />
       </div>
@@ -395,7 +438,10 @@ export function LaunchComposer({
         id: p.id,
         displayName: p.displayName,
         color: p.color,
-        models: p.models.map((m) => ({ name: m.model_name, label: m.display_name })),
+        models: p.models.map((m) => ({
+          name: m.model_name,
+          label: m.display_name,
+        })),
         defaultModel: p.defaultModel,
       })),
     [providers],
@@ -409,7 +455,14 @@ export function LaunchComposer({
   const { data: lookups } = useLookups();
   const profiles = lookups?.profiles ?? [];
 
-  const [state, dispatch] = useReducer(composerReducer, catalog, initialComposerState);
+  const { data: presets = [] } = useLaunchPresets();
+  const createPreset = useCreateLaunchPreset();
+
+  const [state, dispatch] = useReducer(
+    composerReducer,
+    catalog,
+    initialComposerState,
+  );
 
   const hasSections = sections.length > 0;
   const [enabledSections, setEnabledSections] = useState<Set<string>>(
@@ -426,13 +479,41 @@ export function LaunchComposer({
   const [profileId, setProfileId] = useState<number | null>(null);
   const [target, setTarget] = useState<LaunchTarget>("embedded");
 
+  const [saveBarOpen, setSaveBarOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const handleLaunchRef = useRef<() => void>(() => {});
   useEscapeKey(onClose, open);
 
-  const selectedPane = state.panes.find((p) => p.id === state.selectedId) ?? null;
+  const selectedPane =
+    state.panes.find((p) => p.id === state.selectedId) ?? null;
   const summary = summarizeComposer(state);
   const hasAgentPane = state.panes.some((p) => p.kind === "agent");
-  const canLaunch = state.panes.length > 0 && projectId !== null && !(hasAgentPane && catalog.length === 0);
+  const unresolvedIds = unresolvedPaneIds(state.panes, catalog);
+  const canLaunch =
+    state.panes.length > 0 &&
+    projectId !== null &&
+    !(hasAgentPane && catalog.length === 0) &&
+    unresolvedIds.length === 0;
+
+  const presetPanes = composerPanesToPresetPanes(state.panes);
+  const canSavePreset =
+    saveName.trim() !== "" &&
+    projectId !== null &&
+    presetPanes !== null &&
+    hasAgentPane &&
+    state.panes.length <= 8;
+  const saveDisabledReason = (): string | undefined => {
+    if (saveName.trim() === "") return "Name the preset first";
+    if (projectId === null)
+      return "Pick a project with a path to save a preset";
+    if (!hasAgentPane) return "A saved preset needs at least one agent pane";
+    if (state.panes.length > 8) return "A preset can hold at most 8 panes";
+    if (presetPanes === null)
+      return "A pane uses a provider that no longer exists";
+    return undefined;
+  };
 
   function handleLaunch(): void {
     if (!open || !canLaunch) return;
@@ -459,6 +540,38 @@ export function LaunchComposer({
   function resetPromptFromSections(): void {
     setPrompt(composeSectionPrompt(sections, enabledSections));
     setPromptDirty(false);
+  }
+
+  function handleSavePreset(): void {
+    const panes = composerPanesToPresetPanes(state.panes);
+    if (projectId === null || panes === null) return;
+    setSaveError(null);
+    void createPreset
+      .mutateAsync({
+        name: saveName.trim(),
+        project_id: projectId,
+        target,
+        profile_id: profileId,
+        extra_args: "",
+        split: state.split,
+        panes,
+      })
+      .then(() => {
+        setSaveBarOpen(false);
+        setSaveName("");
+      })
+      .catch((err: unknown) => {
+        if (err instanceof SidecarError && err.status === 409) {
+          setSaveError(`A preset called “${saveName.trim()}” already exists.`);
+        } else if (
+          err instanceof SidecarError &&
+          (err.status === 400 || err.status === 422)
+        ) {
+          setSaveError("This composition can't be saved as a preset.");
+        } else {
+          setSaveError("Could not save the preset.");
+        }
+      });
   }
 
   // D13.3 — assigning `handleLaunchRef.current` in the render body would be
@@ -502,7 +615,9 @@ export function LaunchComposer({
 
   if (!open) return null;
 
-  const promptPanes = state.panes.filter((p) => p.kind === "agent" && p.sendPrompt).length;
+  const promptPanes = state.panes.filter(
+    (p) => p.kind === "agent" && p.sendPrompt,
+  ).length;
 
   return createPortal(
     <div
@@ -511,7 +626,12 @@ export function LaunchComposer({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="lp-modal" role="dialog" aria-modal="true" aria-label="Launch session">
+      <div
+        className="lp-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Launch session"
+      >
         <header className="lp-head">
           <div className="lp-head__l">
             <span className="lp-head__icon">
@@ -527,7 +647,12 @@ export function LaunchComposer({
               ) : null}
             </div>
           </div>
-          <button type="button" className="lp-x" aria-label="Close" onClick={onClose}>
+          <button
+            type="button"
+            className="lp-x"
+            aria-label="Close"
+            onClick={onClose}
+          >
             <span aria-hidden="true">✕</span>
           </button>
         </header>
@@ -542,11 +667,41 @@ export function LaunchComposer({
                     key={r.id}
                     type="button"
                     className={`lp-recipe${state.recipe === r.id ? " is-on" : ""}`}
-                    onClick={() => dispatch({ type: "applyRecipe", recipe: r.id, catalog })}
+                    onClick={() =>
+                      dispatch({ type: "applyRecipe", recipe: r.id, catalog })
+                    }
                   >
                     <RecipeIcon id={r.id} />
                     <b>{r.label}</b>
                     <span>{r.desc}</span>
+                  </button>
+                ))}
+                {presets.map((p) => (
+                  <button
+                    key={`preset:${p.id}`}
+                    type="button"
+                    className={`lp-recipe${state.recipe === `preset:${p.id}` ? " is-on" : ""}`}
+                    onClick={() =>
+                      dispatch({
+                        type: "applyPreset",
+                        presetId: p.id,
+                        ...presetToDrafts(p),
+                      })
+                    }
+                  >
+                    <span aria-hidden="true">☆</span>
+                    <b>{p.name}</b>
+                    <span>{describePreset(p)}</span>
+                    {p.unresolved.length > 0 ? (
+                      <span
+                        className="lp-recipe__warn"
+                        title={`Missing or disabled provider: ${p.unresolved
+                          .map((u) => `#${u.provider_id} (${u.reason})`)
+                          .join(", ")}`}
+                      >
+                        ⚠ unresolved
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -556,7 +711,9 @@ export function LaunchComposer({
               <div className="lp-h lp-h--row">
                 <span>
                   Layout
-                  {state.recipe === "custom" ? <em className="lp-custom">custom</em> : null}
+                  {state.recipe === "custom" ? (
+                    <em className="lp-custom">custom</em>
+                  ) : null}
                 </span>
                 <div className="lp-layoutctl">
                   <div className="lp-seg lp-seg--sm">
@@ -565,7 +722,9 @@ export function LaunchComposer({
                         key={opt.id}
                         type="button"
                         className={state.split === opt.id ? "is-on" : ""}
-                        onClick={() => dispatch({ type: "setSplit", split: opt.id })}
+                        onClick={() =>
+                          dispatch({ type: "setSplit", split: opt.id })
+                        }
                       >
                         {opt.label}
                       </button>
@@ -574,14 +733,18 @@ export function LaunchComposer({
                   <button
                     type="button"
                     className="lp-ghost"
-                    onClick={() => dispatch({ type: "addPane", kind: "agent", catalog })}
+                    onClick={() =>
+                      dispatch({ type: "addPane", kind: "agent", catalog })
+                    }
                   >
                     <span aria-hidden="true">＋</span> Agent
                   </button>
                   <button
                     type="button"
                     className="lp-ghost"
-                    onClick={() => dispatch({ type: "addPane", kind: "shell", catalog })}
+                    onClick={() =>
+                      dispatch({ type: "addPane", kind: "shell", catalog })
+                    }
                   >
                     <span aria-hidden="true">＋</span> Shell
                   </button>
@@ -596,7 +759,8 @@ export function LaunchComposer({
                 onRemove={(id) => dispatch({ type: "removePane", id })}
               />
               <div className="lp-prevhint">
-                Click a pane to configure it — drag handles adjust size after launch
+                Click a pane to configure it — drag handles adjust size after
+                launch
               </div>
             </section>
 
@@ -605,7 +769,9 @@ export function LaunchComposer({
                 <div className="lp-insp__head">
                   <div className="lp-insp__title">
                     <PaneKindIcon kind={selectedPane.kind} size={13} />
-                    {selectedPane.kind === "agent" ? "Agent pane" : "Shell pane"}
+                    {selectedPane.kind === "agent"
+                      ? "Agent pane"
+                      : "Shell pane"}
                   </div>
                   <div className="lp-insp__acts">
                     <div className="lp-seg lp-seg--sm">
@@ -641,7 +807,9 @@ export function LaunchComposer({
                     <button
                       type="button"
                       className="lp-ghost"
-                      onClick={() => dispatch({ type: "duplicatePane", id: selectedPane.id })}
+                      onClick={() =>
+                        dispatch({ type: "duplicatePane", id: selectedPane.id })
+                      }
                     >
                       <span aria-hidden="true">⧉</span> Duplicate
                     </button>
@@ -649,14 +817,23 @@ export function LaunchComposer({
                 </div>
                 <div className="lp-rows">
                   {selectedPane.kind === "agent" ? (
-                    <AgentInspectorRows pane={selectedPane} catalog={catalog} dispatch={dispatch} />
+                    <AgentInspectorRows
+                      pane={selectedPane}
+                      catalog={catalog}
+                      dispatch={dispatch}
+                    />
                   ) : (
-                    <ShellInspectorRows pane={selectedPane} dispatch={dispatch} />
+                    <ShellInspectorRows
+                      pane={selectedPane}
+                      dispatch={dispatch}
+                    />
                   )}
                 </div>
               </div>
             ) : (
-              <div className="lp-insp lp-insp--empty">Select a pane to configure it.</div>
+              <div className="lp-insp lp-insp--empty">
+                Select a pane to configure it.
+              </div>
             )}
           </div>
 
@@ -690,7 +867,10 @@ export function LaunchComposer({
                   autoComplete="off"
                 />
               ) : (
-                <div className="lp-promptview" onClick={() => setPromptEditing(true)}>
+                <div
+                  className="lp-promptview"
+                  onClick={() => setPromptEditing(true)}
+                >
                   <pre className="mono">{prompt}</pre>
                   <div className="lp-promptview__foot">
                     <button
@@ -769,7 +949,10 @@ export function LaunchComposer({
                   <LpSelect
                     label="Project"
                     value={projectId !== null ? String(projectId) : ""}
-                    items={launchableProjects.map((p) => ({ id: String(p.id), label: p.name }))}
+                    items={launchableProjects.map((p) => ({
+                      id: String(p.id),
+                      label: p.name,
+                    }))}
                     width={250}
                     placeholder="No project with a path"
                     onPick={(id) => setProjectId(Number(id))}
@@ -782,7 +965,10 @@ export function LaunchComposer({
                     value={profileId !== null ? String(profileId) : ""}
                     items={[
                       { id: "", label: "None" },
-                      ...profiles.map((p) => ({ id: String(p.id), label: p.name })),
+                      ...profiles.map((p) => ({
+                        id: String(p.id),
+                        label: p.name,
+                      })),
                     ]}
                     width={190}
                     onPick={(id) => setProfileId(id === "" ? null : Number(id))}
@@ -830,7 +1016,63 @@ export function LaunchComposer({
               <span aria-hidden="true">▦</span>
               <span>{summary.split}</span>
             </span>
+            {!saveBarOpen ? (
+              <button
+                type="button"
+                className="lp-ghost"
+                onClick={() => {
+                  setSaveError(null);
+                  setSaveBarOpen(true);
+                }}
+              >
+                <span aria-hidden="true">＋</span> Save as preset
+              </button>
+            ) : null}
           </div>
+          {saveBarOpen ? (
+            <div className="lp-savebar">
+              <input
+                className="lp-input"
+                autoFocus
+                placeholder="Preset name"
+                value={saveName}
+                onChange={(e) => setSaveName(e.currentTarget.value)}
+                // Escape closes the save bar, not the whole dialog —
+                // `useEscapeKey` listens on `document`, so this must stop
+                // the keydown from bubbling there.
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter" && canSavePreset) handleSavePreset();
+                  if (e.key === "Escape") {
+                    setSaveBarOpen(false);
+                    setSaveError(null);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="lp-btn"
+                disabled={!canSavePreset}
+                title={canSavePreset ? undefined : saveDisabledReason()}
+                onClick={handleSavePreset}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className="lp-ghost"
+                onClick={() => {
+                  setSaveBarOpen(false);
+                  setSaveError(null);
+                }}
+              >
+                Cancel
+              </button>
+              {saveError !== null ? (
+                <span className="lp-saveerr">{saveError}</span>
+              ) : null}
+            </div>
+          ) : null}
           <div className="lp-foot__r">
             <span className="lp-kbd">
               <kbd>esc</kbd>
@@ -852,7 +1094,9 @@ export function LaunchComposer({
                   ? undefined
                   : projectId === null
                     ? "Pick a project with a path to launch"
-                    : "Add a provider in Settings to launch an agent pane"
+                    : hasAgentPane && catalog.length === 0
+                      ? "Add a provider in Settings to launch an agent pane"
+                      : "A pane uses a provider that no longer exists — pick another"
               }
             >
               <Icon name="zap" size={13} />

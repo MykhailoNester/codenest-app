@@ -411,3 +411,125 @@ async def test_task_label_assignment_task_fk_cascade(migrated_db) -> None:
     row = await cur.fetchone()
     assert row is not None
     assert row["cnt"] == 0, "assignment should have been cascade-deleted"
+
+
+# ---------------------------------------------------------------------------
+# Migration 005 — launch_presets pane list
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_launch_presets_has_panes_and_split_columns(migrated_db) -> None:
+    """Migration 005 must add panes_json and split columns to launch_presets."""
+    cur = await migrated_db.execute("PRAGMA table_info(launch_presets)")
+    rows = await cur.fetchall()
+    col_names = {r["name"] for r in rows}
+    assert "panes_json" in col_names, "panes_json column missing from launch_presets"
+    assert "split" in col_names, "split column missing from launch_presets"
+
+
+@pytest.mark.asyncio
+async def test_launch_presets_split_check(migrated_db) -> None:
+    """split CHECK must accept the three known values and reject anything else."""
+    import aiosqlite
+
+    await migrated_db.execute(
+        "INSERT INTO projects (name, description, tech_stack, status) VALUES (?, ?, ?, ?)",
+        ("SplitCheckProj", None, None, "active"),
+    )
+    await migrated_db.commit()
+    cur = await migrated_db.execute(
+        "SELECT id FROM projects WHERE name='SplitCheckProj'"
+    )
+    proj = await cur.fetchone()
+    assert proj is not None
+
+    prov_id = await _insert_provider(migrated_db, "split-check-prov")
+
+    await migrated_db.execute(
+        """INSERT INTO launch_presets
+           (name, project_id, provider_id, rows, cols, target)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("split-check-preset", proj["id"], prov_id, 1, 1, "embedded"),
+    )
+    await migrated_db.commit()
+
+    with pytest.raises(aiosqlite.IntegrityError):
+        await migrated_db.execute(
+            "UPDATE launch_presets SET split = 'diagonal' WHERE name = 'split-check-preset'"
+        )
+
+    await migrated_db.execute(
+        "UPDATE launch_presets SET split = 'grid' WHERE name = 'split-check-preset'"
+    )
+    await migrated_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_migration_005_applies_over_existing_grid_presets(tmp_path) -> None:
+    """005 must apply cleanly to a DB that already holds a grid-shaped preset,
+    leaving the row untouched and panes_json/split NULL. Pins acceptance
+    criterion 4 (fresh-DB application is covered by every other test above,
+    which all go through `migrated_db`)."""
+    import pathlib
+
+    import aiosqlite
+
+    from app.database import apply_migration_file
+
+    migrations_dir = pathlib.Path(__file__).parents[2] / "migrations"
+    pre_005 = sorted(
+        f for f in migrations_dir.glob("*.sql") if f.stem < "005_launch_preset_panes"
+    )
+
+    db_path = tmp_path / "pre-005.db"
+    conn = await aiosqlite.connect(str(db_path))
+    conn.row_factory = aiosqlite.Row
+    await conn.execute("PRAGMA foreign_keys=ON")
+    try:
+        for migration_file in pre_005:
+            await apply_migration_file(conn, migration_file)
+
+        await conn.execute(
+            "INSERT INTO projects (name, description, tech_stack, status) VALUES (?, ?, ?, ?)",
+            ("Pre005Proj", None, None, "active"),
+        )
+        await conn.commit()
+        proj = await (
+            await conn.execute("SELECT id FROM projects WHERE name='Pre005Proj'")
+        ).fetchone()
+        assert proj is not None
+
+        prov_id = await _insert_provider(conn, "pre-005-prov")
+
+        await conn.execute(
+            """INSERT INTO launch_presets
+               (name, project_id, provider_id, rows, cols, target)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("Pre005Preset", proj["id"], prov_id, 2, 2, "embedded"),
+        )
+        await conn.commit()
+        before = await (
+            await conn.execute(
+                "SELECT id, name, rows, cols FROM launch_presets WHERE name='Pre005Preset'"
+            )
+        ).fetchone()
+        assert before is not None
+
+        await apply_migration_file(conn, migrations_dir / "005_launch_preset_panes.sql")
+
+        after = await (
+            await conn.execute(
+                "SELECT id, name, rows, cols, panes_json, split FROM launch_presets "
+                "WHERE name='Pre005Preset'"
+            )
+        ).fetchone()
+        assert after is not None
+        assert after["id"] == before["id"]
+        assert after["name"] == before["name"]
+        assert after["rows"] == before["rows"]
+        assert after["cols"] == before["cols"]
+        assert after["panes_json"] is None
+        assert after["split"] is None
+    finally:
+        await conn.close()
