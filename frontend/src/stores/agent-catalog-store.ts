@@ -37,6 +37,10 @@ export interface CatalogProvider {
   models: ProviderModel[];
   /** The provider's own default model, or `null` when it registers none. */
   defaultModel: string | null;
+  /** The provider's Settings colour (`providers.color`), or null when unset.
+   *  Carried here so a surface that renders a provider swatch does not need a
+   *  second `/api/v1/providers` fetch beside this store. */
+  color: string | null;
 }
 
 /** The provider/model pair a pane runs (or will run) with. */
@@ -162,6 +166,7 @@ function readCachedProviders(): CatalogProvider[] {
         models: Array.isArray(models) ? (models as CatalogProvider["models"]) : [],
         defaultModel:
           typeof rec["defaultModel"] === "string" ? rec["defaultModel"] : null,
+        color: typeof rec["color"] === "string" ? rec["color"] : null,
       });
     }
     return out;
@@ -238,6 +243,7 @@ export const useAgentCatalogStore = create<AgentCatalogStore>((set, get) => ({
                 env: p.default_env,
                 models: enabled,
                 defaultModel: resolveProviderDefaultModel(p, enabled),
+                color: p.color,
               } satisfies CatalogProvider;
             }),
         );

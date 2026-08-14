@@ -179,6 +179,7 @@ function seedCatalog(): void {
           },
         ],
         defaultModel: "claude-opus-5",
+        color: null,
       },
     ],
   });

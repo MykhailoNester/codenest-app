@@ -35,6 +35,7 @@ function provider(over: Partial<CatalogProvider> = {}): CatalogProvider {
       },
     ],
     defaultModel: "claude-opus-5",
+    color: "#d97757",
     ...over,
   };
 }
@@ -296,6 +297,74 @@ describe("agent-catalog-store.load", () => {
 
     // One providers call plus one models call for the single provider.
     expect(fetchMock.mock.calls.length).toBe(2);
+  });
+
+  it("carries the provider's colour into the catalog row", async () => {
+    // Its own fetch stub, not `mockFetchOk` — that one deliberately returns
+    // `color: null` and is left alone (D12).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const body = url.includes("/models")
+          ? []
+          : [
+              {
+                id: 1,
+                name: "claude-work",
+                display_name: "Anthropic (claude-work)",
+                command_template: "claude-work {session_id}",
+                default_args: "",
+                is_enabled: true,
+                color: "#d97757",
+                default_env: {},
+                models: ["default"],
+                default_model: null,
+                has_api_key: false,
+                base_url: null,
+              },
+            ];
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+
+    await useAgentCatalogStore.getState().load();
+    expect(useAgentCatalogStore.getState().providers[0]?.color).toBe("#d97757");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readCachedProviders() — the upgrade path for a cache written before `color`
+// existed on the row (D12)
+// ---------------------------------------------------------------------------
+
+describe("agent-catalog-store readCachedProviders", () => {
+  it("a cache written before the colour existed still parses, with color: null", async () => {
+    // `readCachedProviders()` runs at module scope (`providers:` seeds from it
+    // on import), so re-running it requires a fresh module instance — the
+    // `composer-store.test.ts:340-341` / `session-hud-store.test.ts:40,61`
+    // idiom.
+    localStorage.setItem(
+      "codenest.agent.catalog",
+      JSON.stringify([
+        {
+          id: 1,
+          name: "claude-work",
+          displayName: "claude-work",
+          command: "claude-work {session_id}",
+          env: {},
+          models: [],
+          defaultModel: null,
+          // no `color` key — an older build's cache blob.
+        },
+      ]),
+    );
+    vi.resetModules();
+    const fresh = await import("../agent-catalog-store");
+    expect(fresh.useAgentCatalogStore.getState().providers[0]?.color).toBeNull();
   });
 });
 
