@@ -130,6 +130,38 @@ describe("composer-store", () => {
     });
   });
 
+  describe("seedDraft (#32)", () => {
+    it("fills an empty draft verbatim, including a fenced code block", () => {
+      const prompt = ["Fix this:", "", "```ts", "const x = 1;", "```"].join(
+        "\n",
+      );
+      useComposerStore.getState().seedDraft("pane-1", prompt);
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe(prompt);
+    });
+
+    it("appends after a blank line rather than clobbering a draft the user already typed", () => {
+      useComposerStore.getState().setDraft("pane-1", "notes I already wrote");
+      useComposerStore.getState().seedDraft("pane-1", "the seeded prompt");
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe(
+        "notes I already wrote\n\nthe seeded prompt",
+      );
+    });
+
+    it("with empty text is a no-op", () => {
+      useComposerStore.getState().setDraft("pane-1", "unchanged");
+      useComposerStore.getState().seedDraft("pane-1", "");
+      expect(useComposerStore.getState().panes["pane-1"]?.draft).toBe(
+        "unchanged",
+      );
+    });
+
+    it("does not send and does not touch history", () => {
+      useComposerStore.getState().seedDraft("pane-1", "a seeded prompt");
+      expect(agentSendMock).not.toHaveBeenCalled();
+      expect(useComposerStore.getState().history).toEqual([]);
+    });
+  });
+
   describe("queue / flushQueue", () => {
     it("queue while running stores the composed text and clears the draft", () => {
       useComposerStore.setState({

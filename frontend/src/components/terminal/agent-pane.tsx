@@ -28,6 +28,7 @@ import { useAgentSessionStore } from "../../stores/agent-session-store";
 import type { PaneLaunchSeed } from "../../lib/layout-tree";
 import { useComposerStore, CODENEST_PATHS_MIME } from "../../stores/composer-store";
 import { useTerminalStore } from "../../stores/terminal-store";
+import { consumePendingPrompt } from "../../stores/pending-prompt-store";
 import {
   recordAgentLaunch,
   recordAgentExited,
@@ -251,6 +252,7 @@ export function AgentPane({
   const reset = useAgentSessionStore((s) => s.reset);
   const clearPane = useComposerStore((s) => s.clearPane);
   const setTargetPane = useComposerStore((s) => s.setTargetPane);
+  const seedDraft = useComposerStore((s) => s.seedDraft);
 
   const focusedLeafId = useTerminalStore((s) => s.focusedLeafId);
   const setFocusedLeaf = useTerminalStore((s) => s.setFocusedLeaf);
@@ -361,6 +363,17 @@ export function AgentPane({
       // (StrictMode double-mount) — the frame subscription above still
       // delivers frames either way.
       if (startedPanes.has(bootKey)) return;
+
+      // Launch prompt handoff (#32): consume-once, keyed by leaf id. Deliberately
+      // ahead of the catalog wait and `agent_start` — the composer draft is the
+      // durable home for this text (it survives a failed start and the Retry that
+      // follows), so consuming early costs nothing on failure and keeps the window
+      // in which the user could be typing into an empty composer as small as
+      // possible. A `retryToken` restart re-runs this line and finds nothing: the
+      // registry is emptied by the first read, which is what makes a restart not a
+      // re-send.
+      const seededPrompt = consumePendingPrompt(leafId);
+      if (seededPrompt !== null) seedDraft(leafId, seededPrompt);
 
       markStarting(leafId);
       const resolvedCwd = cwd ?? (await getWorkspacePath().catch(() => undefined));

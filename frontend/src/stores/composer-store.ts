@@ -95,6 +95,10 @@ interface ComposerStore {
 
   setTargetPane: (paneId: string | null) => void;
   setDraft: (paneId: string, draft: string) => void;
+  /** Place a launch-composed prompt into a pane's draft without sending it
+   *  (#32). Never clobbers text the user already typed: an empty draft is
+   *  replaced, a non-empty one gets the prompt appended after a blank line. */
+  seedDraft: (paneId: string, text: string) => void;
   addPills: (paneId: string, pills: ContextPill[]) => void;
   removePill: (paneId: string, pillId: string) => void;
   /**
@@ -174,6 +178,21 @@ export const useComposerStore = create<ComposerStore>((set, get) => ({
   setTargetPane: (paneId) => set({ targetPaneId: paneId }),
 
   setDraft: (paneId, draft) => {
+    set((state) => ({
+      panes: {
+        ...state.panes,
+        [paneId]: { ...(state.panes[paneId] ?? emptyPaneComposer()), draft },
+      },
+    }));
+  },
+
+  seedDraft: (paneId, text) => {
+    if (text.length === 0) return;
+    const existing = get().panes[paneId]?.draft ?? "";
+    const draft =
+      existing.length === 0
+        ? text
+        : `${existing.replace(/\s+$/u, "")}\n\n${text}`;
     set((state) => ({
       panes: {
         ...state.panes,
