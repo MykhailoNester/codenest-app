@@ -7,10 +7,7 @@ import {
   getWorkspacePath,
   type PtyExitedPayload,
 } from "../lib/ipc";
-import {
-  recordAgentLaunch,
-  recordAgentExited,
-} from "../lib/agent-run-telemetry";
+import { recordAgentExited } from "../lib/agent-run-telemetry";
 import {
   clampSplitRatios,
   closeLeaf,
@@ -31,12 +28,8 @@ import {
   type PaneLeaf,
 } from "../lib/layout-tree";
 import {
-  buildGridLayout,
   buildPaneLayout,
   resolvePromptTargets,
-  safeInjectClaudeArgs,
-  type LaunchCell,
-  type LaunchSpec,
   type PaneLaunchSpec,
 } from "../lib/launch";
 import { stagePendingPrompt } from "./pending-prompt-store";
@@ -70,12 +63,6 @@ interface PersistedState {
 }
 
 const STORAGE_KEY = "codenest.terminal.state";
-
-/** Result returned by `applyGridLayout`. */
-export interface ApplyGridLayoutResult {
-  openedCount: number;
-  failedCount: number;
-}
 
 /** Result returned by `applyPaneLayout`. */
 export interface ApplyPaneLayoutResult {
@@ -121,7 +108,7 @@ export interface TerminalStore {
   /**
    * Mark the store as hydrated without seeding any default tabs.
    * Called by `TerminalsLayout` when `skipHydration` is true (i.e., a
-   * programmatic popout launch is about to call `applyGridLayout` itself).
+   * programmatic popout launch is about to call `applyPaneLayout` itself).
    */
   setHydrated: () => void;
   closeTab: (tabId: string) => Promise<void>;
@@ -185,18 +172,6 @@ export interface TerminalStore {
   leafExists: (terminalId: string) => boolean;
   hydrateFromStorage: () => Promise<void>;
   persistToStorage: () => void;
-  /**
-   * Build a grid layout from `spec`, allocate one PTY per leaf in parallel,
-   * write `spec.providerCommand` to each PTY after open resolves, add the
-   * resulting tab as the active tab, and return `{ openedCount, failedCount }`.
-   *
-   * Individual pane failures do NOT abort siblings (Promise.allSettled).
-   *
-   * In workspace mode (`spec.cells` is non-empty), cells listed in the array
-   * get a real PTY; grid positions with no matching cell become empty-pane
-   * placeholders (`leaf.empty === true`).
-   */
-  applyGridLayout: (spec: LaunchSpec) => Promise<ApplyGridLayoutResult>;
   /**
    * Build a pane-list layout from `spec` (`buildPaneLayout`), open one PTY per
    * shell pane, add the resulting tab as the active tab, and return
@@ -347,7 +322,10 @@ function nextTabTitle(tabs: Tab[], kind: PaneKind): string {
   const label = kind === "agent" ? "Agent" : "Shell";
   const sameKind = tabs.filter((t) => {
     const first = collectLeaves(t.layout)[0];
-    return first !== undefined && (paneKind(first) === "agent") === (kind === "agent");
+    return (
+      first !== undefined &&
+      (paneKind(first) === "agent") === (kind === "agent")
+    );
   }).length;
   return `${label} ${sameKind + 1}`;
 }
@@ -447,7 +425,8 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
           }
         : {
             type: "leaf",
-            terminalId: (await openTerminal(cwd !== undefined ? { cwd } : {})).id,
+            terminalId: (await openTerminal(cwd !== undefined ? { cwd } : {}))
+              .id,
             title: defaultLeafTitle(),
             ...(cwd !== undefined ? { cwd } : {}),
           };
@@ -671,9 +650,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   renameTab: (tabId, title) => {
     set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.id === tabId ? { ...t, title } : t,
-      ),
+      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, title } : t)),
     }));
   },
 
@@ -779,7 +756,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       if (rebuilt.length === 0) {
         // Every restored tab failed — fall back to one fresh tab rather than
         // leaving the page empty.
-        await get().addTab().catch(() => undefined);
+        await get()
+          .addTab()
+          .catch(() => undefined);
         set({ hydrated: true });
         return;
       }
@@ -812,10 +791,10 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         tabs: tabs.map((t) => ({
           id: t.id,
           title: t.title,
-          // Strip initCommand and seed from every leaf before persisting.
-          // Provider CLI commands (written by applyGridLayout/applyPaneLayout)
-          // must not be re-issued when the embedded Terminal page is opened
-          // after a previous Launch session: hydrateFromStorage calls
+          // Strip initCommand and seed from every leaf before persisting. A
+          // provider CLI command (written by applyPaneLayout) must not be
+          // re-issued when the embedded Terminal page is opened after a
+          // previous Launch session: hydrateFromStorage calls
           // sendTerminalInput for any leaf that carries initCommand, which
           // would auto-spawn claude (or another provider) in every restored
           // pane. A rehydrated agent leaf must not re-stamp its launch
@@ -831,291 +810,6 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     } catch {
       // localStorage may be unavailable in some sandboxes; silently skip.
     }
-  },
-
-  applyGridLayout: async (spec) => {
-    // Build the layout tree with placeholder ids.
-    // cwd / initCommand carry the uniform values; per-cell overrides are
-    // applied in the allSettled loop below.
-    const layoutTemplate = buildGridLayout({
-      rows: spec.rows,
-      cols: spec.cols,
-      cwd: spec.cwd,
-      initCommand: spec.providerCommand,
-    });
-
-    const placeholderLeaves = collectLeaves(layoutTemplate);
-
-    // Build a lookup from (row-major index) → LaunchCell when in workspace mode.
-    // Row-major index: row * cols + col.
-    const cellByIndex = new Map<number, LaunchCell>();
-    if (spec.cells && spec.cells.length > 0) {
-      for (const cell of spec.cells) {
-        cellByIndex.set(cell.row * spec.cols + cell.col, cell);
-      }
-    }
-
-    const workspaceMode = cellByIndex.size > 0;
-
-    // Resolve the primary leaf index (row-major): (0,0) for uniform grids or
-    // the cell with is_primary=true for workspace grids.  Fallback is always 0.
-    const primaryLeafIndex = 0; // uniform grids always use (0,0)
-
-    // Allocate one PTY per leaf in parallel; failures are isolated.
-    // Each settled result carries both the placeholder id and the real PTY id
-    // so we can apply all replacements sequentially after allSettled resolves,
-    // avoiding the race condition that would arise from concurrent writes to
-    // a shared `layout` variable.
-    const results = await Promise.allSettled(
-      placeholderLeaves.map(async (placeholder, leafIndex) => {
-        // In workspace mode, skip PTY allocation for cells that have no spec.
-        if (workspaceMode && !cellByIndex.has(leafIndex)) {
-          // Return a sentinel indicating this is an empty-pane placeholder.
-          return {
-            placeholderId: placeholder.terminalId,
-            realId: null as string | null,
-            isEmpty: true,
-            leafIndex,
-          };
-        }
-
-        const cell = cellByIndex.get(leafIndex);
-        const cwd = cell?.cwd ?? spec.cwd;
-        const providerCommand = cell?.providerCommand ?? spec.providerCommand;
-        // Env precedence:
-        //   workspace cell → use cell.envOverlay (already merged by the modal with provider+profile)
-        //   uniform mode   → use spec.env (merged by the modal from provider+profile)
-        //   neither        → no overlay (inherits parent process env)
-        const envOverlay: Record<string, string> | undefined =
-          cell !== undefined && Object.keys(cell.envOverlay).length > 0
-            ? cell.envOverlay
-            : spec.env !== undefined && Object.keys(spec.env).length > 0
-              ? spec.env
-              : undefined;
-
-        // B3: Generate a per-pane session UUID for deterministic Claude enrichment.
-        // This UUID is stored on the agent_runs row and injected into the provider
-        // command via {session_id} → `--session-id <uuid>`.  Non-Claude templates
-        // omit the placeholder, so the UUID is simply unused in their case but
-        // still stamped on the agent_runs row for potential future use.
-        const paneSessionId = genId();
-
-        // Inject session_id into the provider command before writing to PTY.
-        //
-        // renderProviderCommand intentionally leaves {session_id} verbatim when
-        // sessionId is not supplied at modal time (the pane UUID doesn't exist
-        // yet).  We do the final substitution here, replacing {session_id} with
-        // '--session-id <uuid>'.
-        //
-        // After the placeholder substitution we also run safeInjectClaudeArgs as
-        // a belt-and-suspenders safety net: if the template was user-created or
-        // came from an un-migrated DB row and never contained the placeholder at
-        // all, the flags are appended unconditionally for any `claude ...` command.
-        let commandWithSession = providerCommand.includes("{session_id}")
-          ? providerCommand.replace(
-              "{session_id}",
-              `--session-id ${paneSessionId}`,
-            )
-          : providerCommand;
-
-        // Safety net: append --session-id (and --mcp-config, if present in the
-        // spec but missing from the command) for claude invocations whose
-        // template lacked the placeholders.
-        commandWithSession = safeInjectClaudeArgs(
-          commandWithSession,
-          paneSessionId,
-        );
-
-        const handle = await openTerminal({
-          cwd,
-          ...(envOverlay !== undefined ? { env: envOverlay } : {}),
-        });
-        // Write the provider command (with session_id injected) after the PTY is open.
-        await sendTerminalInput(handle.id, commandWithSession);
-
-        // Determine fanout role for telemetry stamping (D6).
-        const fanout = spec.promptFanout ?? "primary";
-        let fanoutRole: "primary" | "secondary" | undefined;
-        if (fanout === "primary") {
-          fanoutRole = leafIndex === primaryLeafIndex ? "primary" : undefined;
-        } else if (fanout === "every") {
-          fanoutRole = leafIndex === primaryLeafIndex ? "primary" : "secondary";
-        }
-        // fanout === "none" → fanoutRole stays undefined
-
-        // Record the run so the AGENTS panel lists this pane with working
-        // Focus/Stop. B1: pane_id is the PTY handle and session_id the
-        // dashboard-minted UUID injected as `--session-id`, which is what links
-        // Claude's hooks to this row. Profile name (migration 051) is what the
-        // panel filters by. Fire-and-forget inside `recordAgentLaunch` — this
-        // must never delay a launch.
-        recordAgentLaunch({
-          provider: cell?.providerId ?? spec.providerId,
-          project_id: cell?.projectId ?? spec.projectId,
-          pane_id: handle.id,
-          session_id: paneSessionId,
-          ...(spec.target !== undefined ? { target: spec.target } : {}),
-          ...(spec.rows !== undefined ? { rows: spec.rows } : {}),
-          ...(spec.cols !== undefined ? { cols: spec.cols } : {}),
-          leaf_index: leafIndex,
-          model: spec.model ?? null,
-          ...(spec.profileName ? { profile: spec.profileName } : {}),
-          // D6: source attribution fields (only when a source is present)
-          ...(spec.source !== undefined
-            ? {
-                source_kind: spec.source.kind,
-                source_id: spec.source.id,
-                prompt_preview:
-                  spec.prompt && spec.prompt.length > 0
-                    ? spec.prompt.slice(0, 120)
-                    : null,
-                fanout_role: fanoutRole ?? null,
-              }
-            : {}),
-        });
-        return {
-          placeholderId: placeholder.terminalId,
-          realId: handle.id,
-          isEmpty: false,
-          leafIndex,
-        };
-      }),
-    );
-
-    // Apply all successful id replacements sequentially to the layout tree.
-    // Empty-pane results get their leaf tagged with `empty: true`.
-    let layout: LayoutNode = layoutTemplate;
-    let openedCount = 0;
-    let failedCount = 0;
-
-    // Collect successfully-opened real PTY ids for prompt delivery below.
-    const successfulPanes: Array<{ realId: string; leafIndex: number }> = [];
-
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        const { placeholderId, realId, isEmpty, leafIndex } = result.value;
-        if (isEmpty) {
-          // Tag the placeholder leaf as empty; it keeps its pending-N terminalId
-          // until the user opens a shell in that cell.
-          layout = _setLeafEmpty(layout, placeholderId, true);
-        } else if (realId !== null) {
-          layout = replaceLeafId(layout, placeholderId, realId);
-          openedCount++;
-          successfulPanes.push({ realId, leafIndex });
-        }
-      } else {
-        failedCount++;
-      }
-    }
-
-    // ── D4: Prompt delivery ──────────────────────────────────────────────────
-    // Insert the prompt into the provider's input field via a bracketed-paste
-    // sequence (CSI 200 ~ … CSI 201 ~).  Claude Code (and most modern TUIs)
-    // enable bracketed-paste mode and treat the wrapped text as a single paste
-    // event — the text lands in the input buffer without being interpreted as
-    // keystrokes, and crucially WITHOUT submitting.  The user reviews and
-    // presses Enter manually.
-    //
-    // The write is gated by the first non-empty `terminal_output` event OR a
-    // 250ms timeout — whichever fires first — so the paste arrives after the
-    // TUI has set up its input handler.
-    const fanout = spec.promptFanout ?? "primary";
-    if (
-      spec.prompt &&
-      spec.prompt.length > 0 &&
-      fanout !== "none" &&
-      successfulPanes.length > 0
-    ) {
-      const promptText = `\x1b[200~${spec.prompt}\x1b[201~`;
-
-      /**
-       * For a single pane: wait for first non-empty `terminal_output` plus a
-       * 600ms settle window for the TUI to enable bracketed-paste mode, OR a
-       * 1200ms worst-case fallback. Then write the paste sequence.
-       *
-       * Why we wait past first-output: Claude Code TUI emits ANSI setup
-       * sequences first; bracketed-paste mode (CSI ?2004h) is enabled later
-       * in init. Writing the paste before that lands as control bytes in the
-       * shell rather than as text in Claude's input field.
-       */
-      const deliverPrompt = async (paneId: string): Promise<void> => {
-        await new Promise<void>((resolve) => {
-          let resolved = false;
-          let unlisten: (() => void) | undefined;
-
-          const writeAndResolve = () => {
-            if (resolved) return;
-            resolved = true;
-            unlisten?.();
-            sendTerminalInput(paneId, promptText).then(
-              () => undefined,
-              (err) =>
-                console.error("[prompt-delivery] write failed", paneId, err),
-            );
-            resolve();
-          };
-
-          const fallbackTimer = setTimeout(
-            () => writeAndResolve(),
-            1200,
-          );
-
-          void listen<string>(`terminal_output:${paneId}`, (raw) => {
-            if (raw.payload && raw.payload.length > 0) {
-              clearTimeout(fallbackTimer);
-              setTimeout(() => writeAndResolve(), 600);
-            }
-          }).then((dispose) => {
-            unlisten = dispose;
-            if (resolved) dispose();
-          });
-        });
-      };
-
-      if (fanout === "primary") {
-        // Deliver to the primary pane only (the first successful pane at index 0
-        // in the successfulPanes list, which corresponds to leafIndex 0).
-        const primaryPane =
-          successfulPanes.find((p) => p.leafIndex === primaryLeafIndex) ??
-          successfulPanes[0];
-        if (primaryPane) {
-          void deliverPrompt(primaryPane.realId).catch(() => undefined);
-        }
-      } else if (fanout === "every") {
-        // Deliver to all panes in parallel; failures are isolated.
-        void Promise.allSettled(
-          successfulPanes.map((p) => deliverPrompt(p.realId)),
-        );
-      }
-    }
-
-    // Construct the new tab and make it active.
-    const tabId = genId();
-    const tabTitle = `Launch ${spec.rows}×${spec.cols}`;
-    const newTab: Tab = {
-      id: tabId,
-      title: tabTitle,
-      layout,
-    };
-
-    // Focus the first non-empty leaf, if any.
-    const firstRealId =
-      collectLeaves(layout).find((l) => !l.empty)?.terminalId ??
-      collectLeafIds(layout)[0] ??
-      null;
-
-    set((state) => ({
-      tabs: [...state.tabs, newTab],
-      activeTabId: tabId,
-      focusedLeafId: firstRealId,
-      maximizedLeafId: null,
-      // Mark hydrated so the embedded TerminalsLayout's mount effect skips
-      // hydrateFromStorage (which would otherwise replace this tab with the
-      // persisted ones and orphan the PTYs we just opened).
-      hydrated: true,
-    }));
-
-    return { openedCount, failedCount };
   },
 
   applyPaneLayout: async (spec) => {
@@ -1160,8 +854,8 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       }),
     );
 
-    // Apply all replacements sequentially — same reason as `applyGridLayout`
-    // above: concurrent writes to one `layout` variable would race.
+    // Apply all replacements sequentially: concurrent writes to one `layout`
+    // variable would race.
     let layout: LayoutNode = layoutTemplate;
     let openedCount = 0;
     let failedCount = 0;
@@ -1224,8 +918,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       activeTabId: tabId,
       focusedLeafId: firstRealId,
       maximizedLeafId: null,
-      // Mark hydrated for the same reason `applyGridLayout` does above: stop
-      // `TerminalsLayout` replacing this tab with the persisted ones.
+      // Mark hydrated so the embedded TerminalsLayout's mount effect skips
+      // hydrateFromStorage, which would otherwise replace this tab with the
+      // persisted ones and orphan the PTYs/agent panes we just opened.
       hydrated: true,
     }));
 
@@ -1267,17 +962,16 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Private helpers for workspace-mode leaf manipulation
+// Private helpers for leaf manipulation
 // ---------------------------------------------------------------------------
 
 /**
  * Recursively strip `initCommand` and `seed` from every leaf in the layout
  * tree.
  *
- * Used by `persistToStorage` so neither survives into localStorage: a
- * provider CLI command (e.g. the `claude` invocation written by
- * `applyGridLayout`, or a shell pane's command from `applyPaneLayout`) must
- * not be replayed when the embedded Terminal page next calls
+ * Used by `persistToStorage` so neither survives into localStorage: a shell
+ * pane's command (written by `applyPaneLayout`) must not be replayed when
+ * the embedded Terminal page next calls
  * `hydrateFromStorage`, and an agent leaf's launch attribution (`seed`) must
  * not be re-stamped onto a run a rehydrate restarts days later. Plain shell
  * tabs never set either field, so this is a no-op for them.

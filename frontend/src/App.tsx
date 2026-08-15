@@ -18,7 +18,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { useTerminalStore } from "./stores/terminal-store";
 import * as pendingLaunchStore from "./stores/pending-launch-store";
-import { isPaneLaunchSpec } from "./lib/launch";
 import {
   useTerminalSettings,
   useEnabledFeatures,
@@ -277,13 +276,10 @@ function AppInner(): ReactElement {
     embeddedConsumed.current = true;
     const spec = pendingLaunchStore.consume("embedded");
     if (spec) {
-      // The explicit annotation stops the two result interfaces having to be
-      // structurally identical for this conditional expression to type-check.
-      const applied: Promise<{ openedCount: number; failedCount: number }> =
-        isPaneLaunchSpec(spec)
-          ? terminalStore.applyPaneLayout(spec)
-          : terminalStore.applyGridLayout(spec);
-      void applied.then(() => navigate("/terminal")).catch(() => undefined);
+      void terminalStore
+        .applyPaneLayout(spec)
+        .then(() => navigate("/terminal"))
+        .catch(() => undefined);
     }
     // terminalStore and navigate are stable references; omit from deps intentionally.
     // eslint-disable-next-line react-hooks/exhaustive-deps

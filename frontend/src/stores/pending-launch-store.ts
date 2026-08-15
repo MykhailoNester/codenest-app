@@ -8,13 +8,14 @@
  *
  * Slot: `localStorage.getItem("codenest.pendingLaunch")`
  *   - null  → no pending launch
- *   - JSON  → serialized `AnyLaunchSpec` waiting for the matching target window
+ *   - JSON  → serialized `PaneLaunchSpec` waiting for the matching target window
  *
- * One slot holds either launch shape (`LaunchSpec`, the rows×cols grid; or
- * `PaneLaunchSpec`, the ordered typed pane list) — never two slots. A second
- * slot would mean `hasPendingPopoutLaunch` has to check both and the two
- * would have to stay in step forever; `isPaneLaunchSpec` (`lib/launch.ts`) is
- * what a consumer narrows the union with.
+ * The slot holds exactly one shape now that the grid-modal's `LaunchSpec` is
+ * gone (task #35): a `PaneLaunchSpec`. A spec queued by a pre-upgrade build
+ * of the app can still be sitting in localStorage across the upgrade, so
+ * every read boundary below (`consume`, `subscribe`, `hasPendingPopoutLaunch`)
+ * validates with `isPaneLaunchSpec` (`lib/launch.ts`) and drops anything that
+ * fails it, rather than making every consumer branch on shape.
  *
  * Atomic CAS in `consume`:
  *   Read the slot, write `null` back atomically.  Only the first reader
@@ -26,12 +27,7 @@
  *   A mismatch leaves the slot intact so the correct window can claim it.
  */
 
-import type { LaunchSpec, PaneLaunchSpec } from "../lib/launch";
-
-/** Either shape the one pending-launch slot can hold. Both members declare
- *  `target` as a required field, so every function below can read it without
- *  narrowing first. */
-export type AnyLaunchSpec = LaunchSpec | PaneLaunchSpec;
+import { isPaneLaunchSpec, type PaneLaunchSpec } from "../lib/launch";
 
 const STORAGE_KEY = "codenest.pendingLaunch";
 
@@ -43,7 +39,7 @@ const STORAGE_KEY = "codenest.pendingLaunch";
  * Write `spec` into the pending-launch slot.
  * Overwrites any previously queued spec.
  */
-export function enqueue(spec: AnyLaunchSpec): void {
+export function enqueue(spec: PaneLaunchSpec): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(spec));
   } catch {
@@ -59,16 +55,19 @@ export function enqueue(spec: AnyLaunchSpec): void {
 /**
  * Atomically read and clear the pending-launch slot.
  *
- * Returns the queued `AnyLaunchSpec` if:
+ * Returns the queued `PaneLaunchSpec` if:
  *   - a spec is present, AND
- *   - `spec.target === target`.
+ *   - `spec.target === target`, AND
+ *   - the spec is a `PaneLaunchSpec` (`isPaneLaunchSpec`) — a spec queued by
+ *     a pre-upgrade build (the old grid modal's `LaunchSpec`) is claimed and
+ *     dropped here rather than returned, with one `console.warn`.
  *
  * Returns `null` and leaves the slot unchanged when the target does not match,
  * so the correct window can still claim the spec later.
  *
  * Returns `null` when the slot is empty or contains invalid JSON.
  */
-export function consume(target: "embedded" | "popout"): AnyLaunchSpec | null {
+export function consume(target: "embedded" | "popout"): PaneLaunchSpec | null {
   let raw: string | null;
   try {
     raw = localStorage.getItem(STORAGE_KEY);
@@ -78,9 +77,9 @@ export function consume(target: "embedded" | "popout"): AnyLaunchSpec | null {
 
   if (raw === null) return null;
 
-  let spec: AnyLaunchSpec;
+  let parsed: unknown;
   try {
-    spec = JSON.parse(raw) as AnyLaunchSpec;
+    parsed = JSON.parse(raw);
   } catch {
     // Corrupt slot — clear it and return null.
     try {
@@ -91,19 +90,27 @@ export function consume(target: "embedded" | "popout"): AnyLaunchSpec | null {
     return null;
   }
 
-  if (spec.target !== target) {
+  if ((parsed as { target?: unknown } | null)?.target !== target) {
     // Target mismatch: leave the slot intact for the correct window.
     return null;
   }
 
-  // Claim the spec: write null back so subsequent reads return nothing.
+  // Claim the spec: write null back so subsequent reads return nothing,
+  // regardless of whether it turns out to be a legacy shape below.
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
     // ignore
   }
 
-  return spec;
+  if (!isPaneLaunchSpec(parsed)) {
+    console.warn(
+      "[pending-launch-store] dropped a legacy launch spec queued before the upgrade",
+    );
+    return null;
+  }
+
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,13 +124,17 @@ export function consume(target: "embedded" | "popout"): AnyLaunchSpec | null {
  * Used by `TerminalWindowRoot` to decide whether to suppress the default
  * `hydrateFromStorage` call in `TerminalsLayout` before the consume effect
  * runs (child effects fire before parent effects on mount).
+ *
+ * Requires `panes` to be an array (not just `target === "popout"`) so a
+ * legacy grid spec queued before the upgrade cannot make the popout skip
+ * hydration and then open empty once `consume` drops it as unrecognised.
  */
 export function hasPendingPopoutLaunch(): boolean {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === null) return false;
-    const spec = JSON.parse(raw) as { target?: string };
-    return spec.target === "popout";
+    const spec = JSON.parse(raw) as { target?: string; panes?: unknown };
+    return spec.target === "popout" && Array.isArray(spec.panes);
   } catch {
     return false;
   }
@@ -133,13 +144,15 @@ export function hasPendingPopoutLaunch(): boolean {
 // subscribe
 // ---------------------------------------------------------------------------
 
-type LaunchCallback = (spec: AnyLaunchSpec) => void;
+type LaunchCallback = (spec: PaneLaunchSpec) => void;
 
 /**
  * Subscribe to future cross-window launch broadcasts for the given `target`.
  *
  * When another window calls `enqueue(spec)` with a matching target, this
  * callback fires once and the slot is claimed (consume semantics apply).
+ * A legacy (non-`PaneLaunchSpec`) broadcast is claimed and dropped, with one
+ * `console.warn`, the same as `consume`.
  *
  * Returns an unsubscribe function — call it on component unmount to avoid
  * memory leaks.
@@ -152,14 +165,14 @@ export function subscribe(
     if (event.key !== STORAGE_KEY) return;
     if (event.newValue === null) return; // slot was cleared, not written
 
-    let spec: AnyLaunchSpec;
+    let parsed: unknown;
     try {
-      spec = JSON.parse(event.newValue) as AnyLaunchSpec;
+      parsed = JSON.parse(event.newValue);
     } catch {
       return;
     }
 
-    if (spec.target !== target) return;
+    if ((parsed as { target?: unknown } | null)?.target !== target) return;
 
     // Claim the spec so no other subscriber fires for it.
     try {
@@ -168,7 +181,14 @@ export function subscribe(
       // ignore
     }
 
-    cb(spec);
+    if (!isPaneLaunchSpec(parsed)) {
+      console.warn(
+        "[pending-launch-store] dropped a legacy launch spec queued before the upgrade",
+      );
+      return;
+    }
+
+    cb(parsed);
   }
 
   window.addEventListener("storage", handleStorage);

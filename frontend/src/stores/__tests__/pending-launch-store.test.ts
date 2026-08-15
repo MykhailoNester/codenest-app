@@ -1,27 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { enqueue, consume, subscribe } from "../pending-launch-store";
 import {
-  isPaneLaunchSpec,
-  type LaunchSpec,
-  type PaneLaunchSpec,
-} from "../../lib/launch";
+  enqueue,
+  consume,
+  subscribe,
+  hasPendingPopoutLaunch,
+} from "../pending-launch-store";
+import { isPaneLaunchSpec, type PaneLaunchSpec } from "../../lib/launch";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function makeSpec(target: "embedded" | "popout" = "embedded"): LaunchSpec {
-  return {
-    projectId: 1,
-    cwd: "/tmp/proj",
-    providerId: 1,
-    providerCommand: "claude\n",
-    rows: 1,
-    cols: 1,
-    target,
-    profileId: null,
-  };
-}
 
 function makePaneSpec(
   target: "embedded" | "popout" = "embedded",
@@ -31,6 +19,23 @@ function makePaneSpec(
     split: "cols",
     target,
   };
+}
+
+/** A grid-shaped spec from a pre-#35 build — no `panes` array, so it fails
+ *  `isPaneLaunchSpec`. Written as raw JSON (never through `enqueue`, which
+ *  now only accepts a `PaneLaunchSpec`) to simulate a slot left over from
+ *  before the upgrade. */
+function legacyGridSpecJson(target: "embedded" | "popout" = "embedded"): string {
+  return JSON.stringify({
+    projectId: 1,
+    cwd: "/tmp/proj",
+    providerId: 1,
+    providerCommand: "claude\n",
+    rows: 1,
+    cols: 1,
+    target,
+    profileId: null,
+  });
 }
 
 /** Install a simple in-memory localStorage stub. */
@@ -66,7 +71,7 @@ describe("pending-launch-store", () => {
   // ─── enqueue / consume ────────────────────────────────────────────────────
 
   it("write-then-consume returns the spec exactly once", () => {
-    const spec = makeSpec("embedded");
+    const spec = makePaneSpec("embedded");
     enqueue(spec);
     const first = consume("embedded");
     expect(first).toEqual(spec);
@@ -76,7 +81,7 @@ describe("pending-launch-store", () => {
   });
 
   it("consume with target mismatch returns null and leaves slot intact", () => {
-    const spec = makeSpec("popout");
+    const spec = makePaneSpec("popout");
     enqueue(spec);
     // embedded window tries to consume a popout spec — mismatch.
     const mismatch = consume("embedded");
@@ -98,19 +103,15 @@ describe("pending-launch-store", () => {
   });
 
   it("enqueue overwrites a previously queued spec", () => {
-    const spec1 = makeSpec("embedded");
-    const spec2 = { ...makeSpec("embedded"), cwd: "/other/path" };
+    const spec1 = makePaneSpec("embedded");
+    const spec2: PaneLaunchSpec = {
+      ...makePaneSpec("embedded"),
+      panes: [{ kind: "shell", cwd: "/other/path" }],
+    };
     enqueue(spec1);
     enqueue(spec2);
     const result = consume("embedded");
-    // Narrowed for the union (D14): `LaunchSpec` has no `panes`/`split`, so
-    // `result.cwd` is TS2339 on `AnyLaunchSpec` without this check first. This
-    // also pins that a `LaunchSpec` does not accidentally satisfy
-    // `isPaneLaunchSpec` — not just "the second enqueue wins".
-    if (result === null || isPaneLaunchSpec(result)) {
-      throw new Error("expected the legacy LaunchSpec back");
-    }
-    expect(result.cwd).toBe("/other/path");
+    expect(result).toEqual(spec2);
   });
 
   it("a PaneLaunchSpec round-trips through the popout slot and is recognised by isPaneLaunchSpec", () => {
@@ -121,12 +122,28 @@ describe("pending-launch-store", () => {
     expect(result !== null && isPaneLaunchSpec(result)).toBe(true);
   });
 
-  it("a legacy LaunchSpec still round-trips and is not recognised as a pane spec", () => {
-    const spec = makeSpec("embedded");
-    enqueue(spec);
-    const result = consume("embedded");
-    expect(result).toEqual(spec);
-    expect(result !== null && isPaneLaunchSpec(result)).toBe(false);
+  it("a legacy grid spec is dropped and the slot cleared", () => {
+    localStorage.setItem("codenest.pendingLaunch", legacyGridSpecJson("embedded"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(consume("embedded")).toBeNull();
+    expect(localStorage.getItem("codenest.pendingLaunch")).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    warnSpy.mockRestore();
+  });
+
+  it("hasPendingPopoutLaunch is false for a legacy popout spec", () => {
+    localStorage.setItem("codenest.pendingLaunch", legacyGridSpecJson("popout"));
+    // A legacy grid spec has no `panes` array — hasPendingPopoutLaunch must
+    // not report true, or the popout would skip hydrateFromStorage and then
+    // consume drops the spec anyway, leaving the window empty.
+    expect(hasPendingPopoutLaunch()).toBe(false);
+  });
+
+  it("hasPendingPopoutLaunch is true for a real popout PaneLaunchSpec", () => {
+    enqueue(makePaneSpec("popout"));
+    expect(hasPendingPopoutLaunch()).toBe(true);
   });
 
   // ─── subscribe ────────────────────────────────────────────────────────────
@@ -135,7 +152,7 @@ describe("pending-launch-store", () => {
     const cb = vi.fn();
     const unsub = subscribe("embedded", cb);
 
-    const spec = makeSpec("embedded");
+    const spec = makePaneSpec("embedded");
 
     // Simulate a storage event fired from another window writing the spec.
     const event = new StorageEvent("storage", {
@@ -158,7 +175,7 @@ describe("pending-launch-store", () => {
     // Emit a spec meant for "embedded" — subscriber is for "popout".
     const event = new StorageEvent("storage", {
       key: "codenest.pendingLaunch",
-      newValue: JSON.stringify(makeSpec("embedded")),
+      newValue: JSON.stringify(makePaneSpec("embedded")),
       oldValue: null,
     });
     window.dispatchEvent(event);
@@ -174,7 +191,7 @@ describe("pending-launch-store", () => {
     const event = new StorageEvent("storage", {
       key: "codenest.pendingLaunch",
       newValue: null,
-      oldValue: JSON.stringify(makeSpec("embedded")),
+      oldValue: JSON.stringify(makePaneSpec("embedded")),
     });
     window.dispatchEvent(event);
 
@@ -188,7 +205,7 @@ describe("pending-launch-store", () => {
 
     const event = new StorageEvent("storage", {
       key: "some.other.key",
-      newValue: JSON.stringify(makeSpec("embedded")),
+      newValue: JSON.stringify(makePaneSpec("embedded")),
     });
     window.dispatchEvent(event);
 
@@ -203,10 +220,29 @@ describe("pending-launch-store", () => {
 
     const event = new StorageEvent("storage", {
       key: "codenest.pendingLaunch",
-      newValue: JSON.stringify(makeSpec("embedded")),
+      newValue: JSON.stringify(makePaneSpec("embedded")),
     });
     window.dispatchEvent(event);
 
     expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("subscriber drops a legacy grid spec broadcast and does not invoke the callback", () => {
+    const cb = vi.fn();
+    const unsub = subscribe("embedded", cb);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const event = new StorageEvent("storage", {
+      key: "codenest.pendingLaunch",
+      newValue: legacyGridSpecJson("embedded"),
+      oldValue: null,
+    });
+    window.dispatchEvent(event);
+
+    expect(cb).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    warnSpy.mockRestore();
+    unsub();
   });
 });

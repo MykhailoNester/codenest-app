@@ -3,14 +3,15 @@
  *
  * A run row is what the Command Center's AGENTS panel lists, and what its
  * Focus/Stop actions act on — so a pane that never posts here is invisible
- * there no matter how alive it is. Both surfaces that own panes report through
- * this module:
+ * there no matter how alive it is. `components/terminal/agent-pane.tsx` is
+ * the only caller of `recordAgentLaunch`: an agent pane has no PTY at all,
+ * so its pane id is the leaf id and its liveness comes from the session's
+ * own `exit` frame, reported via `recordAgentExited`.
  *
- * * PTY provider panes (`stores/terminal-store.ts`'s `applyGridLayout`), whose
- *   pane id is the PTY handle and whose liveness sink is `pty-exited`.
- * * Agent panes (`components/terminal/agent-pane.tsx`), whose pane id is the
- *   leaf id and which have no PTY at all — their liveness comes from the
- *   session's own `exit` frame.
+ * `recordAgentExited` also fires for every plain shell PTY's `pty-exited`
+ * event (`stores/terminal-store.ts`'s module-level listener) — harmlessly:
+ * the sidecar's `mark_ended_by_pane` only touches rows still `running`, and
+ * a shell pane never posted a launch row to begin with.
  *
  * Both calls are fire-and-forget by design: telemetry must never delay a launch
  * or block a teardown, and a sidecar that is still starting (or already gone)
@@ -24,7 +25,7 @@ import { isTauriAvailable, listLivePanes } from "./ipc";
 export type PaneTarget = "embedded" | "popout";
 
 export interface AgentLaunchPayload {
-  /** PTY handle id for a provider pane, leaf id for an agent pane. */
+  /** The agent leaf's id. */
   pane_id: string;
   /** `providers.id`, or a provider name the sidecar resolves. */
   provider?: number | string | null;

@@ -1,8 +1,9 @@
 /**
  * launch-from-source-button.tsx
  *
- * Reusable button that opens a seeded LaunchModal for a task or inbox item.
- * Fetches the LaunchSeed before opening so the modal has full context.
+ * Reusable button that opens a seeded LaunchComposerDialog for a task or
+ * inbox item. Fetches the LaunchSeed before opening so the composer has
+ * full context.
  *
  * Usage:
  *   <LaunchFromSourceButton kind="task" id={task.id} />
@@ -11,7 +12,7 @@
 
 import { useState, type ReactElement } from "react";
 import { useLaunchSeed } from "../../lib/launch-seed";
-import { LaunchModal } from "./launch-modal";
+import { LaunchComposerDialog } from "./launch-composer-dialog";
 import { Icon } from "../icon";
 
 interface LaunchFromSourceButtonProps {
@@ -58,10 +59,6 @@ export function LaunchFromSourceButton({
     setOpen(true);
   }
 
-  // seed.data can be undefined (loading) or LaunchSeed | null (from query).
-  // LaunchModal accepts seed?: LaunchSeed | null — undefined is fine (no seed).
-  const seedData = seedQuery.data ?? undefined;
-
   const className = [
     "d3-btn",
     variant === "primary" ? "d3-btn--primary" : "d3-btn--ghost",
@@ -101,10 +98,15 @@ export function LaunchFromSourceButton({
       </button>
 
       {open && !isLoading && (
-        <LaunchModal
-          open={open}
-          seed={seedData}
+        <LaunchComposerDialog
+          open
           onClose={() => setOpen(false)}
+          source={{ kind, id }}
+          // `?? null` (not `undefined`): the composer dialog's
+          // "Source no longer exists" panel is gated on `seed === null`, so
+          // an errored fetch must produce `null` here rather than silently
+          // opening an unattributed composer.
+          seed={seedQuery.data ?? null}
         />
       )}
     </>

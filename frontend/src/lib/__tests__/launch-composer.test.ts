@@ -2,14 +2,17 @@ import { describe, it, expect } from "vitest";
 import type { LaunchPreset } from "../api";
 import {
   composerPanesToPresetPanes,
+  composerPlanToSpec,
   composerReducer,
   composeSectionPrompt,
   defaultEnabledSectionIds,
   describePreset,
   formatTokenTotal,
   initialComposerState,
+  initialComposerStateFrom,
   presetToDrafts,
   previewGridStyle,
+  seedPanesFromGrid,
   sectionTokenTotal,
   summarizeComposer,
   unresolvedPaneIds,
@@ -17,8 +20,9 @@ import {
   type ComposerCatalogProvider,
   type ComposerPane,
   type ComposerState,
+  type LaunchComposerPlan,
 } from "../launch-composer";
-import type { LaunchPromptSection } from "../launch-seed";
+import type { LaunchPromptSection, LaunchSeed } from "../launch-seed";
 
 /** Minimal shell panes — `previewGridStyle` only reads `panes.length`. */
 function dummyPanes(n: number): ComposerPane[] {
@@ -774,5 +778,254 @@ describe("unresolvedPaneIds", () => {
       { id: "p4", kind: "shell", shell: "", command: "" },
     ];
     expect(unresolvedPaneIds(panes, catalog)).toEqual(["p2", "p3"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// seedPanesFromGrid (task #35)
+// ---------------------------------------------------------------------------
+
+function gridSeed(
+  overrides: Partial<
+    Pick<LaunchSeed, "rows" | "cols" | "provider_id" | "model" | "prompt_fanout">
+  > = {},
+): Pick<LaunchSeed, "rows" | "cols" | "provider_id" | "model" | "prompt_fanout"> {
+  return {
+    rows: 1,
+    cols: 1,
+    provider_id: 1,
+    model: "opus",
+    prompt_fanout: "primary",
+    ...overrides,
+  };
+}
+
+describe("seedPanesFromGrid", () => {
+  it("1×1 becomes one agent pane, split cols", () => {
+    const { panes, split } = seedPanesFromGrid(gridSeed({ rows: 1, cols: 1 }));
+    expect(panes).toHaveLength(1);
+    expect(panes.every((p) => p.kind === "agent")).toBe(true);
+    expect(split).toBe("cols");
+  });
+
+  it("1×3 becomes 3 panes, split cols", () => {
+    const { panes, split } = seedPanesFromGrid(gridSeed({ rows: 1, cols: 3 }));
+    expect(panes).toHaveLength(3);
+    expect(split).toBe("cols");
+  });
+
+  it("3×1 becomes 3 panes, split rows", () => {
+    const { panes, split } = seedPanesFromGrid(gridSeed({ rows: 3, cols: 1 }));
+    expect(panes).toHaveLength(3);
+    expect(split).toBe("rows");
+  });
+
+  it("2×2 becomes 4 panes, split grid", () => {
+    const { panes, split } = seedPanesFromGrid(gridSeed({ rows: 2, cols: 2 }));
+    expect(panes).toHaveLength(4);
+    expect(split).toBe("grid");
+  });
+
+  it("4×4 clamps to exactly 8 panes (the cap buildPaneLayout enforces)", () => {
+    const { panes } = seedPanesFromGrid(gridSeed({ rows: 4, cols: 4 }));
+    expect(panes).toHaveLength(8);
+  });
+
+  it("copies provider_id and model onto every pane", () => {
+    const { panes } = seedPanesFromGrid(
+      gridSeed({ rows: 2, cols: 1, provider_id: 7, model: "sonnet" }),
+    );
+    for (const pane of panes) {
+      expect(pane.kind === "agent" && pane.providerId).toBe(7);
+      expect(pane.kind === "agent" && pane.model).toBe("sonnet");
+    }
+  });
+
+  it('prompt_fanout "primary" sets sendPrompt only on index 0', () => {
+    const { panes } = seedPanesFromGrid(
+      gridSeed({ rows: 1, cols: 3, prompt_fanout: "primary" }),
+    );
+    expect(panes.map((p) => p.kind === "agent" && p.sendPrompt)).toEqual([
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it('prompt_fanout "every" sets sendPrompt on every pane', () => {
+    const { panes } = seedPanesFromGrid(
+      gridSeed({ rows: 1, cols: 3, prompt_fanout: "every" }),
+    );
+    expect(panes.map((p) => p.kind === "agent" && p.sendPrompt)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it('prompt_fanout "none" sets sendPrompt on no pane', () => {
+    const { panes } = seedPanesFromGrid(
+      gridSeed({ rows: 1, cols: 3, prompt_fanout: "none" }),
+    );
+    expect(panes.map((p) => p.kind === "agent" && p.sendPrompt)).toEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// initialComposerStateFrom (task #35)
+// ---------------------------------------------------------------------------
+
+describe("initialComposerStateFrom", () => {
+  it("with layout: null is reference-free deep-equal to initialComposerState(catalog)", () => {
+    const catalog = [provider({ id: 1 })];
+    const fromLayoutNull = initialComposerStateFrom({ catalog, layout: null });
+    const fromDelegate = initialComposerState(catalog);
+    expect(fromLayoutNull).toEqual(fromDelegate);
+  });
+
+  it("with a layout mints ids p1..pn, selects p1, and marks the recipe custom", () => {
+    const catalog = [provider({ id: 1 })];
+    const { panes, split } = seedPanesFromGrid(gridSeed({ rows: 2, cols: 2 }));
+    const state = initialComposerStateFrom({ catalog, layout: { panes, split } });
+
+    expect(state.panes.map((p) => p.id)).toEqual(["p1", "p2", "p3", "p4"]);
+    expect(state.selectedId).toBe("p1");
+    expect(state.recipe).toBe("custom");
+    expect(state.split).toBe("grid");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// composerPlanToSpec (task #35)
+// ---------------------------------------------------------------------------
+
+function plan(overrides: Partial<LaunchComposerPlan> = {}): LaunchComposerPlan {
+  return {
+    panes: [],
+    split: "cols",
+    prompt: "",
+    projectId: 1,
+    profileId: null,
+    target: "embedded",
+    source: null,
+    ...overrides,
+  };
+}
+
+describe("composerPlanToSpec", () => {
+  it("an agent pane with model: null and permissionMode: '' emits neither key", () => {
+    const spec = composerPlanToSpec(
+      plan({
+        panes: [
+          {
+            id: "p1",
+            kind: "agent",
+            providerId: 1,
+            model: null,
+            permissionMode: "",
+            sendPrompt: true,
+          },
+        ],
+      }),
+      { cwd: "/repo" },
+    );
+    const pane = spec.panes[0]!;
+    expect(pane).not.toHaveProperty("model");
+    expect(pane).not.toHaveProperty("permissionMode");
+    expect(pane).toMatchObject({ providerId: 1, sendPrompt: true, cwd: "/repo" });
+  });
+
+  it("a shell pane with empty shell/command emits neither key", () => {
+    const spec = composerPlanToSpec(
+      plan({ panes: [{ id: "p1", kind: "shell", shell: "", command: "" }] }),
+      { cwd: "/repo" },
+    );
+    const pane = spec.panes[0]!;
+    expect(pane).not.toHaveProperty("shell");
+    expect(pane).not.toHaveProperty("command");
+    expect(pane).toMatchObject({ cwd: "/repo" });
+  });
+
+  it("cwd lands on every pane", () => {
+    const spec = composerPlanToSpec(
+      plan({
+        panes: [
+          {
+            id: "p1",
+            kind: "agent",
+            providerId: 1,
+            model: null,
+            permissionMode: "",
+            sendPrompt: false,
+          },
+          { id: "p2", kind: "shell", shell: "", command: "npm run dev" },
+        ],
+      }),
+      { cwd: "/repo" },
+    );
+    expect(spec.panes.every((p) => p.cwd === "/repo")).toBe(true);
+  });
+
+  it("profileName is set on agent panes only", () => {
+    const spec = composerPlanToSpec(
+      plan({
+        panes: [
+          {
+            id: "p1",
+            kind: "agent",
+            providerId: 1,
+            model: null,
+            permissionMode: "",
+            sendPrompt: false,
+          },
+          { id: "p2", kind: "shell", shell: "", command: "npm run dev" },
+        ],
+      }),
+      { cwd: "/repo", profileName: "work" },
+    );
+    expect(spec.panes[0]).toMatchObject({ profileName: "work" });
+    expect(spec.panes[1]).not.toHaveProperty("profileName");
+  });
+
+  it("projectId/source/prompt land on the spec", () => {
+    const spec = composerPlanToSpec(
+      plan({
+        projectId: 42,
+        source: { kind: "task", id: 7 },
+        prompt: "fix the bug",
+      }),
+      { cwd: "/repo" },
+    );
+    expect(spec.projectId).toBe(42);
+    expect(spec.source).toEqual({ kind: "task", id: 7 });
+    expect(spec.prompt).toBe("fix the bug");
+  });
+
+  it("promptFanout is never present on the spec", () => {
+    const spec = composerPlanToSpec(
+      plan({
+        panes: [
+          {
+            id: "p1",
+            kind: "agent",
+            providerId: 1,
+            model: null,
+            permissionMode: "",
+            sendPrompt: true,
+          },
+        ],
+      }),
+      { cwd: "/repo" },
+    );
+    expect(spec).not.toHaveProperty("promptFanout");
+  });
+
+  it("an empty plan.prompt omits `prompt` from the spec", () => {
+    const spec = composerPlanToSpec(plan({ prompt: "" }), { cwd: "/repo" });
+    expect(spec).not.toHaveProperty("prompt");
   });
 });

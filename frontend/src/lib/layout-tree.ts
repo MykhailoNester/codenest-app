@@ -69,12 +69,11 @@ export interface PaneLeaf {
    */
   permissionMode?: string;
   /**
-   * Command written to the PTY stdin after the shell is ready (e.g. a
-   * provider CLI invocation from `applyGridLayout`, or a shell pane's command
-   * from `applyPaneLayout`).  Held in the in-memory store for reference but
-   * intentionally stripped by `persistToStorage` before the layout is written
-   * to localStorage, so the command is NOT re-issued when the embedded
-   * Terminal page rehydrates on next open.
+   * Command written to the PTY stdin after the shell is ready (a shell
+   * pane's command from `applyPaneLayout`).  Held in the in-memory store for
+   * reference but intentionally stripped by `persistToStorage` before the
+   * layout is written to localStorage, so the command is NOT re-issued when
+   * the embedded Terminal page rehydrates on next open.
    */
   initCommand?: string;
   /**

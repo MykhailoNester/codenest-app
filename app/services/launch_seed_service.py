@@ -2,7 +2,8 @@
 
 Centralises prompt composition and seed building for the task-launch feature.
 The endpoint `GET /api/v1/launch/seed` returns a `LaunchSeed` that the
-frontend uses to pre-fill the Launch modal.
+frontend uses to pre-fill the launch composer
+(`components/launch/launch-composer-dialog.tsx`).
 
 Design D1: prompt composition lives here so that future consumers (slash
 commands, global shortcuts) share the same formatting without duplicating
@@ -62,7 +63,7 @@ async def build_sections(
 
         Project: {name} ({path})           ← only when project is non-null
 
-        Labels: {names}                    ← task only, off by default (D2)
+        Labels: {names}                    ← task only
 
     Each entry is present only when it has text — a task with no description
     yields no `description` section, never one with `text=""`. The guards
@@ -128,13 +129,15 @@ async def build_sections(
                     label="Labels",
                     text=labels_text,
                     tokens=estimate_tokens(labels_text),
-                    # D2: off by default — a default-on Labels row would
-                    # change `prompt` for every labelled task that exists
-                    # today, breaking the "all-enabled composition is
-                    # byte-identical to today's compose_prompt" invariant
-                    # and drifting every saved prompt_override written from
-                    # it. Flip once LaunchModal is deleted (see Follow-ups).
-                    default_on=False,
+                    # Deferral from #33's D2 comes due here (task #35): the
+                    # grid launch modal that read the flat `prompt` string as
+                    # its literal launch payload is deleted, and nothing else
+                    # reads `prompt` as a launch payload any more (the
+                    # composer's Prompt block is user-editable, seeded from
+                    # `sections` and never auto-submitted — #32). The
+                    # design's default is every row checked, so Labels joins
+                    # the rest.
+                    default_on=True,
                 )
             )
 

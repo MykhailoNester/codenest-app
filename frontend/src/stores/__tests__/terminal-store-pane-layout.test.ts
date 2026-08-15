@@ -2,8 +2,8 @@
  * terminal-store-pane-layout.test.ts
  *
  * Unit tests for `applyPaneLayout` — the ordered typed pane list's store-side
- * half of `buildPaneLayout` (`lib/launch.ts`). Mirrors the mocking shape of
- * `terminal-store-workspace.test.ts` (its `applyGridLayout` counterpart).
+ * half of `buildPaneLayout` (`lib/launch.ts`) — and `replaceEmptyLeaf`, the
+ * empty-pane retry both this and the deleted rows×cols grid launch path used.
  *
  * Covers:
  *  - agent + shell mix: exactly one PTY, opened with the shell pane's own args.
@@ -13,6 +13,7 @@
  *    job, not the store's — a second post would be a second `agent_runs` row).
  *  - three agent panes keep three distinct provider/model pairs, no PTY at all.
  *  - a failed shell pane becomes an empty leaf; siblings survive.
+ *  - `replaceEmptyLeaf` converts that empty leaf into a real PTY.
  *  - an over-cap spec throws before any IPC or state change.
  *  - persistToStorage strips initCommand/seed but keeps kind/providerId/model/
  *    permissionMode.
@@ -241,6 +242,40 @@ describe("applyPaneLayout", () => {
     expect(empty?.initCommand).toBe("npm run dev\n");
     expect(real).toBeDefined();
     expect(real?.terminalId).toMatch(/^pty-/);
+  });
+
+  it("replaceEmptyLeaf converts an empty leaf to a real PTY and clears the empty flag", async () => {
+    // Built on the same failure the previous test produces: a rejected
+    // shell pane becomes an empty leaf that still deserves a working retry
+    // (moved here from the deleted `terminal-store-workspace.test.ts`, whose
+    // whole suite otherwise only exercised the deleted grid launch path).
+    openTerminalMock.mockImplementationOnce(async () => {
+      throw new Error("no such directory");
+    });
+    const spec = makeSpec([
+      { kind: "shell", cwd: "/missing", command: "npm run dev" },
+    ]);
+    await useTerminalStore.getState().applyPaneLayout(spec);
+
+    const leaves = collectLeaves(useTerminalStore.getState().tabs[0]!.layout);
+    const emptyLeaf = leaves.find((l) => l.empty === true);
+    expect(emptyLeaf).toBeDefined();
+    const emptyLeafId = emptyLeaf!.terminalId;
+    openTerminalMock.mockClear();
+
+    await useTerminalStore.getState().replaceEmptyLeaf(emptyLeafId, {
+      cwd: "/new/cwd",
+      initCommand: "new-cmd\n",
+    });
+
+    expect(openTerminalMock).toHaveBeenCalledTimes(1);
+    expect(openTerminalMock).toHaveBeenCalledWith({ cwd: "/new/cwd" });
+
+    const updatedLeaves = collectLeaves(
+      useTerminalStore.getState().tabs[0]!.layout,
+    );
+    expect(updatedLeaves.find((l) => l.terminalId === emptyLeafId)).toBeUndefined();
+    expect(updatedLeaves.filter((l) => !l.empty)).toHaveLength(1);
   });
 
   it("an over-cap spec throws RangeError, opens no PTY and adds no tab", async () => {

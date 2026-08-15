@@ -317,7 +317,10 @@ class LaunchSeed(BaseModel):
     source: LaunchSeedSource
     project: LaunchSeedProject | None = None
     prompt: str  # == "\n\n".join(s.text for s in sections if s.default_on).
-    # Kept for LaunchModal, which has no section UI; delete with it.
+    # The flat projection of the `default_on` sections below, for a consumer
+    # with no section UI of its own — the frontend still passes it as the
+    # launch composer's `initialPrompt` for the never-observed-empty-sections
+    # case (`test_prompt_is_the_join_of_default_on_sections` pins the join).
     sections: list[LaunchPromptSection] = []
     provider_id: int
     model: str | None = None

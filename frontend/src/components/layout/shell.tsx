@@ -12,7 +12,7 @@ import { OmniBar } from "../omni-bar";
 import { NotificationBell } from "../notification-bell";
 import { ScreenshotButton } from "../screenshot/screenshot-button";
 import { Icon } from "../icon";
-import { LaunchModal } from "../launch/launch-modal";
+import { LaunchComposerDialog } from "../launch/launch-composer-dialog";
 import { useActiveSessionCounts } from "../../lib/api";
 import { NAV_ITEMS } from "../../lib/nav-items";
 import { OMNI_EVENT_OPEN_LAUNCH } from "../../lib/omni-commands";
@@ -127,8 +127,18 @@ export function Shell({
         )}
       </main>
 
-      {/* Shell-level Launch modal — available on every page. */}
-      <LaunchModal open={launchOpen} onClose={closeLaunch} />
+      {/* Shell-level Launch dialog — available on every page. Mounted only
+          while open: the composer runs useProjects/useLookups/
+          useLaunchPresets and an agent-catalog load() on mount, and its
+          state is mount-scoped, so a second open must be a fresh dialog. */}
+      {launchOpen && (
+        <LaunchComposerDialog
+          open
+          onClose={closeLaunch}
+          source={null}
+          seed={null}
+        />
+      )}
     </div>
   );
 }

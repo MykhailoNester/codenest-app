@@ -18,23 +18,19 @@ import { collectLeaves, paneKind } from "../lib/layout-tree";
 import { recordAgentExitedAndWait } from "../lib/agent-run-telemetry";
 import { useAgentSessionStore } from "../stores/agent-session-store";
 import * as pendingLaunchStore from "../stores/pending-launch-store";
-import type { AnyLaunchSpec } from "../stores/pending-launch-store";
-import { isPaneLaunchSpec } from "../lib/launch";
+import type { PaneLaunchSpec } from "../lib/launch";
 import styles from "./terminal-window-root.module.css";
 import { listen } from "@tauri-apps/api/event";
 
 /**
- * Apply either launch shape to this window's terminal store — the popout's
- * half of the branch `App.tsx`'s embedded consume effect also makes. Reads
- * the store fresh via `getState()` (the same pattern `handleCloseTab` below
+ * Apply a launch spec to this window's terminal store — the popout's half
+ * of the effect `App.tsx`'s embedded consume effect also makes. Reads the
+ * store fresh via `getState()` (the same pattern `handleCloseTab` below
  * uses) rather than closing over a hook value, so both call sites below (the
  * mount consume and the `subscribe` callback) can share one implementation.
  */
-function applySpec(spec: AnyLaunchSpec): Promise<unknown> {
-  const store = useTerminalStore.getState();
-  return isPaneLaunchSpec(spec)
-    ? store.applyPaneLayout(spec)
-    : store.applyGridLayout(spec);
+function applySpec(spec: PaneLaunchSpec): Promise<unknown> {
+  return useTerminalStore.getState().applyPaneLayout(spec);
 }
 
 /**

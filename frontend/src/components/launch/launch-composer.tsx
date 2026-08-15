@@ -6,11 +6,10 @@
  * view/edit pair and the session block.
  *
  * Fires `onLaunch(plan)` with the composed `LaunchComposerPlan` and stops
- * there — no `LaunchSpec`, no PTY, no navigation (that is the wiring
- * ticket's job; see `lib/launch-composer.ts`'s doc comment on D11). Nothing
- * in the app imports this component yet: `LaunchModal`
- * (`components/launch/launch-modal.tsx`) remains the only dialog any entry
- * point opens.
+ * there — no `PaneLaunchSpec`, no PTY, no navigation. That wiring —
+ * `lib/launch-composer.ts`'s `composerPlanToSpec` plus `applyPaneLayout` /
+ * the popout queue — lives in `components/launch/launch-composer-dialog.tsx`,
+ * the wrapper every launch entry point in the app now mounts (task #35).
  *
  * Every selector here (`LpSelect`, `components/launch/lp-popover.tsx`) opens
  * a portalled, fixed-position menu rather than an in-flow absolute one,
@@ -34,17 +33,16 @@ import {
   useLookups,
   useLaunchPresets,
   useCreateLaunchPreset,
+  useDeleteLaunchPreset,
   SidecarError,
 } from "../../lib/api";
-import type {
-  LaunchTarget,
-  LaunchPromptSection,
-} from "../../lib/launch-seed";
+import type { LaunchTarget, LaunchPromptSection } from "../../lib/launch-seed";
 import { useAgentCatalogStore } from "../../stores/agent-catalog-store";
 import { useEscapeKey } from "../../hooks/use-escape-key";
 import { Icon } from "../icon";
 import { LpSelect, type LpSelectItem } from "./lp-popover";
 import { LIVE_PERMISSION_MODES } from "../../lib/permission-modes";
+import { MAX_LAUNCH_PANES } from "../../lib/launch";
 import {
   RECIPES,
   composeSectionPrompt,
@@ -53,7 +51,7 @@ import {
   defaultEnabledSectionIds,
   describePreset,
   formatTokenTotal,
-  initialComposerState,
+  initialComposerStateFrom,
   paneLabel,
   presetToDrafts,
   previewGridStyle,
@@ -67,6 +65,7 @@ import {
   type ComposerPane,
   type LaunchComposerPlan,
   type LaunchComposerSource,
+  type PaneDraft,
   type ShellPane,
   type SplitMode,
 } from "../../lib/launch-composer";
@@ -410,6 +409,15 @@ export interface LaunchComposerProps {
   /** Seeded prompt sections; read once at mount (see D7). Empty from the top
    *  bar, where there is no ticket. */
   sections?: readonly LaunchPromptSection[];
+  /** Seeded profile id; read once at mount (`useState` initialiser). Absent
+   *  or null → CLI default / no profile. */
+  initialProfileId?: number | null;
+  /** Seeded target; read once at mount. Defaults to `"embedded"`. */
+  initialTarget?: LaunchTarget;
+  /** A pre-built pane list (a seed's `rows`×`cols`, or a restored draft) to
+   *  seed the reducer with instead of the `devpair` recipe. `null` — the
+   *  default — is today's cold-start behaviour. Read once at mount. */
+  initialLayout?: { panes: PaneDraft[]; split: SplitMode } | null;
   /** Fired by the Launch button and by Cmd/Ctrl+Enter. */
   onLaunch: (plan: LaunchComposerPlan) => void;
 }
@@ -421,6 +429,9 @@ export function LaunchComposer({
   initialPrompt = "",
   initialProjectId = null,
   sections = NO_SECTIONS,
+  initialProfileId = null,
+  initialTarget = "embedded",
+  initialLayout = null,
   onLaunch,
 }: LaunchComposerProps): ReactElement | null {
   const providers = useAgentCatalogStore((s) => s.providers);
@@ -457,11 +468,12 @@ export function LaunchComposer({
 
   const { data: presets = [] } = useLaunchPresets();
   const createPreset = useCreateLaunchPreset();
+  const deletePreset = useDeleteLaunchPreset();
 
   const [state, dispatch] = useReducer(
     composerReducer,
-    catalog,
-    initialComposerState,
+    { catalog, layout: initialLayout },
+    initialComposerStateFrom,
   );
 
   const hasSections = sections.length > 0;
@@ -470,14 +482,17 @@ export function LaunchComposer({
   );
   const [prompt, setPrompt] = useState(() =>
     sections.length > 0
-      ? composeSectionPrompt(sections, new Set(defaultEnabledSectionIds(sections)))
+      ? composeSectionPrompt(
+          sections,
+          new Set(defaultEnabledSectionIds(sections)),
+        )
       : initialPrompt,
   );
   const [promptEditing, setPromptEditing] = useState(false);
   const [promptDirty, setPromptDirty] = useState(false);
   const [projectId, setProjectId] = useState<number | null>(initialProjectId);
-  const [profileId, setProfileId] = useState<number | null>(null);
-  const [target, setTarget] = useState<LaunchTarget>("embedded");
+  const [profileId, setProfileId] = useState<number | null>(initialProfileId);
+  const [target, setTarget] = useState<LaunchTarget>(initialTarget);
 
   const [saveBarOpen, setSaveBarOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
@@ -491,8 +506,10 @@ export function LaunchComposer({
   const summary = summarizeComposer(state);
   const hasAgentPane = state.panes.some((p) => p.kind === "agent");
   const unresolvedIds = unresolvedPaneIds(state.panes, catalog);
+  const overPaneCap = state.panes.length > MAX_LAUNCH_PANES;
   const canLaunch =
     state.panes.length > 0 &&
+    !overPaneCap &&
     projectId !== null &&
     !(hasAgentPane && catalog.length === 0) &&
     unresolvedIds.length === 0;
@@ -508,7 +525,8 @@ export function LaunchComposer({
     if (saveName.trim() === "") return "Name the preset first";
     if (projectId === null)
       return "Pick a project with a path to save a preset";
-    if (!hasAgentPane) return "A saved preset needs at least one agent pane";
+    if (!hasAgentPane)
+      return "A saved preset needs at least one agent pane (shell-only presets aren't storable yet)";
     if (state.panes.length > 8) return "A preset can hold at most 8 panes";
     if (presetPanes === null)
       return "A pane uses a provider that no longer exists";
@@ -676,34 +694,70 @@ export function LaunchComposer({
                     <span>{r.desc}</span>
                   </button>
                 ))}
-                {presets.map((p) => (
-                  <button
-                    key={`preset:${p.id}`}
-                    type="button"
-                    className={`lp-recipe${state.recipe === `preset:${p.id}` ? " is-on" : ""}`}
-                    onClick={() =>
-                      dispatch({
-                        type: "applyPreset",
-                        presetId: p.id,
-                        ...presetToDrafts(p),
-                      })
-                    }
-                  >
-                    <span aria-hidden="true">☆</span>
-                    <b>{p.name}</b>
-                    <span>{describePreset(p)}</span>
-                    {p.unresolved.length > 0 ? (
-                      <span
-                        className="lp-recipe__warn"
-                        title={`Missing or disabled provider: ${p.unresolved
-                          .map((u) => `#${u.provider_id} (${u.reason})`)
-                          .join(", ")}`}
+                {presets.map((p) => {
+                  const applyThisPreset = (): void =>
+                    dispatch({
+                      type: "applyPreset",
+                      presetId: p.id,
+                      ...presetToDrafts(p),
+                    });
+                  return (
+                    // A saved preset chip is no longer a bare `<button>`: it
+                    // now nests a real `<button>` for delete (below), and a
+                    // `<button>` cannot contain another interactive control
+                    // (the same nesting fix `PanePreview` above already
+                    // documents for panes). `role="button"` + a matching
+                    // `onKeyDown` keeps it keyboard-operable.
+                    <div
+                      key={`preset:${p.id}`}
+                      role="button"
+                      tabIndex={0}
+                      className={`lp-recipe${state.recipe === `preset:${p.id}` ? " is-on" : ""}`}
+                      onClick={applyThisPreset}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        e.preventDefault();
+                        applyThisPreset();
+                      }}
+                    >
+                      <span aria-hidden="true">☆</span>
+                      <b>{p.name}</b>
+                      <span>{describePreset(p)}</span>
+                      {p.unresolved.length > 0 ? (
+                        <span
+                          className="lp-recipe__warn"
+                          title={`Missing or disabled provider: ${p.unresolved
+                            .map((u) => `#${u.provider_id} (${u.reason})`)
+                            .join(", ")}`}
+                        >
+                          ⚠ unresolved
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="lp-recipe__x"
+                        aria-label={`Delete preset ${p.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deletePreset
+                            .mutateAsync(p.id)
+                            .catch(() => undefined);
+                        }}
+                        onKeyDown={(e) => {
+                          // Without this, Enter/Space bubbles to the outer
+                          // `role="button"` div's onKeyDown, which calls
+                          // `applyThisPreset()` instead of deleting — and
+                          // that handler's `preventDefault()` suppresses
+                          // this button's own native Enter/Space click.
+                          if (e.key !== "Enter" && e.key !== " ") return;
+                          e.stopPropagation();
+                        }}
                       >
-                        ⚠ unresolved
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
+                        <span aria-hidden="true">✕</span>
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </section>
 
@@ -854,7 +908,8 @@ export function LaunchComposer({
                     setPrompt(next);
                     if (hasSections) {
                       setPromptDirty(
-                        next !== composeSectionPrompt(sections, enabledSections),
+                        next !==
+                          composeSectionPrompt(sections, enabledSections),
                       );
                     }
                   }}
@@ -903,7 +958,9 @@ export function LaunchComposer({
                 <div className="lp-h lp-h--row">
                   <span>Ticket context</span>
                   <span className="lp-h__meta tabular">
-                    {formatTokenTotal(sectionTokenTotal(sections, enabledSections))}
+                    {formatTokenTotal(
+                      sectionTokenTotal(sections, enabledSections),
+                    )}
                   </span>
                 </div>
                 <div className={`lp-ctx${promptDirty ? " is-locked" : ""}`}>
@@ -928,7 +985,9 @@ export function LaunchComposer({
                 </div>
                 {promptDirty ? (
                   <div className="lp-ctx__note">
-                    <span className="lp-h__meta">Prompt edited — toggles paused</span>
+                    <span className="lp-h__meta">
+                      Prompt edited — toggles paused
+                    </span>
                     <button
                       type="button"
                       className="lp-ghost"
@@ -1092,11 +1151,13 @@ export function LaunchComposer({
               title={
                 canLaunch
                   ? undefined
-                  : projectId === null
-                    ? "Pick a project with a path to launch"
-                    : hasAgentPane && catalog.length === 0
-                      ? "Add a provider in Settings to launch an agent pane"
-                      : "A pane uses a provider that no longer exists — pick another"
+                  : overPaneCap
+                    ? `A launch can hold at most ${MAX_LAUNCH_PANES} panes — remove one`
+                    : projectId === null
+                      ? "Pick a project with a path to launch"
+                      : hasAgentPane && catalog.length === 0
+                        ? "Add a provider in Settings to launch an agent pane"
+                        : "A pane uses a provider that no longer exists — pick another"
               }
             >
               <Icon name="zap" size={13} />
