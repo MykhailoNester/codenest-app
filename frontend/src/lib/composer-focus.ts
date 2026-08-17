@@ -33,15 +33,12 @@
  *
  * This module imports nothing from `stores/` or `lib/api`/`lib/ipc`: it is a
  * DOM-only leaf so it cannot add an edge to the module graph that could form
- * an import cycle.
+ * an import cycle. Its one import, `composer-editor-layout`, is another such
+ * leaf: the editor's geometry lives there so the box height, the overlay and
+ * the row counter cannot disagree about the same measurement.
  */
 
-/** Mirrors `.editorTextarea { max-height: 264px }` in
- * `agent-composer.module.css` — the auto-grow clamp. Kept as a literal here
- * (moved from `agent-composer.tsx`) rather than read from CSS; the two must be
- * kept in sync by hand. Raised 240 -> 264 when the persistent `.wire` strip
- * became the `{}` popover and freed that vertical space for the editor. */
-export const COMPOSER_EDITOR_MAX_HEIGHT_PX = 264;
+import { resizeComposerEditor } from "./composer-editor-layout";
 
 /** The attribute `AgentComposer` stamps on its own textarea, distinct from
  * the valueless `data-agent-composer` presence guard two `closest()` calls
@@ -61,15 +58,6 @@ export function findComposerEditor(paneId: string): HTMLTextAreaElement | null {
     if (el.dataset.composerPaneId === paneId) return el;
   }
   return null;
-}
-
-/** The auto-grow measurement: collapse to content height, then reveal, so a
- * shrink is reflected and not just a growth. Shared by every write path — the
- * user's own typing does this synchronously, and a programmatic write does it
- * inside the frame below. */
-export function resizeComposerEditor(el: HTMLTextAreaElement): void {
-  el.style.height = "auto";
-  el.style.height = `${Math.min(el.scrollHeight, COMPOSER_EDITOR_MAX_HEIGHT_PX)}px`;
 }
 
 /** One pending request per pane: an explicit caret set by a call that knows

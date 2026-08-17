@@ -20,5 +20,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/**/__tests__/**/*.test.ts", "src/**/__tests__/**/*.test.tsx"],
+    // Fills jsdom's layout-shaped gaps (see the file) so a component that
+    // observes its own box on mount is testable without every one of its test
+    // files hand-rolling the same stub.
+    setupFiles: ["src/test-setup.ts"],
   },
 });
