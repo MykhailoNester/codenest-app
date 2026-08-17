@@ -208,10 +208,16 @@
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.07);
 }
 
+/* The bottom padding is `.gut`'s reserved strip, not breathing room: the
+   counter is absolutely positioned over this box, so anything laid out under
+   it would render behind the text. Keeping the strip in the padding is what
+   lets a full draft's last row stay readable. `min-height` is the sum of the
+   parts (8 + `.editorTextarea`'s 48 + 20), so the empty box does not jump on
+   the first keystroke. */
 .editorStack {
   position: relative;
-  padding: 8px 10px;
-  min-height: 64px;
+  padding: 8px 10px 20px;
+  min-height: 76px;
 }
 
 .editorOverlay,
@@ -227,9 +233,16 @@
   border: 0;
 }
 
+/* Width and height come from `syncComposerOverlay`, inline off the textarea's
+   own `clientWidth`/`clientHeight`, not from `right`/`bottom` insets — for the
+   same reason `.editorMirror` is width-matched below: past `max-height` the
+   textarea grows a scrollbar that narrows its own line box, and an
+   inset-positioned overlay would keep wrapping at the wider measure and paint
+   the draft a line further off with every wrapped row. */
 .editorOverlay {
   position: absolute;
-  inset: 8px 10px;
+  top: 8px;
+  left: 10px;
   color: var(--fg-1);
   pointer-events: none;
   overflow: hidden;
@@ -275,10 +288,11 @@
   overflow-y: auto;
 }
 
+/* Sits inside `.editorStack`'s reserved bottom padding — see that rule. */
 .gut {
   position: absolute;
   right: 9px;
-  bottom: 5px;
+  bottom: 4px;
   font-size: 9.5px;
   color: var(--fg-4);
   font-family: var(--font-mono);

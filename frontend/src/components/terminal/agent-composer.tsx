@@ -84,7 +84,13 @@ import {
 import { caretAnchor } from "../../lib/caret-anchor";
 import { slashRowToSuggest, mentionRowToSuggest, type SuggestRow } from "../../lib/composer-menu";
 import { SuggestPanel, MentionSourceProbe } from "./composer-suggest";
-import { focusComposerAt, resizeComposerEditor } from "../../lib/composer-focus";
+import { focusComposerAt } from "../../lib/composer-focus";
+import {
+  composerRowCount,
+  layoutComposerEditor,
+  resizeComposerEditor,
+  syncComposerOverlay,
+} from "../../lib/composer-editor-layout";
 import {
   MAIN_VIEW,
   parseViewKey,
@@ -708,6 +714,14 @@ export function AgentComposer({
   const markerRef = useRef<HTMLSpanElement>(null);
   const stackRef = useRef<HTMLDivElement>(null);
 
+  // Rows the draft occupies on screen, for the gutter counter. State rather
+  // than a render-time expression because it is a *measurement*: the count the
+  // user reads has to be the one the box was just laid out to, which is only
+  // knowable after layout. Seeded from the logical line count so the first
+  // paint is never blank and a jsdom render (where nothing is measurable)
+  // still reports something true.
+  const [rowCount, setRowCount] = useState(() => composerRowCount(0, draft));
+
   // Seeded from the mount-time draft, not "": a composer that remounts with a
   // surviving draft (session restart, a sibling pane closing — see
   // `agent-pane.tsx`'s unmount cleanup) must not read as an external change
@@ -747,7 +761,6 @@ export function AgentComposer({
   // exactly when it is wanted.
   const sessionEnded = status === "exited";
   const live = !sessionEnded;
-  const lineCount = draft.length === 0 ? 0 : draft.split("\n").length;
 
   // ── Slash-command / `@`-mention detection ────────────────────────────────
   const trigger = useMemo(() => detectTrigger(draft, caret), [draft, caret]);
@@ -816,6 +829,41 @@ export function AgentComposer({
     setPrevMenuRows(menuRows);
     if (activeIndex !== 0) setActiveIndex(0);
   }
+
+  // ── Editor layout: box height, overlay alignment, row count ──────────────
+  //
+  // One layout effect owns all three because they are one measurement (see
+  // `composer-editor-layout.ts`). It runs on every draft change, which is the
+  // point: the overlay is a React-rendered mirror whose child list is rewritten
+  // on each keystroke, and a re-render can drop its scroll offset with no
+  // scroll event to put it back — that is the bug where the draft is intact,
+  // the caret is right, and the box paints blank. Re-syncing here, after the
+  // render that caused it, closes that window by construction rather than
+  // hoping `onScroll` fires.
+  //
+  // `useLayoutEffect`, not `useEffect`: it both reads geometry and writes it
+  // back, so it has to land before the browser paints or the user sees one
+  // frame of the stale box.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    setRowCount(layoutComposerEditor(textarea, overlayRef.current, draft));
+  }, [draft]);
+
+  // A pane resize rewraps the draft without changing it, so the effect above
+  // cannot see it: the box needs a different height and the overlay a
+  // different width, and the row count changes with them. Observing the
+  // textarea covers a pane split, a window resize and the dock opening or
+  // closing without any of them having to be enumerated.
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const ro = new ResizeObserver(() => {
+      setRowCount(layoutComposerEditor(textarea, overlayRef.current, draft));
+    });
+    ro.observe(textarea);
+    return () => ro.disconnect();
+  }, [draft]);
 
   // Caret-coordinate mirror (Design decision 8/9): measured only while a menu
   // is open, so it costs nothing in the normal case.
@@ -975,8 +1023,11 @@ export function AgentComposer({
     if (result.outcome.kind === "ok") {
       setDraft(leafId, "");
       setCaret(0);
-      const el = textareaRef.current;
-      if (el) el.style.height = "auto";
+      // The box follows the draft, so clearing it is enough — the layout
+      // effect shrinks it back on the render that empties the textarea. The
+      // former `style.height = "auto"` here wrote a height the effect then
+      // overwrote anyway, and left the box one frame taller than its content
+      // in between.
     }
   }
 
@@ -1094,9 +1145,11 @@ export function AgentComposer({
     for (const target of targets) {
       useAgentSessionStore.getState().markSendStart(target, composedText);
     }
+    // No height reset here: `send` clears the draft asynchronously (it awaits
+    // every `agentSend` first), and the layout effect shrinks the box on the
+    // render that clear produces. Writing a height now would only make the box
+    // collapse *before* the text leaves it.
     void send(leafId);
-    const el = textareaRef.current;
-    if (el) el.style.height = "auto";
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -1459,8 +1512,10 @@ export function AgentComposer({
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={handleKeyDown}
             onScroll={(e) => {
+              // Still needed alongside the layout effect above: a wheel or
+              // drag scroll moves the textarea without changing the draft.
               if (overlayRef.current) {
-                overlayRef.current.scrollTop = e.currentTarget.scrollTop;
+                syncComposerOverlay(e.currentTarget, overlayRef.current);
               }
             }}
             onDragOver={handleDragOver}
@@ -1473,7 +1528,8 @@ export function AgentComposer({
             autoComplete="off"
           />
           <span className={styles.gut}>
-            {lineCount} lines · {draft.length} chars
+            {rowCount} {rowCount === 1 ? "line" : "lines"} · {draft.length}{" "}
+            {draft.length === 1 ? "char" : "chars"}
           </span>
           {dragCount !== null ? (
             <div className={styles.dropzone}>

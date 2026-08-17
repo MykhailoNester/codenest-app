@@ -4,13 +4,11 @@
 // directly, against bare textareas appended to `document.body` — no React.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { focusComposerAt, findComposerEditor, COMPOSER_PANE_ATTR } from "../composer-focus";
 import {
-  focusComposerAt,
-  findComposerEditor,
   resizeComposerEditor,
-  COMPOSER_PANE_ATTR,
   COMPOSER_EDITOR_MAX_HEIGHT_PX,
-} from "../composer-focus";
+} from "../composer-editor-layout";
 
 // A *deferring* rAF stub, not a synchronous one: a synchronous stub would run
 // the restore before the caller's DOM write is visible, which would let a
