@@ -157,19 +157,35 @@ export interface ConversationState {
    */
   startedAt: number | null;
   /**
-   * Token accounting from the newest `result` frame — the only frame that
-   * reports it. `contextTokens` is what the turn actually sent (fresh input plus
-   * both cache halves, matching how the CLI itself counts context);
-   * `contextWindow` comes from `modelUsage[<model>].contextWindow` and is `null`
-   * when the frame carries no entry for the running model, in which case the
-   * strip shows tokens without a percentage rather than inventing a denominator.
-   * `null` overall until the first turn completes.
+   * Live context occupancy, from the newest `assistant` frame's own
+   * `message.usage`: `contextTokens` is fresh input plus both cache halves,
+   * i.e. the whole prompt that one API call sent. `null` until an assistant
+   * message reports usage.
+   *
+   * **Deliberately not the `result` frame's `usage` (#39).** That one is the
+   * session *lifetime* aggregate — the same scope as the `total_cost_usd`
+   * beside it — and since every turn re-reads the whole cache, summing its
+   * three input fields climbs past the context window within a handful of
+   * turns; the ticket was filed on a strip reading `2181k/1000k`.
+   * `agent_service.py`'s `_read_last_turn_usage` already defines the *shell*
+   * pane HUD's context off this same per-assistant-message field and documents
+   * the same summed-vs-overwritten distinction, so this keeps the two panes
+   * honest in the same terms.
    */
   usage: {
     contextTokens: number;
-    contextWindow: number | null;
     outputTokens: number | null;
   } | null;
+  /**
+   * The running model's context window, from a `result` frame's
+   * `modelUsage[<model>].contextWindow`. A property of the model rather than of
+   * any one call, which is why it sits beside `usage` instead of inside it —
+   * and why it survives every later frame that names no window. `null` until a
+   * `result` names one for the running model (a multi-model turn names none), in
+   * which case the strip shows tokens without a percentage rather than
+   * inventing a denominator.
+   */
+  contextWindow: number | null;
   exitCode: number | null;
   /** Every `Workflow`-tool orchestration this pane's session has launched —
    *  see the orchestration types and `applySystem`'s four `task_*` branches
@@ -194,6 +210,7 @@ export function emptyConversation(): ConversationState {
     lastResult: null,
     startedAt: null,
     usage: null,
+    contextWindow: null,
     exitCode: null,
     orchestrations: [],
   };
@@ -974,13 +991,51 @@ function applyAssistantOrToolUse(
   now: number,
 ): ConversationState {
   const rec = asRecord(raw);
-  const content = asArray(asRecord(rec?.["message"])?.["content"]) ?? [];
+  const message = asRecord(rec?.["message"]);
+  const content = asArray(message?.["content"]) ?? [];
   const blocks = blocksFromAssistantContent(content, now);
   // The assistant frame always replaces the streaming scratch buffer with
   // its real text (Design decision 6) — closing it here, before appending,
   // means a following frame never doubles up on already-rendered text.
-  const closed: ConversationState = { ...state, streaming: false, streamText: "" };
+  const closed: ConversationState = {
+    ...state,
+    streaming: false,
+    streamText: "",
+    usage: readAssistantUsage(message) ?? state.usage,
+  };
   return appendAssistantBlocks(closed, blocks, now);
+}
+
+/**
+ * Live context occupancy out of one `assistant` frame's `message.usage`, or
+ * `undefined` when the frame carries none (the caller then keeps the previous
+ * figures rather than blanking the strip mid-turn).
+ *
+ * This is the *per-API-call* prompt size: `input_tokens` is the fresh part and
+ * the two cache fields are the rest of the same prompt, so their sum is what
+ * that one call sent and cannot exceed the window. Contrast `result.usage`,
+ * whose identically-named fields are session lifetime totals — see the
+ * `usage` field's own comment and #39.
+ *
+ * `tool_use` frames are `type: "assistant"` upstream (`agent/frame.rs`
+ * `classify` splits them off by content block), so they carry usage too and
+ * are read here on the same path.
+ */
+function readAssistantUsage(
+  message: Record<string, unknown> | undefined,
+): ConversationState["usage"] | undefined {
+  const usage = asRecord(message?.["usage"]);
+  if (!usage) return undefined;
+  const input = asNumber(usage["input_tokens"]);
+  const cacheRead = asNumber(usage["cache_read_input_tokens"]);
+  const cacheCreate = asNumber(usage["cache_creation_input_tokens"]);
+  if (input === undefined && cacheRead === undefined && cacheCreate === undefined) {
+    return undefined;
+  }
+  return {
+    contextTokens: (input ?? 0) + (cacheRead ?? 0) + (cacheCreate ?? 0),
+    outputTokens: asNumber(usage["output_tokens"]) ?? null,
+  };
 }
 
 function applyToolResult(
@@ -1048,50 +1103,37 @@ function applyResult(state: ConversationState, raw: unknown): ConversationState 
       durationMs: asNumber(rec?.["duration_ms"]) ?? null,
       isError: asBool(rec?.["is_error"]) ?? false,
     },
-    usage: readResultUsage(rec, state.model) ?? state.usage,
+    // `usage` is deliberately not touched here: this frame's copy is the
+    // session lifetime aggregate, not live context (#39). Only the window —
+    // a property of the model — is worth taking, and only the `result` frame
+    // reports it.
+    contextWindow: readContextWindow(rec, state.model) ?? state.contextWindow,
   };
 }
 
 /**
- * Token accounting out of a `result` frame, or `undefined` when the frame
- * carries none (in which case the caller keeps the previous figures rather than
- * blanking the strip mid-session).
+ * The running model's context window out of a `result` frame's `modelUsage`,
+ * or `undefined` when the frame names none for it — in which case the caller
+ * keeps the window it already had rather than blanking the percentage.
  *
- * Shape verified against CLI 2.1.220:
- * `usage: {input_tokens, cache_creation_input_tokens, cache_read_input_tokens,
- * output_tokens}` and `modelUsage: {"<model>": {contextWindow, …}}`.
+ * Shape verified against CLI 2.1.220: `modelUsage: {"<model>":
+ * {contextWindow, …}}`. The sibling `usage: {input_tokens,
+ * cache_creation_input_tokens, cache_read_input_tokens, output_tokens}` is
+ * read past on purpose — see `applyResult`.
  */
-function readResultUsage(
+function readContextWindow(
   rec: Record<string, unknown> | undefined,
   model: string | null,
-): ConversationState["usage"] | undefined {
-  const usage = asRecord(rec?.["usage"]);
-  if (!usage) return undefined;
-  const input = asNumber(usage["input_tokens"]);
-  const cacheRead = asNumber(usage["cache_read_input_tokens"]);
-  const cacheCreate = asNumber(usage["cache_creation_input_tokens"]);
-  if (input === undefined && cacheRead === undefined && cacheCreate === undefined) {
-    return undefined;
-  }
-  const contextTokens = (input ?? 0) + (cacheRead ?? 0) + (cacheCreate ?? 0);
-
+): number | undefined {
+  const modelUsage = asRecord(rec?.["modelUsage"]);
+  if (!modelUsage) return undefined;
   // Prefer the entry for the model actually running; fall back to the sole
   // entry when there is exactly one, and to no window at all otherwise — a
   // multi-model turn has no single context window to report.
-  const modelUsage = asRecord(rec?.["modelUsage"]);
-  let window: number | null = null;
-  if (modelUsage) {
-    const named = model !== null ? asRecord(modelUsage[model]) : undefined;
-    const entries = Object.values(modelUsage);
-    const only = entries.length === 1 ? asRecord(entries[0]) : undefined;
-    window = asNumber((named ?? only)?.["contextWindow"]) ?? null;
-  }
-
-  return {
-    contextTokens,
-    contextWindow: window,
-    outputTokens: asNumber(usage["output_tokens"]) ?? null,
-  };
+  const named = model !== null ? asRecord(modelUsage[model]) : undefined;
+  const entries = Object.values(modelUsage);
+  const only = entries.length === 1 ? asRecord(entries[0]) : undefined;
+  return asNumber((named ?? only)?.["contextWindow"]);
 }
 
 function applyPermission(state: ConversationState, raw: unknown): ConversationState {

@@ -100,7 +100,8 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
   );
 
   if (state.usage !== null) {
-    const { contextTokens, contextWindow } = state.usage;
+    const { contextTokens } = state.usage;
+    const { contextWindow } = state;
     if (contextWindow !== null) {
       const pct = Math.min(100, Math.round((contextTokens / contextWindow) * 100));
       cells.push(
