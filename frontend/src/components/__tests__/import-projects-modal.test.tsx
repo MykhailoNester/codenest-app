@@ -3,17 +3,13 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { ImportProjectsModal } from "../import-projects-modal";
 import type { DiscoveryCandidate } from "../../lib/api";
 
-const {
-  mockScanMutate,
-  mockPickDirectory,
-  mockUseSystemInfo,
-  mockRichImportMutate,
-} = vi.hoisted(() => ({
-  mockScanMutate: vi.fn(),
-  mockPickDirectory: vi.fn(),
-  mockUseSystemInfo: vi.fn(),
-  mockRichImportMutate: vi.fn(),
-}));
+const { mockScanMutate, mockPickDirectory, mockRichImportMutate } = vi.hoisted(
+  () => ({
+    mockScanMutate: vi.fn(),
+    mockPickDirectory: vi.fn(),
+    mockRichImportMutate: vi.fn(),
+  }),
+);
 
 vi.mock("../../lib/ipc", () => ({
   pickDirectory: (...args: unknown[]) => mockPickDirectory(...args),
@@ -31,7 +27,6 @@ vi.mock("../../lib/api", () => ({
     isPending: false,
   }),
   useProfiles: () => ({ data: [] }),
-  useSystemInfo: () => mockUseSystemInfo(),
 }));
 
 /** The scan response queued for the *next* `mockScanMutate` call. */
@@ -62,6 +57,17 @@ function scanRootsOf(call: unknown[] | undefined): unknown {
   return vars?.roots;
 }
 
+/** Pick `path` as the scan root, then run the scan the user has to click. */
+async function pickAndScan(path: string): Promise<void> {
+  mockPickDirectory.mockResolvedValue(path);
+  await act(async () => {
+    fireEvent.click(screen.getByText("Pick folder..."));
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByText("Scan this folder"));
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   nextCandidates = [];
@@ -73,9 +79,6 @@ beforeEach(() => {
       opts?.onSuccess?.({ candidates: nextCandidates });
     },
   );
-  mockUseSystemInfo.mockReturnValue({
-    data: { home: "/Users/test", platform: "darwin" },
-  });
 });
 
 afterEach(() => {
@@ -83,61 +86,58 @@ afterEach(() => {
 });
 
 describe("ImportProjectsModal", () => {
-  it("auto-scans the home root from /api/v1/system/info on open", async () => {
-    await act(async () => {
-      render(<ImportProjectsModal onClose={noop} onImported={noop} />);
-    });
-
-    expect(mockScanMutate).toHaveBeenCalledTimes(1);
-    expect(mockScanMutate.mock.calls[0]?.[0]).toEqual({
-      roots: ["/Users/test"],
-      git_only: true,
-      max_depth: 4,
-    });
-  });
-
-  it("does not scan before the home root is known", async () => {
-    mockUseSystemInfo.mockReturnValue({ data: undefined });
-
+  it("scans nothing on open — no root, no home directory walk", async () => {
     await act(async () => {
       render(<ImportProjectsModal onClose={noop} onImported={noop} />);
     });
 
     expect(mockScanMutate).not.toHaveBeenCalled();
+    expect(screen.getByText(/No folder selected/)).toBeTruthy();
     expect(
-      (screen.getByText("Rescan") as HTMLButtonElement).disabled,
+      (screen.getByText("Scan this folder") as HTMLButtonElement).disabled,
     ).toBe(true);
   });
 
-  it("Pick folder... sets the scan root and scans that folder", async () => {
+  it("Pick folder... arms the root but does not scan it yet", async () => {
     await act(async () => {
       render(<ImportProjectsModal onClose={noop} onImported={noop} />);
     });
-    mockScanMutate.mockClear();
     mockPickDirectory.mockResolvedValue("/Users/test/Code");
 
     await act(async () => {
       fireEvent.click(screen.getByText("Pick folder..."));
     });
 
-    const lastCall = mockScanMutate.mock.calls.at(-1);
-    expect(lastCall?.[0]).toEqual({
+    expect(mockScanMutate).not.toHaveBeenCalled();
+    expect(screen.getByTitle("/Users/test/Code")).toBeTruthy();
+    expect(screen.getByText(/Ready to scan/)).toBeTruthy();
+    expect(
+      (screen.getByText("Scan this folder") as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("Scan this folder scans exactly the picked root", async () => {
+    await act(async () => {
+      render(<ImportProjectsModal onClose={noop} onImported={noop} />);
+    });
+
+    await pickAndScan("/Users/test/Code");
+
+    expect(mockScanMutate).toHaveBeenCalledTimes(1);
+    expect(mockScanMutate.mock.calls[0]?.[0]).toEqual({
       roots: ["/Users/test/Code"],
       git_only: true,
       max_depth: 4,
     });
-    expect(screen.getByTitle("/Users/test/Code")).toBeTruthy();
   });
 
-  it("Rescan re-scans the picked root, never the sidecar defaults", async () => {
+  it("Rescan re-scans the picked root, never a default root", async () => {
     await act(async () => {
       render(<ImportProjectsModal onClose={noop} onImported={noop} />);
     });
-    mockPickDirectory.mockResolvedValue("/Users/test/Code");
-    await act(async () => {
-      fireEvent.click(screen.getByText("Pick folder..."));
-    });
+    await pickAndScan("/Users/test/Code");
 
+    // The button becomes "Rescan" only once the current root has been scanned.
     await act(async () => {
       fireEvent.click(screen.getByText("Rescan"));
     });
@@ -149,17 +149,37 @@ describe("ImportProjectsModal", () => {
       max_depth: 4,
     });
     expect(
-      mockScanMutate.mock.calls.every((call) =>
-        Array.isArray(scanRootsOf(call)),
+      mockScanMutate.mock.calls.every(
+        (call) => scanRootsOf(call) === undefined || Array.isArray(scanRootsOf(call)),
       ),
     ).toBe(true);
   });
 
-  it("a manually added folder survives a rescan and stays selected", async () => {
-    nextCandidates = [repo("/Users/test/repo-a")];
+  it("picking a different root drops the previous results and re-arms the scan", async () => {
     await act(async () => {
       render(<ImportProjectsModal onClose={noop} onImported={noop} />);
     });
+    nextCandidates = [repo("/Users/test/Code/repo-a")];
+    await pickAndScan("/Users/test/Code");
+    expect(screen.getByText("/Users/test/Code/repo-a")).toBeTruthy();
+
+    mockScanMutate.mockClear();
+    mockPickDirectory.mockResolvedValue("/Users/test/Other");
+    await act(async () => {
+      fireEvent.click(screen.getByText("Pick folder..."));
+    });
+
+    expect(mockScanMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText("/Users/test/Code/repo-a")).toBeNull();
+    expect(screen.getByText("Scan this folder")).toBeTruthy();
+  });
+
+  it("a manually added folder survives a rescan and stays selected", async () => {
+    await act(async () => {
+      render(<ImportProjectsModal onClose={noop} onImported={noop} />);
+    });
+    nextCandidates = [repo("/Users/test/repo-a")];
+    await pickAndScan("/Users/test");
 
     mockPickDirectory.mockResolvedValue("/Users/test/notes");
     await act(async () => {
@@ -180,6 +200,10 @@ describe("ImportProjectsModal", () => {
     await act(async () => {
       render(<ImportProjectsModal onClose={noop} onImported={noop} />);
     });
+    mockPickDirectory.mockResolvedValue("/Users/test");
+    await act(async () => {
+      fireEvent.click(screen.getByText("Pick folder..."));
+    });
 
     mockPickDirectory.mockResolvedValue("/Users/test/repo-a");
     await act(async () => {
@@ -188,18 +212,24 @@ describe("ImportProjectsModal", () => {
 
     nextCandidates = [repo("/Users/test/repo-a")];
     await act(async () => {
-      fireEvent.click(screen.getByText("Rescan"));
+      fireEvent.click(screen.getByText("Scan this folder"));
     });
 
     expect(screen.getAllByText("/Users/test/repo-a")).toHaveLength(1);
     expect(screen.getByText("git")).toBeTruthy();
   });
 
-  it("shows the active scan root instead of the default-roots subtitle", async () => {
+  it("an unscanned root reads as unscanned, not as nothing-new-to-import", async () => {
     await act(async () => {
       render(<ImportProjectsModal onClose={noop} onImported={noop} />);
     });
+    mockPickDirectory.mockResolvedValue("/Users/test/Code");
+    await act(async () => {
+      fireEvent.click(screen.getByText("Pick folder..."));
+    });
 
-    expect(screen.queryByText(/Scanned common folders/)).toBeNull();
+    expect(screen.queryByText("Nothing new to import.")).toBeNull();
+    expect(screen.getByText("Nothing to import yet.")).toBeTruthy();
+    expect(screen.getByText(/Press "Scan this folder"/)).toBeTruthy();
   });
 });

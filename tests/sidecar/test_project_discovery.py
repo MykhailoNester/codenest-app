@@ -8,6 +8,8 @@ Two things are pinned here:
 2. **Import contract.** Bulk import skips duplicates by path, rejects
    non-absolute paths, and writes ``tech_stack`` from the supplied
    stack label.
+3. **Scan roots are the user's choice.** A scan needs an explicit, non-empty
+   root; there is no default root, and ``/`` and ``$HOME`` itself are refused.
 """
 
 from __future__ import annotations
@@ -268,6 +270,68 @@ def test_git_remote_none_for_worktree_and_missing(tmp_path: pathlib.Path) -> Non
     # Git repo with no remotes configured → None.
     plain = _make_repo(tmp_path, "plain", git=True)
     assert project_discovery_service._git_remote(plain) is None
+
+
+# ---------------------------------------------------------------------------
+# Scan roots are always the user's choice (#37)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("roots", [[], [""], ["   "]])
+def test_scan_requires_an_explicit_root(roots: list[str]) -> None:
+    # There is no default root and no fallback: a scan the user did not ask for
+    # is an error, not a walk of ~/Documents, ~/Code and friends.
+    with pytest.raises(ValueError, match="at least one root"):
+        project_discovery_service.scan(roots=roots)
+
+
+def test_scan_refuses_the_home_directory_itself(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = (tmp_path / "home").resolve()
+    _make_repo(home, "repo", git=True)
+    monkeypatch.setattr(project_discovery_service, "_home_dir", lambda: home)
+    with pytest.raises(ValueError, match="whole home directory"):
+        project_discovery_service.scan(roots=[home])
+
+
+def test_scan_refuses_the_filesystem_root() -> None:
+    with pytest.raises(ValueError, match="filesystem root"):
+        project_discovery_service.scan(roots=["/"])
+
+
+def test_scan_allows_a_folder_inside_home(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The rejection is the home dir itself, not everything under it — the whole
+    # point is that the user picks a folder, and that folder usually lives here.
+    home = (tmp_path / "home").resolve()
+    _make_repo(home / "Code", "repo", git=True)
+    monkeypatch.setattr(project_discovery_service, "_home_dir", lambda: home)
+    candidates = project_discovery_service.scan(roots=[home / "Code"])
+    assert [c["name"] for c in candidates] == ["repo"]
+
+
+@pytest.mark.asyncio
+async def test_router_scan_rejects_a_request_with_no_roots(
+    discovery_app: tuple[TestClient, aiosqlite.Connection],
+) -> None:
+    client, _ = discovery_app
+    assert client.post("/api/v1/projects/discovery/scan", json={}).status_code == 422
+    assert (
+        client.post("/api/v1/projects/discovery/scan", json={"roots": []}).status_code
+        == 422
+    )
+
+
+@pytest.mark.asyncio
+async def test_router_scan_rejects_the_filesystem_root(
+    discovery_app: tuple[TestClient, aiosqlite.Connection],
+) -> None:
+    client, _ = discovery_app
+    resp = client.post("/api/v1/projects/discovery/scan", json={"roots": ["/"]})
+    assert resp.status_code == 400
+    assert "filesystem root" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

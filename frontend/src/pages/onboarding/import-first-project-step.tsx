@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, type ReactElement } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import {
-  fetchSidecar,
   useScanProjects,
   useRichImportProjects,
   type DiscoveryCandidate,
@@ -40,14 +39,10 @@ export function ImportFirstProjectStep({
   // captures current candidates/selected without re-registering on every render.
   const doImportRef = useRef<() => Promise<void>>(async () => undefined);
 
-  // Seed root with home directory on first mount.
-  useEffect(() => {
-    fetchSidecar<{ home?: string }>("/api/v1/system/info")
-      .then((info) => {
-        if (info.home) setRootPath(info.home);
-      })
-      .catch(() => undefined);
-  }, []);
+  // The root is deliberately left empty. It used to be seeded with the
+  // sidecar's home directory, which made the first press of Scan walk the
+  // user's entire personal tree — the user chooses the folder, we never
+  // pre-fill one broad enough to read the whole disk.
 
   // Register a stable wrapper once; the wrapper delegates to doImportRef
   // so it always runs the latest version.
@@ -166,7 +161,7 @@ export function ImportFirstProjectStep({
             type="button"
             className={`${styles.btn} ${styles.btnPrimary}`}
             onClick={() => void runScan()}
-            disabled={scan.isPending}
+            disabled={scan.isPending || !rootPath.trim()}
           >
             {scan.isPending ? "⟳ Scanning…" : "⟲ Scan"}
           </button>
