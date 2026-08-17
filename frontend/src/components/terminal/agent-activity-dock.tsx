@@ -446,9 +446,12 @@ export function AgentActivityDock({
   onHighlightChange,
   onReturnFocus,
 }: AgentActivityDockProps): ReactElement | null {
-  // One interval, gated exactly as the metrics strip's own ticker is —
-  // nothing here ticks on a dead pane either, and the sub-agent/orchestration
-  // groups' elapsed figures ride this same tick rather than a second interval.
+  // One interval for the sub-agent/orchestration groups' elapsed figures,
+  // rather than a second interval per group. Gated on the session being alive
+  // rather than on a turn being in flight — deliberately looser than the
+  // metrics strip's own ticker, which times the turn (#40): an orchestration
+  // outlives the turn that launched it (see `activeOrchestrations`), so its row
+  // still has to count while the pane reads `idle`.
   const ticking = state.startedAt !== null && state.status !== "exited";
   const [, setTick] = useState(0);
   useEffect(() => {

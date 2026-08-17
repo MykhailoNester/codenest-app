@@ -14,6 +14,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { AgentSessionHud } from "../agent-session-hud";
 import {
+  appendUserTurn,
   applyFrame,
   emptyConversation,
   type ConversationState,
@@ -181,23 +182,62 @@ describe("AgentSessionHud", () => {
     ).toContain("1 awaiting approval");
   });
 
-  it("the elapsed cell ticks while the session runs", () => {
+  it("the elapsed cell ticks while a turn is in flight", () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
-    const state = applyFrame(emptyConversation(), frame("init", { model: "claude-opus-5" }), 1_000_000 - 1_000);
+    let state = applyFrame(
+      emptyConversation(),
+      frame("init", { model: "claude-opus-5" }),
+      1_000_000 - 600_000,
+    );
+    // The turn started a second ago; the session started ten minutes ago, and
+    // the cell must be reporting the former (#40).
+    state = appendUserTurn(state, "run the tests", 1_000_000 - 1_000);
 
     render(<AgentSessionHud state={state} cwd={undefined} />);
-    const before = screen
-      .getByTestId("agent-session-hud")
-      .querySelector('[data-cell="elapsed"]')?.textContent;
+    const strip = (): string | undefined =>
+      screen.getByTestId("agent-session-hud").querySelector('[data-cell="elapsed"]')
+        ?.textContent ?? undefined;
+    expect(strip()).toBe("1s");
 
     act(() => {
       vi.advanceTimersByTime(2_000);
     });
+    expect(strip()).toBe("3s");
+  });
 
-    const after = screen
-      .getByTestId("agent-session-hud")
-      .querySelector('[data-cell="elapsed"]')?.textContent;
-    expect(after).not.toBe(before);
+  it("the elapsed cell holds still on an idle pane, showing the last turn's duration (#40)", () => {
+    // The bug: this cell counted the session's age, so a pane sitting idle read
+    // `10m 14s` and kept climbing — a timer beside `idle` measuring nothing.
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    let state = applyFrame(
+      emptyConversation(),
+      frame("init", { model: "claude-opus-5" }),
+      1_000_000 - 600_000,
+    );
+    state = appendUserTurn(state, "run the tests", 1_000_000 - 90_000);
+    state = applyFrame(state, frame("result", { duration_ms: 42_000 }), 1_000_000 - 48_000);
+
+    render(<AgentSessionHud state={state} cwd={undefined} />);
+    const strip = (): string | undefined =>
+      screen.getByTestId("agent-session-hud").querySelector('[data-cell="elapsed"]')
+        ?.textContent ?? undefined;
+    expect(strip()).toBe("42s");
+
+    act(() => {
+      vi.advanceTimersByTime(120_000);
+    });
+    expect(strip()).toBe("42s");
+  });
+
+  it("shows no elapsed cell on an idle pane that has run nothing yet", () => {
+    // Honesty contract: before a first turn completes there is no duration to
+    // report, and `0s` would be a value no frame ever sent.
+    const state = applyFrame(emptyConversation(), frame("init", { model: "claude-opus-5" }), 1_000);
+    render(<AgentSessionHud state={state} cwd={undefined} />);
+    const strip = screen.getByTestId("agent-session-hud");
+    expect(strip.textContent).toContain("idle");
+    expect(strip.querySelector('[data-cell="elapsed"]')).toBeNull();
   });
 });

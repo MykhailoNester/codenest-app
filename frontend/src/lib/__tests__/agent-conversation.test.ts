@@ -591,6 +591,70 @@ describe("agent-conversation reducer", () => {
     expect(restarted.startedAt).toBe(9999);
   });
 
+  // #40 — the metrics line showed `idle … 10m 14s` and climbing, because the
+  // elapsed cell measured `startedAt` (the session's age). These pin the turn
+  // clock that replaced it: it runs only while a turn does, and what it freezes
+  // on is that turn's own duration.
+  it("the turn clock starts when a turn does and freezes on the result's duration (#40)", () => {
+    const sent = appendUserTurn(emptyConversation(), "run the tests", 10_000);
+    expect(sent.turnStartedAt).toBe(10_000);
+    expect(sent.lastTurnDurationMs).toBeNull();
+
+    // The CLI's own duration wins over anything this side could measure.
+    const done = applyFrame(sent, frame("result", { duration_ms: 2_300 }), 42_000);
+    expect(done.status).toBe("idle");
+    expect(done.turnStartedAt).toBeNull();
+    expect(done.lastTurnDurationMs).toBe(2_300);
+  });
+
+  it("a turn the CLI opened itself starts the clock too, and queued input does not restart it", () => {
+    const requesting = applyFrame(
+      emptyConversation(),
+      frame("system", { subtype: "status", status: "requesting" }),
+      3_000,
+    );
+    expect(requesting.turnStartedAt).toBe(3_000);
+
+    // Typing again mid-turn belongs to the turn already in flight.
+    const queued = appendUserTurn(requesting, "and lint", 8_000);
+    expect(queued.turnStartedAt).toBe(3_000);
+  });
+
+  it("a result with no duration_ms falls back to the wall time this side measured", () => {
+    const sent = appendUserTurn(emptyConversation(), "hi", 1_000);
+    const done = applyFrame(sent, frame("result", { is_error: false }), 4_500);
+    expect(done.lastTurnDurationMs).toBe(3_500);
+  });
+
+  it("a session killed mid-turn freezes on how long that turn did run", () => {
+    // No `result` frame ever arrives for an interrupted session, so the exit is
+    // the only place left to stop the clock.
+    const sent = appendUserTurn(emptyConversation(), "hi", 1_000);
+    const dead = applyFrame(sent, frame("exit", { exit_code: 143 }), 6_000);
+    expect(dead.status).toBe("exited");
+    expect(dead.turnStartedAt).toBeNull();
+    expect(dead.lastTurnDurationMs).toBe(5_000);
+
+    // An exit between turns leaves the last completed turn's figure alone.
+    const idle = applyFrame(
+      appendUserTurn(emptyConversation(), "hi", 1_000),
+      frame("result", { duration_ms: 900 }),
+      2_000,
+    );
+    expect(applyFrame(idle, frame("exit", { exit_code: 0 }), 9_000).lastTurnDurationMs).toBe(900);
+  });
+
+  it("a restart clears the dead session's turn clock", () => {
+    const done = applyFrame(
+      appendUserTurn(emptyConversation(), "hi", 1_000),
+      frame("result", { duration_ms: 900 }),
+      2_000,
+    );
+    const restarted = applyFrame(done, frame("init", { model: "m" }), 9_999);
+    expect(restarted.lastTurnDurationMs).toBeNull();
+    expect(restarted.turnStartedAt).toBeNull();
+  });
+
   it("a thinking_tokens system frame sets thinking and its token estimate", () => {
     // Captured shape: {"type":"system","subtype":"thinking_tokens","estimated_tokens":112}
     const state = applyFrame(
