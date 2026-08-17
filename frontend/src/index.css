@@ -12,6 +12,34 @@ body,
   color: var(--text-primary, #e7e9ee);
 }
 
+/* The shell is a fixed viewport: every scroll in the app belongs to a pane
+ * inside it (`.d3-page-scroll`, the transcript, the explorer tree), so the
+ * document itself must never be able to scroll. Without this, anything that
+ * overflows the shell turns into a page-level scrollbar and the whole app
+ * scrolls as one — which is how #43 presented, alongside a root box stuck at a
+ * stale size. Clipping here is the intended failure mode: an overflow is a bug
+ * in the pane that owns it, not something to hand to the document. */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* Take the root's size from the viewport rect directly rather than through the
+ * `height: 100%` chain above (#43: the UI rendered at roughly the window's
+ * previous, smaller dimensions in the top-left corner, with the rest of the
+ * window left black — a percentage chain the webview never re-resolved after
+ * the window changed size under a reload). `inset: 0` has no such chain to
+ * resolve: it is measured against the initial containing block, which *is* the
+ * viewport, and `lib/viewport-lock.ts` re-asserts it in pixels on every resize
+ * as the belt to this brace. Same construction the detached terminals window
+ * has always used (`terminal-window-root.module.css`). */
+#root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
 code {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
