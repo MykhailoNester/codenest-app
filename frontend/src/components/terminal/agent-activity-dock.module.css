@@ -6,23 +6,41 @@
    `.dock` and `.groups` are the two flex layers that make "the composer never
    moves" true even in a busy session:
 
-   - `.dock` is `flex: 0 1 auto; min-height: 0` — it sizes to its own content
-     and *can* shrink, but never grows to fight `.viewport` (`flex: 1 1 auto`)
-     for the pane's height.
+   - `.dock` is `flex: 0 1 auto` with a `min-content` floor — it sizes to its
+     own content and *can* shrink, but never grows to fight `.viewport`
+     (`flex: 1 1 auto`) for the pane's height, and never shrinks below its
+     always-on metrics line (see the floor's own comment below).
    - `.groups` caps at `max-height: 220px` (roughly 8-10 mono rows — enough for
      a couple of collapsed groups plus one expanded phase tree, not a whole
      30-agent workflow) and scrolls internally past that, with
      `overscroll-behavior: contain` so the wheel never chains into the
      transcript once the cap is hit.
 
-   Together: a pane too short even for the capped dock shrinks the dock first
-   (`.dock`'s own `flex-shrink`), never the composer, which stays
+   Together: a pane too short even for the capped dock shrinks the dock's
+   *groups* first, then the transcript, never the composer, which stays
    `flex: 0 0 auto` in `agent-composer.module.css` and is therefore never
-   asked to give up any space at all. */
+   asked to give up any space at all.
+
+   Child order is groups-then-metrics-line, deliberately (#38) — the dock is
+   bottom-anchored against the composer, so whichever child is last is the one
+   that holds still. See `agent-activity-dock.tsx`'s module doc. */
 
 .dock {
   flex: 0 1 auto;
-  min-height: 0;
+  /* The floor, and the whole of #38's first half. This was `min-height: 0`,
+     which let the flex algorithm crush the dock to a sliver: a shrink deficit
+     inside `.body` is distributed by *scaled* shrink factor (flex-shrink x
+     flex-basis), so a tall transcript's `.viewport` and this dock shared the
+     squeeze proportionally rather than the dock being squeezed last — an
+     800pt transcript in a 300pt pane left the dock ~4pt while the viewport
+     still had ~136pt. The metrics strip is `flex: 0 0 auto` and will not
+     shrink, so it overflowed the dock's box and the composer, a later sibling
+     with an opaque background, painted over the bottom half of its glyphs.
+     `min-content` here resolves to exactly the metrics line's height —
+     `.groups` contributes 0, being a scroll container with `min-height: 0` —
+     so the deficit lands on the viewport and on `.groups`, both of which can
+     absorb it, and the strip is always rendered whole. */
+  min-height: min-content;
   display: flex;
   flex-direction: column;
   background: var(--bg-2);
@@ -42,7 +60,11 @@
   max-height: 220px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border-top: 1px solid var(--line-1);
+  /* `border-bottom`, not `border-top`: the groups sit above the metrics line
+     now, and the dock's own `border-top` already rules the seam against the
+     transcript. A `border-top` here would double that rule into a 2px line
+     and leave the groups/metrics seam unruled. */
+  border-bottom: 1px solid var(--line-1);
 }
 
 .group {
