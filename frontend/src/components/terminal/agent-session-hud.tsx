@@ -28,7 +28,10 @@
  *   percentage only when that frame also named a context window.
  * - `cost` is the CLI's own `total_cost_usd`. On a subscription that is notional
  *   pricing, not billing — the cell's `title` says so.
- * - elapsed counts from the `init` frame and freezes when the session exits.
+ * - elapsed times the *turn*: it counts while the pane is `running` and holds
+ *   on the finished turn's own duration otherwise. A pane that has run nothing
+ *   yet shows no elapsed cell (#40 — it used to count the session's age, so an
+ *   `idle` pane read `10m 14s` and climbing).
  * - the thinking cell never renders on a dead session; claiming the model is
  *   mid-thought inside an exited process would be a lie (D11 in the
  *   session-state-hud plan, applied to this surface too).
@@ -62,9 +65,10 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
   const exited = state.status === "exited";
   const dimmed = exited || state.status === "starting";
 
-  // One interval for the elapsed cell, and only while the session is live —
-  // nothing ticks on a dead pane.
-  const ticking = state.startedAt !== null && !exited;
+  // One interval for the elapsed cell, and only while a turn is actually in
+  // flight — an idle pane's cell is a frozen duration, so re-rendering it every
+  // second would only redraw the same string (#40).
+  const ticking = state.status === "running" && state.turnStartedAt !== null;
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!ticking) return;
@@ -148,11 +152,19 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
     );
   }
 
-  if (state.startedAt !== null) {
-    const seconds = elapsedSecondsSinceMs(state.startedAt);
+  // Running: count from the turn's start. Otherwise: the last completed turn's
+  // duration, frozen — and nothing at all before the first turn finishes, since
+  // a `0s` beside `idle` would be a value the wire never reported.
+  const turnSeconds =
+    ticking && state.turnStartedAt !== null
+      ? elapsedSecondsSinceMs(state.turnStartedAt)
+      : state.lastTurnDurationMs !== null
+        ? Math.floor(state.lastTurnDurationMs / 1000)
+        : null;
+  if (turnSeconds !== null) {
     cells.push(
       <div key="elapsed" className={styles.cell} data-cell="elapsed">
-        <span className={styles.value}>{formatElapsed(seconds)}</span>
+        <span className={styles.value}>{formatElapsed(turnSeconds)}</span>
       </div>,
     );
   }

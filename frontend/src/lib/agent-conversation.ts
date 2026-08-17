@@ -157,6 +157,27 @@ export interface ConversationState {
    */
   startedAt: number | null;
   /**
+   * When the turn now in flight started, i.e. when this pane last went from
+   * not-`running` to `running` — either because it sent a message
+   * (`appendUserTurn`) or because the CLI announced a request of its own
+   * (`system`/`status`/`requesting`). `null` whenever no turn is in flight.
+   *
+   * **Deliberately not `startedAt` (#40).** The metrics line's elapsed cell sat
+   * next to a status of `idle` counting past `10m 14s`, because it measured the
+   * session's age: `startedAt` is the `init` frame and nothing stopped the
+   * clock between turns. A timer beside `idle` reads as "this turn is taking
+   * that long", so it has to time the turn.
+   */
+  turnStartedAt: number | null;
+  /**
+   * How long the last completed turn took, frozen: the CLI's own
+   * `result.duration_ms` when it reported one, else the wall time this side
+   * measured between the turn going `running` and the session dying under it.
+   * `null` until a first turn completes, and reset by a restart's `init` — an
+   * idle pane that has run nothing shows no elapsed cell rather than a zero.
+   */
+  lastTurnDurationMs: number | null;
+  /**
    * Live context occupancy, from the newest `assistant` frame's own
    * `message.usage`: `contextTokens` is fresh input plus both cache halves,
    * i.e. the whole prompt that one API call sent. `null` until an assistant
@@ -209,6 +230,8 @@ export function emptyConversation(): ConversationState {
     permissions: [],
     lastResult: null,
     startedAt: null,
+    turnStartedAt: null,
+    lastTurnDurationMs: null,
     usage: null,
     contextWindow: null,
     exitCode: null,
@@ -930,7 +953,14 @@ export function appendUserTurn(
     at: now,
     blocks: [{ type: "text", text }],
   };
-  return { ...state, turns: [...state.turns, turn], status: "running" };
+  return {
+    ...state,
+    turns: [...state.turns, turn],
+    status: "running",
+    // A message sent while a turn is already in flight (queued input) belongs to
+    // that turn's clock — only the transition into `running` starts a new one.
+    turnStartedAt: state.status === "running" ? state.turnStartedAt : now,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -957,8 +987,11 @@ function applyInit(
     permissionModeError: null,
     status: "idle",
     // A restart re-inits the same pane, so the clock restarts with the new
-    // session rather than carrying the dead one's start time forward.
+    // session rather than carrying the dead one's start time forward. The turn
+    // clock goes with it: the dead session's last turn is not this one's.
     startedAt: now,
+    turnStartedAt: null,
+    lastTurnDurationMs: null,
   };
 }
 
@@ -1090,8 +1123,13 @@ function applyUserFrame(
   return { ...state, turns: [...state.turns, turn] };
 }
 
-function applyResult(state: ConversationState, raw: unknown): ConversationState {
+function applyResult(
+  state: ConversationState,
+  raw: unknown,
+  now: number,
+): ConversationState {
   const rec = asRecord(raw);
+  const durationMs = asNumber(rec?.["duration_ms"]) ?? null;
   return {
     ...state,
     status: "idle",
@@ -1100,9 +1138,17 @@ function applyResult(state: ConversationState, raw: unknown): ConversationState 
     streamText: "",
     lastResult: {
       costUsd: asNumber(rec?.["total_cost_usd"]) ?? null,
-      durationMs: asNumber(rec?.["duration_ms"]) ?? null,
+      durationMs,
       isError: asBool(rec?.["is_error"]) ?? false,
     },
+    // The turn is over, so its clock stops here (#40) — frozen on the CLI's own
+    // duration, and on this side's measurement only when the frame reported
+    // none. Keeping the previous turn's figure would be worse than dropping the
+    // cell, so an unmeasurable turn clears it.
+    turnStartedAt: null,
+    lastTurnDurationMs:
+      durationMs ??
+      (state.turnStartedAt !== null ? Math.max(0, now - state.turnStartedAt) : null),
     // `usage` is deliberately not touched here: this frame's copy is the
     // session lifetime aggregate, not live context (#39). Only the window —
     // a property of the model — is worth taking, and only the `result` frame
@@ -1232,7 +1278,13 @@ function applySystem(
   const rec = asRecord(raw);
   const subtype = asString(rec?.["subtype"]);
   if (subtype === "status" && asString(rec?.["status"]) === "requesting") {
-    return { ...state, status: "running" };
+    // The CLI can open a turn this side never asked for (a hook, a resumed
+    // session), so this is the second place the turn clock starts (#40).
+    return {
+      ...state,
+      status: "running",
+      turnStartedAt: state.status === "running" ? state.turnStartedAt : now,
+    };
   }
   // `{"type":"system","subtype":"permission_denied", tool_name, tool_use_id,
   //   decision_reason_type?, decision_reason?, message}` — a tool call the CLI
@@ -1378,12 +1430,24 @@ function applyErrorFrame(
   return appendErrorBlock(state, { type: "error", text, source }, now);
 }
 
-function applyExit(state: ConversationState, raw: unknown): ConversationState {
+function applyExit(
+  state: ConversationState,
+  raw: unknown,
+  now: number,
+): ConversationState {
   const rec = asRecord(raw);
   const exitCodeRaw = rec?.["exit_code"];
+  // A session killed mid-turn gets no `result` frame, so the duration the CLI
+  // would have reported never arrives; freezing on the wall time up to the exit
+  // keeps the cell honest instead of leaving it counting on a dead process.
+  const died = state.status === "running" && state.turnStartedAt !== null;
   return {
     ...state,
     status: "exited",
+    turnStartedAt: null,
+    lastTurnDurationMs: died
+      ? Math.max(0, now - (state.turnStartedAt ?? now))
+      : state.lastTurnDurationMs,
     exitCode: typeof exitCodeRaw === "number" ? exitCodeRaw : null,
   };
 }
@@ -1471,7 +1535,7 @@ export function applyFrame(
     case "user":
       return applyUserFrame(state, frame.raw, now);
     case "result":
-      return applyResult(state, frame.raw);
+      return applyResult(state, frame.raw, now);
     case "permission":
       return applyPermission(state, frame.raw);
     case "system":
@@ -1480,7 +1544,7 @@ export function applyFrame(
     case "error":
       return applyErrorFrame(state, frame.raw, now);
     case "exit":
-      return applyExit(state, frame.raw);
+      return applyExit(state, frame.raw, now);
     case "control":
       return applyControl(state, frame.raw);
     case "unknown":
