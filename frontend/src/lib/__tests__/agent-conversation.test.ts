@@ -16,6 +16,7 @@ import {
   toolDiffstat,
   buildUserMessageText,
   permissionInputSummary,
+  type ConversationState,
   type ConvToolBlock,
 } from "../agent-conversation";
 import type { AgentFrame, AgentFrameKind } from "../ipc";
@@ -421,19 +422,52 @@ describe("agent-conversation reducer", () => {
     expect(state.lastResult).toEqual({ costUsd: 0.01, durationMs: 2300, isError: true });
   });
 
-  it("result records usage and the context window the status strip needs", () => {
-    // Field names and nesting copied from a real CLI 2.1.220 `result` line.
+  it("an assistant frame records the context its own API call sent", () => {
+    // Field names and nesting copied from a real CLI 2.1.220 `assistant` line.
     const state = applyFrame(
       { ...emptyConversation(), model: "claude-sonnet-5" },
+      frame("assistant", {
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "hi" }],
+          usage: {
+            input_tokens: 10,
+            cache_creation_input_tokens: 7404,
+            cache_read_input_tokens: 19082,
+            output_tokens: 94,
+          },
+        },
+      }),
+      0,
+    );
+    // Context is fresh input plus both cache halves — the whole prompt that
+    // one call sent, which is how the CLI itself counts it.
+    expect(state.usage).toEqual({
+      contextTokens: 10 + 7404 + 19082,
+      outputTokens: 94,
+    });
+  });
+
+  it("result contributes the context window and leaves live context alone (#39)", () => {
+    const assistant = applyFrame(
+      { ...emptyConversation(), model: "claude-sonnet-5" },
+      frame("assistant", {
+        message: { content: [], usage: { input_tokens: 40, cache_read_input_tokens: 60 } },
+      }),
+      0,
+    );
+    const state = applyFrame(
+      assistant,
       frame("result", {
         subtype: "success",
         is_error: false,
         duration_ms: 2162,
         total_cost_usd: 0.0171962,
+        // The session lifetime aggregate — deliberately ignored for context.
         usage: {
-          input_tokens: 10,
-          cache_creation_input_tokens: 7404,
-          cache_read_input_tokens: 19082,
+          input_tokens: 300,
+          cache_creation_input_tokens: 900_000,
+          cache_read_input_tokens: 1_500_000,
           output_tokens: 94,
         },
         modelUsage: {
@@ -442,15 +476,49 @@ describe("agent-conversation reducer", () => {
       }),
       0,
     );
-    // Context is fresh input plus both cache halves — how the CLI counts it.
-    expect(state.usage).toEqual({
-      contextTokens: 10 + 7404 + 19082,
-      contextWindow: 1000000,
-      outputTokens: 94,
-    });
+    expect(state.contextWindow).toBe(1000000);
+    expect(state.usage).toEqual({ contextTokens: 100, outputTokens: null });
+    // Cost still comes off the result frame, where the session total belongs.
+    expect(state.lastResult?.costUsd).toBe(0.0171962);
   });
 
-  it("result with usage but no matching modelUsage entry reports tokens with no window", () => {
+  it("context stays inside the window across many turns (#39)", () => {
+    // The regression: every turn re-reads the whole cache, so summing the
+    // result frame's three input fields climbs past the window within a
+    // handful of turns — the strip that reported `2181k/1000k`. Reading the
+    // per-call assistant usage instead cannot exceed the window.
+    let state: ConversationState = { ...emptyConversation(), model: "m" };
+    let lifetimeRead = 0;
+    for (let turn = 1; turn <= 20; turn += 1) {
+      const perCallContext = 40_000 + turn * 1_000;
+      lifetimeRead += perCallContext;
+      state = applyFrame(
+        state,
+        frame("assistant", {
+          message: {
+            content: [{ type: "text", text: `turn ${turn}` }],
+            usage: { input_tokens: 1_000, cache_read_input_tokens: perCallContext - 1_000 },
+          },
+        }),
+        0,
+      );
+      state = applyFrame(
+        state,
+        frame("result", {
+          usage: { input_tokens: turn, cache_read_input_tokens: lifetimeRead },
+          modelUsage: { m: { contextWindow: 200_000 } },
+        }),
+        0,
+      );
+    }
+    // The old reducer would have reported the aggregate, which by now exceeds
+    // the window; the live figure is one call's prompt.
+    expect(lifetimeRead).toBeGreaterThan(200_000);
+    expect(state.usage?.contextTokens).toBe(60_000);
+    expect(state.contextWindow).toBe(200_000);
+  });
+
+  it("result with no matching modelUsage entry reports tokens with no window", () => {
     // The strip must then show tokens and omit the percentage rather than
     // inventing a denominator.
     const state = applyFrame(
@@ -464,24 +532,55 @@ describe("agent-conversation reducer", () => {
       }),
       0,
     );
-    expect(state.usage).toEqual({
-      contextTokens: 105,
-      contextWindow: null,
-      outputTokens: null,
-    });
+    expect(state.contextWindow).toBeNull();
+    expect(state.usage).toBeNull();
   });
 
-  it("a result frame with no usage keeps the previous figures", () => {
-    const withUsage = applyFrame(
+  it("frames that name no figures keep the previous ones", () => {
+    const seeded = applyFrame(
+      applyFrame(
+        { ...emptyConversation(), model: "m" },
+        frame("assistant", { message: { content: [], usage: { input_tokens: 7 } } }),
+        0,
+      ),
+      frame("result", { usage: { input_tokens: 7 }, modelUsage: { m: { contextWindow: 1000 } } }),
+      0,
+    );
+    // A later assistant message with no usage, then a result naming no window.
+    const after = applyFrame(
+      applyFrame(seeded, frame("assistant", { message: { content: [] } }), 0),
+      frame("result", { is_error: false }),
+      0,
+    );
+    expect(after.usage).toEqual(seeded.usage);
+    expect(after.contextWindow).toBe(1000);
+  });
+
+  it("a sub-agent's usage never reaches the pane's own context figure (#39)", () => {
+    // The delegating call first, so the child frame has a parent block to land
+    // in and is genuinely folded into the child stream rather than dropped.
+    const delegated = applyFrame(
       { ...emptyConversation(), model: "m" },
-      frame("result", {
-        usage: { input_tokens: 7 },
-        modelUsage: { m: { contextWindow: 1000 } },
+      frame("tool_use", {
+        message: {
+          content: [
+            { type: "tool_use", id: "toolu_child", name: "Agent", input: { prompt: "go" } },
+          ],
+          usage: { input_tokens: 500 },
+        },
       }),
       0,
     );
-    const after = applyFrame(withUsage, frame("result", { is_error: false }), 0);
-    expect(after.usage).toEqual(withUsage.usage);
+    const withChild = applyFrame(
+      delegated,
+      frame("assistant", {
+        parent_tool_use_id: "toolu_child",
+        message: { content: [{ type: "text", text: "sub" }], usage: { input_tokens: 90_000 } },
+      }),
+      0,
+    );
+    expect(withChild.turns).not.toEqual(delegated.turns); // the child did land
+    expect(withChild.usage).toEqual({ contextTokens: 500, outputTokens: null });
   });
 
   it("init stamps startedAt so elapsed counts the session, not the mount", () => {

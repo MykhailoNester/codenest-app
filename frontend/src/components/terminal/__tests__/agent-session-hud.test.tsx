@@ -29,21 +29,32 @@ function frame(kind: AgentFrameKind, raw: unknown): AgentFrame {
   return { pane_id: "p1", session_id: "s1", kind, raw };
 }
 
-/** A session that has initialised and completed one turn. */
+/** A session that has initialised and completed one turn. Context comes off
+ *  the assistant message and the window off the result frame (#39). */
 function liveState(): ConversationState {
   let state = applyFrame(emptyConversation(), frame("init", { model: "claude-opus-5" }), 1_000);
+  state = applyFrame(
+    state,
+    frame("assistant", {
+      message: {
+        content: [{ type: "text", text: "done" }],
+        usage: {
+          input_tokens: 10,
+          cache_creation_input_tokens: 1_990,
+          cache_read_input_tokens: 8_000,
+          output_tokens: 40,
+        },
+      },
+    }),
+    1_500,
+  );
   state = applyFrame(
     state,
     frame("result", {
       is_error: false,
       total_cost_usd: 0.25,
       duration_ms: 1200,
-      usage: {
-        input_tokens: 10,
-        cache_creation_input_tokens: 1_990,
-        cache_read_input_tokens: 8_000,
-        output_tokens: 40,
-      },
+      usage: { input_tokens: 10, cache_read_input_tokens: 8_000, output_tokens: 40 },
       modelUsage: { "claude-opus-5": { contextWindow: 200_000 } },
     }),
     2_000,
@@ -87,10 +98,12 @@ describe("AgentSessionHud", () => {
     expect(strip.querySelector('[data-cell="elapsed"]')).not.toBeNull();
   });
 
-  it("omits the percentage when the frame named no context window", () => {
+  it("omits the percentage when no frame has named a context window", () => {
+    // Tokens are a fact from the first assistant message; the window is not
+    // known until a `result` names one for the running model.
     const state = applyFrame(
-      liveState(),
-      frame("result", { usage: { input_tokens: 500 }, modelUsage: {} }),
+      applyFrame(emptyConversation(), frame("init", { model: "claude-opus-5" }), 1_000),
+      frame("assistant", { message: { content: [], usage: { input_tokens: 500 } } }),
       3_000,
     );
     render(<AgentSessionHud state={state} cwd={undefined} />);
@@ -98,6 +111,36 @@ describe("AgentSessionHud", () => {
     const strip = screen.getByTestId("agent-session-hud");
     expect(strip.querySelector('[data-cell="ctx"]')).toBeNull();
     expect(strip.querySelector('[data-cell="tokens"]')?.textContent).not.toContain("%");
+  });
+
+  it("the ctx cell cannot exceed the window once many turns have run (#39)", () => {
+    // The bug: the result frame's lifetime aggregate divided by a per-call
+    // window rendered `2181k/1000k`, clamped to a full bar at 100%.
+    let state = liveState();
+    let lifetime = 0;
+    for (let turn = 0; turn < 30; turn += 1) {
+      lifetime += 50_000;
+      state = applyFrame(
+        state,
+        frame("assistant", {
+          message: { content: [], usage: { input_tokens: 500, cache_read_input_tokens: 49_500 } },
+        }),
+        4_000 + turn,
+      );
+      state = applyFrame(
+        state,
+        frame("result", {
+          usage: { input_tokens: 500, cache_read_input_tokens: lifetime },
+          modelUsage: { "claude-opus-5": { contextWindow: 200_000 } },
+        }),
+        4_000 + turn,
+      );
+    }
+    render(<AgentSessionHud state={state} cwd={undefined} />);
+
+    const strip = screen.getByTestId("agent-session-hud");
+    expect(strip.querySelector('[data-cell="tokens"]')?.textContent).toBe("50k/200k");
+    expect(strip.querySelector('[data-cell="ctx"]')?.textContent).toContain("25%");
   });
 
   it("never claims the model is thinking on an exited session", () => {
