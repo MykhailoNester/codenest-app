@@ -104,6 +104,15 @@ import styles from "./agent-composer.module.css";
 interface AgentComposerProps {
   leafId: string;
   status: ConversationState["status"];
+  /**
+   * The pane's `agent_start` was refused and could not be reconciled, so there
+   * is no session behind this composer whatever `status` last said (#42: the
+   * status line read `running` off a session the shell had already rejected,
+   * and the input surface stayed fully enabled until a send round-tripped into
+   * a red banner). Treated exactly like an exited session: typing is still
+   * allowed so the draft survives the Retry, sending is not.
+   */
+  startFailed?: boolean;
   /** `providers.id` this pane's session runs against, as persisted on the leaf. */
   providerId: number | null;
   /** The model this pane's session runs, as persisted on the leaf. */
@@ -643,6 +652,7 @@ function ProviderModelRow({
 export function AgentComposer({
   leafId,
   status,
+  startFailed = false,
   providerId,
   model,
   permissionMode,
@@ -759,7 +769,12 @@ export function AgentComposer({
   // restart, which is the point of keeping the composer mounted. A *command*
   // is exempt (`sendDisabled` below) — `/clear` on an exited session is
   // exactly when it is wanted.
-  const sessionEnded = status === "exited";
+  // A refused start counts as "no session" here for exactly the same reason an
+  // exit does — there is no stdin on the other side of Send (#42). It is the
+  // one case where `status` cannot be trusted to say so on its own: the pane
+  // may still be holding the *previous* session's `running` while the shell has
+  // refused this one.
+  const sessionEnded = status === "exited" || startFailed;
   const live = !sessionEnded;
 
   // ── Slash-command / `@`-mention detection ────────────────────────────────
@@ -1322,7 +1337,13 @@ export function AgentComposer({
       : null;
 
   return (
-    <div className={styles.composer} data-agent-composer>
+    <div
+      className={sessionEnded ? `${styles.composer} ${styles.composerStale}` : styles.composer}
+      data-agent-composer
+      // "Is there a session behind this input?", readable from the DOM: the
+      // pane's own status is not the answer once a start has been refused (#42).
+      data-session={sessionEnded ? "none" : "live"}
+    >
       <div className={styles.cmode}>
         <span className={`${styles.mbadge} ${styles.mbadgeComposing}`}>◆ Conversation</span>
         {subagentCount > 0 ? (
@@ -1577,7 +1598,9 @@ export function AgentComposer({
           </span>
         )}
         <span className={styles.hint}>
-          {sessionEnded ? (
+          {startFailed ? (
+            "no session for this pane · Retry to start one"
+          ) : sessionEnded ? (
             "session ended · Restart to send"
           ) : (
             <>
@@ -1597,7 +1620,10 @@ export function AgentComposer({
         <button
           type="button"
           className={styles.sendGhost}
-          disabled={status !== "running" || command !== undefined}
+          // `sessionEnded` as well as the status: queueing behind a turn that no
+          // longer has a session behind it is the same false promise Send was
+          // making (#42) — the pane's `running` can outlive the session itself.
+          disabled={status !== "running" || sessionEnded || command !== undefined}
           onClick={() => queue(leafId)}
         >
           ⌛ Queue

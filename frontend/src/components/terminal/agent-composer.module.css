@@ -37,6 +37,21 @@
   border-top-color: var(--accent-line);
 }
 
+/* No session behind the input — it ended, or its start was refused (#42, where
+ * the pane accepted a whole prompt over a session the shell had already
+ * rejected). Typing stays possible, because the draft has to survive the
+ * Restart/Retry that follows, so this marks the surface as not-connected rather
+ * than hiding it: the editor stays legible, the chrome around it stops
+ * presenting itself as live. */
+.composerStale {
+  border-top-color: var(--warn);
+}
+
+.composerStale .cmode,
+.composerStale .cact {
+  opacity: 0.55;
+}
+
 .cmode {
   display: flex;
   align-items: center;
