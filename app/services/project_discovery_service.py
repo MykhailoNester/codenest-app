@@ -35,15 +35,8 @@ _STACK_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 _DOTNET_GLOBS: tuple[str, ...] = ("*.csproj", "*.sln")
 
-DEFAULT_SCAN_ROOTS: tuple[str, ...] = (
-    "~/Documents",
-    "~/Projects",
-    "~/Code",
-    "~/Work",
-    "~/dev",
-    "~/src",
-)
-
+# There is deliberately no DEFAULT_SCAN_ROOTS. Discovery only ever walks a
+# folder the user picked — see `scan` and `_require_scannable_root`.
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_RESULTS = 200
 
@@ -65,6 +58,39 @@ _NOISY_DIRS: frozenset[str] = frozenset(
         "Pods",
     }
 )
+
+
+def _home_dir() -> Path | None:
+    """The resolved home directory, or ``None`` when it cannot be determined.
+
+    Exposed as a function (not a constant) so tests can redirect it to a temp
+    dir via monkeypatch — the same seam as
+    ``project_scanner_service._allowed_scan_roots``.
+    """
+    try:
+        return Path.home().resolve()
+    except (OSError, RuntimeError):
+        return None
+
+
+def _require_scannable_root(root: Path) -> None:
+    """Reject roots too broad to walk on the user's behalf. ``root`` is resolved.
+
+    The filesystem root and ``$HOME`` itself are never valid scan targets. A
+    walk from either enumerates the user's entire personal tree — Desktop,
+    Downloads, ``Library/`` and every unrelated folder in it — to find a handful
+    of repositories, which is both slow and far more of the disk than anyone
+    asked us to read. Discovery is pointed at a folder the user chose, so a
+    request naming one of these is a bug in the caller, not a scan to run.
+    Folders *inside* home are fine: that is where projects normally live.
+    """
+    if root.parent == root:
+        raise ValueError(f"refusing to scan the filesystem root: {root}")
+    if root == _home_dir():
+        raise ValueError(
+            f"refusing to scan the whole home directory: {root} — "
+            "pick the folder your projects live in"
+        )
 
 
 def _classify(path: Path) -> str | None:
@@ -174,13 +200,18 @@ def _claude_asset_counts(path: Path) -> tuple[int, int]:
 
 
 def scan(
-    roots: Iterable[str | Path] | None = None,
+    roots: Iterable[str | Path],
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_results: int = DEFAULT_MAX_RESULTS,
     already_imported_paths: Iterable[str] = (),
     git_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Walk ``roots`` and return candidate project directories.
+
+    ``roots`` is required and must be non-empty: there is no default and no
+    implicit fallback, so discovery never starts a walk the user did not ask
+    for. ``/`` and ``$HOME`` itself are rejected outright
+    (:func:`_require_scannable_root`) — both raise ``ValueError``.
 
     A directory qualifies if it contains ``.git`` (dir or file) or any
     recognised manifest. With ``git_only=True`` only git repos qualify and
@@ -200,7 +231,9 @@ def scan(
     git repos also carry ``git_remote``, and Claude repos add ``agents`` /
     ``skills`` counts read from ``.claude/``.
     """
-    target_roots = list(roots) if roots else list(DEFAULT_SCAN_ROOTS)
+    target_roots = [r for r in roots if str(r).strip()]
+    if not target_roots:
+        raise ValueError("a scan needs at least one root folder to walk")
     imported_set = {str(p) for p in already_imported_paths}
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -263,6 +296,7 @@ def scan(
             resolved = Path(raw_root).expanduser().resolve()
         except (OSError, RuntimeError):
             continue
+        _require_scannable_root(resolved)
         _walk(resolved, 0, False)
         if len(results) >= max_results:
             break

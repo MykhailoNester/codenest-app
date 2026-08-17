@@ -1,17 +1,10 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactElement,
-} from "react";
+import { useMemo, useState, type ReactElement } from "react";
 import { useEscapeKey } from "../hooks/use-escape-key";
 import { pickDirectory } from "../lib/ipc";
 import {
   useScanProjects,
   useRichImportProjects,
   useProfiles,
-  useSystemInfo,
   type DiscoveryCandidate,
   type ProfileOut,
 } from "../lib/api";
@@ -53,9 +46,8 @@ const rowStyle: React.CSSProperties = {
 };
 
 /** Scan depth for the modal: four levels below the chosen root. Four, not
- * three, because the default root is the home directory and a repo that sits
- * at e.g. `~/Documents/Work/Acme` only reveals the repos nested inside it on
- * the level below that. */
+ * three, because a repo that sits at e.g. `~/Documents/Work/Acme` only reveals
+ * the repos nested inside it on the level below that. */
 const SCAN_MAX_DEPTH = 4;
 
 /** Build a placeholder row for a manually added folder that hasn't (yet)
@@ -85,20 +77,22 @@ export function ImportProjectsModal({
   // Show profile selector only when more than one profile exists.
   const showProfileSelector = profiles.length > 1;
   const [profileId, setProfileId] = useState<number | null>(defaultProfileId);
-  const { data: systemInfo } = useSystemInfo();
-  // The scan root: a folder the user picked, or the sidecar's home directory
-  // once /api/v1/system/info answers. Derived (not an effect-driven state) so
-  // there is no render where it lags behind either source.
-  const [pickedRoot, setPickedRoot] = useState<string | null>(null);
-  const rootPath = pickedRoot ?? systemInfo?.home ?? "";
+  // The scan root is *only* ever a folder the user picked. There is no default
+  // and no auto-scan: the modal used to seed this from the sidecar's home
+  // directory and walk it on open, which meant opening the dialog recursively
+  // read the user's whole personal tree before they had chosen anything.
+  const [rootPath, setRootPath] = useState("");
   // `scanned` mirrors the last scan response verbatim so a rescan can keep
   // replacing it wholesale without discarding manually added folders, which
   // live separately in `manualPaths` and are merged into `candidates` below.
   const [scanned, setScanned] = useState<DiscoveryCandidate[]>([]);
+  // The root the last successful scan actually covered — drives the button
+  // label (Scan vs Rescan) and the "not scanned yet" empty state, both of which
+  // must not claim a freshly picked folder has been looked at.
+  const [scannedRoot, setScannedRoot] = useState<string | null>(null);
   const [manualPaths, setManualPaths] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [hint, setHint] = useState<string | null>(null);
-  const autoScanned = useRef(false);
 
   const candidates = useMemo<DiscoveryCandidate[]>(() => {
     const scannedPaths = new Set(scanned.map((c) => c.path));
@@ -115,6 +109,7 @@ export function ImportProjectsModal({
       {
         onSuccess: (data) => {
           setScanned(data.candidates);
+          setScannedRoot(root);
           const importedPaths = new Set(
             data.candidates
               .filter((c) => c.already_imported)
@@ -133,15 +128,6 @@ export function ImportProjectsModal({
       },
     );
   }
-
-  // Auto-scan once the root is known (home from the sidecar, or a folder the
-  // user picked before /system/info answered). "Rescan" re-runs it on demand.
-  useEffect(() => {
-    if (autoScanned.current || !rootPath) return;
-    autoScanned.current = true;
-    runScan(rootPath);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootPath]);
 
   useEscapeKey(onClose);
 
@@ -162,12 +148,16 @@ export function ImportProjectsModal({
   async function handlePickFolder(): Promise<void> {
     const picked = await pickDirectory();
     if (picked === null) return;
-    // Claim the auto-scan slot so the rootPath change below cannot fire a
-    // second scan.
-    autoScanned.current = true;
-    setPickedRoot(picked);
+    if (picked === rootPath) return;
+    // Picking only *arms* the scan — the user still has to press "Scan this
+    // folder". Results from the previous root are dropped because they no
+    // longer describe what the header says is selected; folders the user added
+    // by hand are theirs and stay.
+    setRootPath(picked);
+    setScanned([]);
+    setScannedRoot(null);
+    setSelected(new Set(manualPaths));
     setHint(null);
-    runScan(picked);
   }
 
   async function handleAddFolder(): Promise<void> {
@@ -182,7 +172,7 @@ export function ImportProjectsModal({
     setHint(null);
   }
 
-  function handleRescan(): void {
+  function handleScan(): void {
     runScan(rootPath);
   }
 
@@ -239,7 +229,13 @@ export function ImportProjectsModal({
               }}
               title={rootPath || undefined}
             >
-              {rootPath ? `Scanning ${rootPath}` : "No folder selected yet."}
+              {!rootPath
+                ? "No folder selected — pick one to scan."
+                : scan.isPending
+                  ? `Scanning ${rootPath}`
+                  : scannedRoot === rootPath
+                    ? `Scanned ${rootPath}`
+                    : `Ready to scan ${rootPath}`}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -264,10 +260,19 @@ export function ImportProjectsModal({
             <button
               className="d3-btn d3-btn--ghost"
               type="button"
-              onClick={handleRescan}
+              onClick={handleScan}
               disabled={scan.isPending || !rootPath}
+              title={
+                rootPath
+                  ? `Scan ${rootPath} for git repositories`
+                  : "Pick a folder first"
+              }
             >
-              {scan.isPending ? "Scanning..." : "Rescan"}
+              {scan.isPending
+                ? "Scanning..."
+                : scannedRoot === rootPath
+                  ? "Rescan"
+                  : "Scan this folder"}
             </button>
           </div>
         </div>
@@ -288,8 +293,10 @@ export function ImportProjectsModal({
               style={{ padding: 32, textAlign: "center", color: "var(--fg-3)" }}
             >
               {!rootPath
-                ? "Pick a folder to scan for git repositories."
-                : `No git repositories found under ${rootPath}. Use "Pick folder..." to scan somewhere else, or "Add folder..." to add a folder directly.`}
+                ? 'Use "Pick folder..." to choose where your projects live, then "Scan this folder".'
+                : scannedRoot !== rootPath
+                  ? `Press "Scan this folder" to look for git repositories under ${rootPath}.`
+                  : `No git repositories found under ${rootPath}. Use "Pick folder..." to scan somewhere else, or "Add folder..." to add a folder directly.`}
             </div>
           ) : (
             candidates.map((c) => {
@@ -383,9 +390,14 @@ export function ImportProjectsModal({
             <div style={{ fontSize: 12, color: "var(--fg-3)" }}>
               {hint
                 ? hint
-                : importable.length === 0
-                  ? "Nothing new to import."
-                  : `${selected.size} of ${importable.length} selected`}
+                : candidates.length === 0
+                  ? // Distinct from "nothing new": an unscanned root has found
+                    // nothing yet, which is not the same as finding only
+                    // already-imported repos.
+                    "Nothing to import yet."
+                  : importable.length === 0
+                    ? "Nothing new to import."
+                    : `${selected.size} of ${importable.length} selected`}
             </div>
             {showProfileSelector && (
               <select

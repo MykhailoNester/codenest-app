@@ -6,7 +6,7 @@ parsing here, all logic in :mod:`app.services.project_discovery_service`.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -17,7 +17,9 @@ router = APIRouter(prefix="/api/v1/projects/discovery")
 
 
 class ScanRequest(BaseModel):
-    roots: list[str] | None = None
+    # Required, non-empty, and no default: a scan is always a folder the user
+    # picked. See project_discovery_service.scan.
+    roots: list[str] = Field(min_length=1)
     max_depth: int = Field(
         default=project_discovery_service.DEFAULT_MAX_DEPTH, ge=1, le=8
     )
@@ -38,19 +40,19 @@ class ImportRequest(BaseModel):
 
 
 @router.post("/scan")
-async def api_scan(
-    payload: ScanRequest | None = Body(default=None),  # noqa: B008
-) -> JSONResponse:
-    body = payload or ScanRequest()
+async def api_scan(payload: ScanRequest) -> JSONResponse:
     db = await get_db()
     imported_paths = await project_discovery_service.get_imported_paths(db)
-    candidates = project_discovery_service.scan(
-        roots=body.roots,
-        max_depth=body.max_depth,
-        max_results=body.max_results,
-        already_imported_paths=imported_paths,
-        git_only=body.git_only,
-    )
+    try:
+        candidates = project_discovery_service.scan(
+            roots=payload.roots,
+            max_depth=payload.max_depth,
+            max_results=payload.max_results,
+            already_imported_paths=imported_paths,
+            git_only=payload.git_only,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return JSONResponse({"candidates": candidates})
 
 
