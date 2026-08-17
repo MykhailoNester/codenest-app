@@ -22,6 +22,7 @@ import {
   agentRespondPermission,
   subscribeAgentFrames,
   getWorkspacePath,
+  listLivePanes,
   type AgentFrame,
 } from "../../lib/ipc";
 import { useAgentSessionStore } from "../../stores/agent-session-store";
@@ -164,6 +165,28 @@ const controlNoteSinks = new Map<string, (note: string) => void>();
 /** In-flight subscribe calls, so two mounts of one leaf can't double-register. */
 const pendingSubscriptions = new Map<string, Promise<void>>();
 
+/**
+ * `leafId` -> an `agent_stop` this pane has issued but not yet seen resolve.
+ *
+ * A `useEffect` cleanup cannot await, so the lifecycle effect's teardown fires
+ * `agent_stop` and returns — while a Restart's next effect run is already on its
+ * way to `agent_start` for the same pane. `mod.rs` refuses a start for a pane
+ * whose slot is still occupied ("agent session already running for pane …", D10),
+ * so losing that race put the banner in front of the user for nothing: the stop
+ * was landing anyway (#42).
+ *
+ * Read only from the refusal branch in `boot()`, never before the start itself:
+ * pre-awaiting it would make a stop that never resolves wedge the pane, and the
+ * pane starting fine is the case that must not be slowed down. Its value is
+ * answering *whose* session is in the slot — see that branch's three cases.
+ */
+const pendingStops = new Map<string, Promise<void>>();
+
+/** The refusal `mod.rs` returns for a pane that already holds a session slot. */
+function isDuplicateSessionError(message: string): boolean {
+  return message.includes("agent session already running");
+}
+
 async function ensureFrameSubscription(leafId: string): Promise<void> {
   if (frameSubscriptions.has(leafId)) return;
   const pending = pendingSubscriptions.get(leafId);
@@ -247,6 +270,7 @@ export function AgentPane({
 }: AgentPaneProps): ReactElement {
   const conversation = useAgentSessionStore((s) => s.panes[leafId]);
   const markStarting = useAgentSessionStore((s) => s.markStarting);
+  const markAttached = useAgentSessionStore((s) => s.markAttached);
   const resolvePermission = useAgentSessionStore((s) => s.resolvePermission);
   const allowSession = useAgentSessionStore((s) => s.allowSession);
   const reset = useAgentSessionStore((s) => s.reset);
@@ -416,16 +440,64 @@ export function AgentPane({
       });
 
       startedPanes.add(bootKey);
+      const startArgs = {
+        paneId: leafId,
+        cwd: resolvedCwd,
+        ...(provider ? { command: provider.command, env: provider.env } : {}),
+        ...(selection.model !== null ? { model: selection.model } : {}),
+        // Boots straight into the mode the pane was last switched to, so a
+        // Restart is not a silent drop back to the CLI default.
+        ...(permissionMode !== undefined ? { permissionMode } : {}),
+      };
       try {
-        const handle = await agentStart({
-          paneId: leafId,
-          cwd: resolvedCwd,
-          ...(provider ? { command: provider.command, env: provider.env } : {}),
-          ...(selection.model !== null ? { model: selection.model } : {}),
-          // Boots straight into the mode the pane was last switched to, so a
-          // Restart is not a silent drop back to the CLI default.
-          ...(permissionMode !== undefined ? { permissionMode } : {}),
-        });
+        let handle;
+        try {
+          handle = await agentStart(startArgs);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (!isDuplicateSessionError(message)) throw err;
+          // The shell refused because this pane already holds a slot (D10).
+          // Resolve that here, once, rather than leaving it to surface on the
+          // user's next send (#42) — which is how the ticket's pane came to
+          // accept a whole prompt over a session that had never started.
+          //
+          // Which resolution is right depends on whose session that slot is:
+          //
+          // 1. Our own, on its way out — a Restart whose teardown fired
+          //    `agent_stop` a moment ago and cannot be awaited from a cleanup.
+          //    The stop is landing; wait for it and take the slot. Deliberately
+          //    *not* awaited before the first start attempt: a stop that never
+          //    resolves would then wedge the pane for good, whereas here the
+          //    start has already been attempted and this is the recovery path.
+          // 2. Somebody's live session for this same pane id — the other window
+          //    showing this leaf, or this frontend having lost its record of a
+          //    child that is still running (a reload keeps the shell's registry
+          //    but not the store's). Attach: the subscription installed above is
+          //    already carrying its frames, `agent_send` writes to it, and
+          //    killing a working session — the ticket's was mid-turn — to
+          //    replace it with an identical one would be strictly worse.
+          // 3. Neither: a reservation from a start that never published, or a
+          //    session that died between the refusal and now. Clear it and try
+          //    once more.
+          const ownStop = pendingStops.get(leafId);
+          if (ownStop) {
+            await ownStop;
+            if (cancelled) return;
+            handle = await agentStart(startArgs);
+          } else {
+            const livePanes = await listLivePanes().catch(() => [] as string[]);
+            if (cancelled) return;
+            if (livePanes.includes(leafId)) {
+              // No `recordAgentLaunch`: this launch is not new, and its
+              // `agent_runs` row belongs to whoever did start it.
+              markAttached(leafId);
+              return;
+            }
+            await agentStop(leafId);
+            if (cancelled) return;
+            handle = await agentStart(startArgs);
+          }
+        }
         // Register the session as a run so it appears in the Command Center's
         // AGENTS panel with working Focus/Stop. Posted after the spawn, not
         // before, so a failed start never leaves a phantom "running" row —
@@ -497,7 +569,18 @@ export function AgentPane({
         null,
         useAgentSessionStore.getState().panes[leafId]?.sessionId ?? null,
       );
-      void agentStop(leafId).finally(() => startedPanes.delete(bootKey));
+      // Published so the next boot for this leaf can order itself behind the
+      // stop it cannot await from here (#42). A rejected stop resolves this
+      // promise all the same — it exists to say "the attempt is over", and a
+      // boot waiting on it must proceed to its own start either way, which is
+      // where a still-occupied slot is then handled.
+      const stopping = agentStop(leafId)
+        .catch(() => undefined)
+        .finally(() => {
+          startedPanes.delete(bootKey);
+          if (pendingStops.get(leafId) === stopping) pendingStops.delete(leafId);
+        });
+      pendingStops.set(leafId, stopping);
     };
     // `cwd`, and every store action below, are stable references (zustand
     // actions never change identity) or intentionally excluded — only
@@ -882,6 +965,12 @@ export function AgentPane({
         <AgentComposer
           leafId={leafId}
           status={conv.status}
+          // The pane has no session to write to: this start was refused and the
+          // reconcile above could not recover it. Passed so the composer refuses
+          // the send *before* it round-trips, rather than accepting a prompt and
+          // then reporting the failure after the fact (#42) — which is what made
+          // the banner look like it had nothing to do with the message just sent.
+          startFailed={startError !== null}
           providerId={providerId ?? null}
           model={model ?? null}
           permissionMode={permissionMode ?? null}

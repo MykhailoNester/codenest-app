@@ -30,6 +30,18 @@ interface AgentSessionStore {
   ensurePane: (paneId: string) => void;
   applyFrame: (paneId: string, frame: AgentFrame) => void;
   markStarting: (paneId: string) => void;
+  /**
+   * This pane's `agent_start` was refused because the shell already holds a
+   * live session for it, and the pane attached to that session instead of
+   * spawning a second child or wedging (#42).
+   *
+   * `idle` is the honest reading of what is then known: a session exists and
+   * accepts input, and nothing this side has seen says a turn is in flight. It
+   * is also self-correcting — an attached session mid-turn is emitting frames
+   * into the same subscription, so the very next one moves the status to
+   * `running` (or to `exited` if it died between the refusal and here).
+   */
+  markAttached: (paneId: string) => void;
   /** Optimistic user turn + status "running" — the CLI never echoes a plain
    * user message (Design decision 5), so this is the only place one is
    * added for a message this pane itself sent. */
@@ -59,6 +71,15 @@ export const useAgentSessionStore = create<AgentSessionStore>((set, get) => ({
       panes: {
         ...state.panes,
         [paneId]: { ...(state.panes[paneId] ?? emptyConversation()), status: "starting" },
+      },
+    }));
+  },
+
+  markAttached: (paneId) => {
+    set((state) => ({
+      panes: {
+        ...state.panes,
+        [paneId]: { ...(state.panes[paneId] ?? emptyConversation()), status: "idle" },
       },
     }));
   },
