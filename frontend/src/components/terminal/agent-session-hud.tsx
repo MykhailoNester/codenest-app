@@ -1,8 +1,11 @@
 /**
  * The metrics line of the *native agent* pane's activity dock
  * (`agent-activity-dock.tsx`) — the prototype's `.hud` row (CSS ~197-224,
- * markup ~621-636), rendered as the dock's own first child rather than
- * standing on its own between the pane header and the conversation.
+ * markup ~621-636), rendered as the dock's own *last* child rather than
+ * standing on its own between the pane header and the conversation. Last, so
+ * that this strip — always present, fixed height — is the thing pinned a fixed
+ * distance above the composer, and the dock's transient groups grow upward
+ * instead of shoving it around (#38; the dock's module doc has the full why).
  *
  * Deliberately a sibling of `<SessionHud/>` rather than a reuse of it, sharing
  * only `session-hud.module.css` so the two strips are visually identical. They

@@ -195,6 +195,44 @@ describe("AgentActivityDock — presence and the metrics line", () => {
     expect(dockEl.contains(strip)).toBe(true);
     expect(strip.querySelector('[data-cell="elapsed"]')).not.toBeNull();
   });
+
+  it("keeps the metrics line last, below the groups, so tools never move it (#38)", () => {
+    // The dock is bottom-anchored against the composer, so its *last* child is
+    // the one at a fixed distance from the caret. The metrics line is always
+    // present and fixed-height; the groups appear and vanish several times
+    // within one turn. Layout is unobservable in jsdom, so child order is the
+    // checkable half of "the ctx figure the user is reading does not jump".
+    let state = liveState();
+    state = applyFrame(state, toolUseFrame("t1", { command: "ls" }), 2_000);
+
+    const { rerender } = render(dock(state));
+    const dockEl = screen.getByTestId("agent-activity-dock");
+    const strip = screen.getByTestId("agent-session-hud");
+    const groups = screen.getByTestId("dock-group-tools").parentElement;
+    expect(groups).not.toBeNull();
+
+    expect(dockEl.firstElementChild).toBe(groups);
+    expect(dockEl.lastElementChild).toBe(strip);
+    expect(
+      groups!.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // The run resolves and the Tools group unmounts — the strip is still the
+    // dock's last child, i.e. still the same distance above the composer.
+    rerender(dock(applyFrame(state, toolResultFrame("t1", false), 3_000)));
+    expect(screen.queryByTestId("dock-group-tools")).toBeNull();
+    expect(screen.getByTestId("agent-activity-dock").lastElementChild).toBe(
+      screen.getByTestId("agent-session-hud"),
+    );
+  });
+
+  // #38's other half — `.dock`'s `min-height: min-content` floor, which is what
+  // stops a tall transcript's shrink deficit from crushing the strip until it
+  // overflows and the composer paints over it — has no test here on purpose.
+  // Vitest does not process CSS modules for this project (`styles.dock` is a
+  // stub) and the frontend tsconfig ships no Node types, so neither the
+  // computed rule nor the stylesheet's text is reachable from a case in this
+  // file. The rule carries the reasoning in its own comment instead.
 });
 
 describe("AgentActivityDock — Tools group", () => {

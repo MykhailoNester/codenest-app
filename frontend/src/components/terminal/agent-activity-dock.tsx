@@ -13,19 +13,14 @@
  *
  * Contents, top to bottom:
  *
- * 1. **The metrics line** — `<AgentSessionHud/>`, unchanged in content and
- *    honesty contract (status, ctx, tokens, cost, elapsed, git, thinking,
- *    perm — a cell renders a real value or it does not render at all). That
- *    file now renders only this line; everything below used to be cells on
- *    it too.
- * 2. **Tools** — the live grouped tool run as one line ("Running 2 ToolSearch
+ * 1. **Tools** — the live grouped tool run as one line ("Running 2 ToolSearch
  *    calls, fetching 1 page") with its elapsed and a "what now" row
  *    underneath. Built from `liveToolRun` (`lib/agent-dock.ts`, which reuses
  *    the transcript's own `groupTurnBlocks`) and `summarizeToolRun` /
  *    `toolRunHeadline` / `toolRunElapsedMs` (`lib/agent-conversation.ts`) —
  *    the same three the transcript's `ToolRunRow` uses, so the dock and the
  *    transcript can never disagree about what one run is.
- * 3. **Agents** and **Workflows** — one row per `Task`/`Agent` delegation and
+ * 2. **Agents** and **Workflows** — one row per `Task`/`Agent` delegation and
  *    one row per orchestration run, running and finished alike: the most
  *    useful moment to read a sub-agent's or a run's result is right after it
  *    ends, so neither group empties itself the instant its last live entity
@@ -37,6 +32,20 @@
  *    button next to its run: it is this app's only way to end one `Workflow`
  *    run without killing the whole session, so the move to named rows
  *    carries it along rather than dropping it.
+ * 3. **The metrics line** — `<AgentSessionHud/>`, unchanged in content and
+ *    honesty contract (status, ctx, tokens, cost, elapsed, git, thinking,
+ *    perm — a cell renders a real value or it does not render at all). That
+ *    file renders only this line; the groups above used to be cells on it too.
+ *
+ * **Why the metrics line is last, not first (#38).** The dock is bottom-
+ * anchored: `.viewport` above it takes every spare pixel, so the dock's bottom
+ * edge sits against the composer and its *last* child is the one at a fixed
+ * distance from the caret. The metrics line is the always-present, fixed-height
+ * half of the dock; the groups are the transient half, appearing and vanishing
+ * several times within one turn as tool runs start and resolve. With the
+ * metrics line first, every one of those appearances shoved it up and down and
+ * the ctx figure the user was reading jumped away mid-glance. Last, it holds
+ * still and the groups grow upward into the transcript instead.
  *
  * Renders `null` — no element at all, not an empty chrome bar — when
  * `dockHasContent` says the session has reported nothing yet (`lib/agent-dock.ts`).
@@ -830,8 +839,8 @@ export function AgentActivityDock({
 
   return (
     <div className={styles.dock} data-testid="agent-activity-dock" data-agent-dock>
-      <AgentSessionHud state={state} cwd={cwd} />
       {groups.length > 0 ? <div className={styles.groups}>{groups}</div> : null}
+      <AgentSessionHud state={state} cwd={cwd} />
     </div>
   );
 }

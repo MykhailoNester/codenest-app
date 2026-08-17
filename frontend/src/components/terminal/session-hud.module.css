@@ -276,10 +276,12 @@
   cursor: pointer;
 }
 
-/* The strip as the dock's metrics line: the dock's own `.groups` (or the
-   composer's top border) provides the rule beneath it, so the strip's own
-   bottom border would double it. `<SessionHud/>` (shell panes) never sets
-   this and is untouched. */
+/* The strip as the dock's metrics line — its *last* child since #38, so the
+   composer's own top border is always what rules the seam beneath it and the
+   strip's own bottom border would double that rule. The rule *above* it comes
+   from `.groups`' `border-bottom` when groups are showing, else from the dock's
+   `border-top`. `<SessionHud/>` (shell panes) never sets this and is
+   untouched. */
 .stripDocked {
   border-bottom: 0;
 }
