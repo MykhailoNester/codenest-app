@@ -34,10 +34,20 @@ _BLOCK_RE = re.compile(re.escape(_BEGIN) + r".*?" + re.escape(_END), re.DOTALL)
 # is disambiguated and can never symlink over the built-in.
 PROJECTS_SKILL_NAME = "projects"
 
-_PROJECTS_SKILL = """\
+# The skill's own ``description:`` line, lifted out of the template because the
+# invocables catalog reports it verbatim (``command_center_service.list_invocables``).
+# A picker row and the file the CLI actually reads must not describe the same
+# skill differently, and that can only be guaranteed by having one string.
+PROJECTS_SKILL_DESCRIPTION = (
+    "List the workspace's imported projects and resolve a project name to its "
+    'absolute path. Use when the user refers to a project by name (e.g. "work '
+    'on web-app") and you need its location on disk.'
+)
+
+_PROJECTS_SKILL = f"""\
 ---
-name: projects
-description: List the workspace's imported projects and resolve a project name to its absolute path. Use when the user refers to a project by name (e.g. "work on web-app") and you need its location on disk.
+name: {PROJECTS_SKILL_NAME}
+description: {PROJECTS_SKILL_DESCRIPTION}
 ---
 
 # Workspace projects
