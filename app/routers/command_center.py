@@ -66,6 +66,20 @@ async def list_configured_agents() -> dict[str, Any]:
     return await command_center_service.list_configured_agents(db)
 
 
+@router.get("/invocables")
+async def list_invocables(cwd: str | None = None) -> dict[str, Any]:
+    """What a session started in ``cwd`` can invoke, and with which token.
+
+    ``cwd`` scopes the answer: a path inside the workspace gets everything linked
+    into the workspace ``.claude/``; a path inside an imported project gets that
+    project's own assets; anything else gets empty lists. Omitted means the
+    workspace, which is where a new agent pane starts. See
+    ``command_center_service.list_invocables`` for the full shape.
+    """
+    db = await get_db()
+    return await command_center_service.list_invocables(db, cwd=cwd)
+
+
 @router.get("/org-agents")
 async def list_org_agents() -> list[dict[str, Any]]:
     db = await get_db()

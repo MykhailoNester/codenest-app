@@ -72,6 +72,76 @@ def _ensure_workspace_dirs() -> None:
     )
 
 
+# The three project-scoped asset tables, keyed by the workspace ``.claude/``
+# bucket they link into. Interpolated into SQL below, so this mapping is the
+# only place a table name may come from — never a caller-supplied string.
+_PROJECT_ASSET_TABLES = {
+    "agents": "project_agents",
+    "skills": "project_skills",
+    "commands": "project_commands",
+}
+
+
+async def _fetch_org_agent_rows(
+    db: aiosqlite.Connection, *, enabled_only: bool = True
+) -> list[dict]:
+    """``org_agents`` rows, oldest first.
+
+    Ordered by ``id`` because that order decides who wins a name race in
+    :func:`_collect_desired_links` — org agents claim their names before any
+    project agent gets a look.
+    """
+    where = "WHERE enabled = 1" if enabled_only else ""
+    cur = await db.execute(f"SELECT * FROM org_agents {where} ORDER BY id")
+    return [dict(r) for r in await cur.fetchall()]
+
+
+async def _fetch_project_asset_rows(
+    db: aiosqlite.Connection,
+    bucket: str,
+    *,
+    project_id: int | None = None,
+    enabled_only: bool = True,
+    order: str = "id",
+) -> list[dict]:
+    """Rows from one project-asset table with the owning project joined in.
+
+    One query serving every reader of these tables — the link builder, the
+    Agents page, and the invocables catalog — so "which rows count" is decided
+    once. Always scoped to active, non-workspace projects: an archived project's
+    agents are not invocable, and the synthetic workspace project owns none.
+
+    Args:
+        bucket: ``"agents"``, ``"skills"`` or ``"commands"``.
+        project_id: restrict to one project; ``None`` for every project.
+        enabled_only: keep only rows shared into the workspace (``enabled = 1``).
+        order: ``"id"`` (insert order — what decides a name race) or ``"name"``
+            (alphabetical, for display).
+
+    Returns:
+        Row dicts carrying every table column plus ``project_name``.
+    """
+    table = _PROJECT_ASSET_TABLES[bucket]
+    if order not in ("id", "name"):
+        raise ValueError(f"unsupported order: {order}")
+    clauses = ["p.is_active = 1", "p.is_workspace = 0"]
+    params: list[object] = []
+    if enabled_only:
+        clauses.append("t.enabled = 1")
+    if project_id is not None:
+        clauses.append("t.project_id = ?")
+        params.append(project_id)
+    cur = await db.execute(
+        f"""SELECT t.*, COALESCE(NULLIF(p.name, ''), 'project') AS project_name
+              FROM {table} t
+              JOIN projects p ON p.id = t.project_id
+             WHERE {" AND ".join(clauses)}
+             ORDER BY p.id, t.{order}""",
+        params,
+    )
+    return [dict(r) for r in await cur.fetchall()]
+
+
 async def _collect_desired_links(
     db: aiosqlite.Connection,
 ) -> tuple[list[dict], list[dict]]:
@@ -104,11 +174,8 @@ async def _collect_desired_links(
     conflicts: list[dict] = []
 
     # Org agents (always live in .claude/agents/<name>.md)
-    cur = await db.execute(
-        "SELECT id, name, install_path FROM org_agents WHERE enabled = 1 ORDER BY id"
-    )
-    for row in await cur.fetchall():
-        row_id, name, install_path = row
+    for row in await _fetch_org_agent_rows(db):
+        row_id, name, install_path = row["id"], row["name"], row["install_path"]
         safe_name = _safe_agent_name(name)
         filename = f"{safe_name}.md"
         seen_filenames.add(filename)
@@ -125,16 +192,9 @@ async def _collect_desired_links(
         )
 
     # Project agents (enabled AND project is_active)
-    cur = await db.execute(
-        """SELECT pa.id, pa.name, pa.canonical_path, p.id AS pid,
-                  COALESCE(NULLIF(p.name, ''), 'project') AS pname
-             FROM project_agents pa
-             JOIN projects p ON p.id = pa.project_id
-            WHERE pa.enabled = 1 AND p.is_active = 1 AND p.is_workspace = 0
-            ORDER BY p.id, pa.id"""
-    )
-    for row in await cur.fetchall():
-        row_id, name, canonical_path, _pid, pname = row
+    for row in await _fetch_project_asset_rows(db, "agents"):
+        row_id, name = row["id"], row["name"]
+        canonical_path, pname = row["canonical_path"], row["project_name"]
         # Shadowed: something already answers to this invocable name, so linking
         # this file would add a second agent the CLI cannot tell apart.
         owner = claimed_names.get(name)
@@ -181,19 +241,13 @@ async def _collect_desired_links(
         )
 
     # Project skills (enabled AND project is_active)
-    cur = await db.execute(
-        """SELECT ps.id, ps.name, ps.canonical_path,
-                  COALESCE(NULLIF(p.name, ''), 'project') AS pname
-             FROM project_skills ps
-             JOIN projects p ON p.id = ps.project_id
-            WHERE ps.enabled = 1 AND p.is_active = 1 AND p.is_workspace = 0
-            ORDER BY p.id, ps.id"""
-    )
+    #
     # Reserve the built-in projects skill name so a project skill named
     # "projects" is disambiguated (slug-prefixed) and can never symlink over it.
     skill_seen: set[str] = {workspace_context_service.PROJECTS_SKILL_NAME}
-    for row in await cur.fetchall():
-        row_id, name, canonical_path, pname = row
+    for row in await _fetch_project_asset_rows(db, "skills"):
+        row_id, name = row["id"], row["name"]
+        canonical_path, pname = row["canonical_path"], row["project_name"]
         safe_name = _safe_agent_name(name)
         slug = _slugify(pname)
         filename = safe_name if safe_name not in skill_seen else f"{slug}--{safe_name}"
@@ -212,17 +266,10 @@ async def _collect_desired_links(
         )
 
     # Project commands (enabled AND project is_active)
-    cur = await db.execute(
-        """SELECT pc.id, pc.name, pc.canonical_path,
-                  COALESCE(NULLIF(p.name, ''), 'project') AS pname
-             FROM project_commands pc
-             JOIN projects p ON p.id = pc.project_id
-            WHERE pc.enabled = 1 AND p.is_active = 1 AND p.is_workspace = 0
-            ORDER BY p.id, pc.id"""
-    )
     cmd_seen: set[str] = set()
-    for row in await cur.fetchall():
-        row_id, name, canonical_path, pname = row
+    for row in await _fetch_project_asset_rows(db, "commands"):
+        row_id, name = row["id"], row["name"]
+        canonical_path, pname = row["canonical_path"], row["project_name"]
         safe_name = _safe_agent_name(name)
         slug = _slugify(pname)
         base = f"{safe_name}.md"
@@ -685,81 +732,24 @@ async def list_configured_agents(db: aiosqlite.Connection) -> dict:
     enabled), one entry per project.  Items with enabled=1 appear in BOTH the
     shared section and the project section (is_shared=True marks them as shared).
     """
-    # ------------------------------------------------------------------
-    # 1. Org agents (all enabled) — always shared/workspace
-    # ------------------------------------------------------------------
-    cur = await db.execute(
-        """
-        SELECT
-            oa.id,
-            oa.name,
-            oa.display_name,
-            oa.description,
-            oa.model,
-            oa.verify_status,
-            'org' AS kind,
-            NULL AS project_id,
-            NULL AS project_name
-        FROM org_agents oa
-        WHERE oa.enabled = 1
-        ORDER BY oa.id
-        """
+    # Same rows, same predicate, as the link builder — one query per table,
+    # shared with _collect_desired_links, so this page can never disagree with
+    # what the workspace actually links. `enabled_only=False` because the page
+    # lists a project's unshared agents too, ordered by name for display.
+    org_rows = await _fetch_org_agent_rows(db)
+    project_rows = await _fetch_project_asset_rows(
+        db, "agents", enabled_only=False, order="name"
     )
-    org_rows = await cur.fetchall()
-
-    # ------------------------------------------------------------------
-    # 2. Project agents enabled=1 → shared; enabled=0 → per-project
-    # ------------------------------------------------------------------
-    cur2 = await db.execute(
-        """
-        SELECT
-            pa.id,
-            pa.name,
-            NULL            AS display_name,
-            pa.description,
-            pa.model,
-            pa.verify_status,
-            'project'       AS kind,
-            pa.enabled,
-            p.id            AS project_id,
-            p.name          AS project_name
-        FROM project_agents pa
-        JOIN projects p ON p.id = pa.project_id
-        WHERE p.is_active = 1 AND p.is_workspace = 0
-        ORDER BY p.id, pa.name
-        """
+    skill_rows = await _fetch_project_asset_rows(
+        db, "skills", enabled_only=False, order="name"
     )
-    project_rows = await cur2.fetchall()
 
-    # ------------------------------------------------------------------
-    # 3. Project skills enabled=1 → shared_skills; enabled=0 → per-project
-    # ------------------------------------------------------------------
-    cur3 = await db.execute(
-        """
-        SELECT
-            ps.id,
-            ps.name,
-            ps.canonical_path,
-            ps.verify_status,
-            ps.enabled,
-            p.id   AS project_id,
-            p.name AS project_name
-        FROM project_skills ps
-        JOIN projects p ON p.id = ps.project_id
-        WHERE p.is_active = 1 AND p.is_workspace = 0
-        ORDER BY p.id, ps.name
-        """
-    )
-    skill_rows = await cur3.fetchall()
-
-    # ------------------------------------------------------------------
-    # 4. Build response — use named column access via dict(row)
-    # ------------------------------------------------------------------
     def _agent_dict(row: dict, kind: str, *, is_shared: bool) -> dict:
         return {
             "id": row["id"],
             "name": row["name"],
-            "display_name": row["display_name"],
+            # org_agents only — a project agent has no display_name column.
+            "display_name": row.get("display_name"),
             "description": row["description"],
             "model": row["model"],
             "verify_status": row["verify_status"],
@@ -777,7 +767,7 @@ async def list_configured_agents(db: aiosqlite.Connection) -> dict:
         }
 
     # Org agents are always shared (and only appear in the shared section).
-    shared: list[dict] = [_agent_dict(dict(r), "org", is_shared=True) for r in org_rows]
+    shared: list[dict] = [_agent_dict(r, "org", is_shared=True) for r in org_rows]
     shared_skills: list[dict] = []
 
     by_project_map: dict[int, dict] = {}
@@ -791,8 +781,7 @@ async def list_configured_agents(db: aiosqlite.Connection) -> dict:
                 "skills": [],
             }
 
-    for r in project_rows:
-        row = dict(r)
+    for row in project_rows:
         enabled = int(row["enabled"])
         is_shared = enabled == 1
         pid = int(row["project_id"])
@@ -806,8 +795,7 @@ async def list_configured_agents(db: aiosqlite.Connection) -> dict:
             _agent_dict(row, "project", is_shared=is_shared)
         )
 
-    for r in skill_rows:
-        row = dict(r)
+    for row in skill_rows:
         enabled = int(row["enabled"])
         is_shared = enabled == 1
         pid = int(row["project_id"])
@@ -822,6 +810,355 @@ async def list_configured_agents(db: aiosqlite.Connection) -> dict:
     by_project = list(by_project_map.values())
 
     return {"shared": shared, "shared_skills": shared_skills, "by_project": by_project}
+
+
+# ---------------------------------------------------------------------------
+# Invocables catalog
+#
+# One answer to "what can a session started in *this* directory invoke, and with
+# exactly what token". Claude Code resolves the three kinds differently, and the
+# tokens below encode that asymmetry once so no caller has to rediscover it:
+#
+#   agents   — by frontmatter ``name:``, wherever the file sits, so the token is
+#              ``@agent-<name>`` and the filename the workspace links it under is
+#              irrelevant. (Which is also why two projects shipping a
+#              ``code-reviewer`` cannot both be linked — see
+#              :func:`_collect_desired_links`.)
+#   skills   — by the directory segment holding ``SKILL.md``, so a slug-prefixed
+#              workspace entry genuinely is a distinct skill: ``/<dirname>``.
+#   commands — by the file stem, likewise: ``/<stem>``.
+#
+# Scope comes first, because a token no session could resolve is worse than no
+# row at all: a pane rooted in the workspace resolves the workspace ``.claude/``,
+# a pane rooted in an imported project resolves that project's own ``.claude/``,
+# and a pane anywhere else resolves nothing Codenest manages. User-level assets
+# (``$CLAUDE_CONFIG_DIR/agents`` and friends, which every session also sees) are
+# outside the DB and deliberately not reported here.
+# ---------------------------------------------------------------------------
+
+
+def _agent_token(name: str) -> str:
+    """``@agent-<frontmatter name>`` — what the CLI matches an agent mention on."""
+    return f"@agent-{name}"
+
+
+def _slash_token(name: str) -> str:
+    """``/<path segment>`` — what the CLI matches a skill or command on."""
+    return f"/{name}"
+
+
+def _display_alias(declared_name: str, project_name: str | None) -> str:
+    """Picker label: ``project:name``, or the bare name for an app-owned agent.
+
+    Cosmetic only — ``invoke_token`` is what gets sent. Deliberately built from
+    the name the file *declares* rather than the possibly slug-prefixed workspace
+    entry, so the row reads the way the author of the project would recognise it.
+    """
+    return f"{project_name}:{declared_name}" if project_name else declared_name
+
+
+def _resolved(raw: str) -> Path:
+    """``raw`` expanded and symlink-resolved, for comparing two roots.
+
+    Non-strict: a cwd that no longer exists still resolves to a comparable path
+    rather than raising, and simply matches no root.
+    """
+    return Path(raw).expanduser().resolve()
+
+
+async def _resolve_invocable_scope(db: aiosqlite.Connection, cwd: str | None) -> dict:
+    """Which ``.claude/`` tree a session in *cwd* reads.
+
+    Returns ``{"scope", "cwd", "project_id", "project_name"}`` where scope is
+    ``"workspace"``, ``"project"`` or ``"unknown"``.
+
+    An absent *cwd* means the workspace: that is where a new agent pane starts
+    (``resolveWorkspaceCwd``, ``frontend/src/stores/terminal-store.ts``), so
+    treating "unspecified" as "nowhere" would empty the picker on the app's own
+    default. The deepest matching project root wins, so a project checked out
+    inside another project resolves to itself.
+    """
+    unscoped: dict = {
+        "scope": "unknown",
+        "cwd": None,
+        "project_id": None,
+        "project_name": None,
+    }
+
+    if cwd is None or not cwd.strip():
+        return {**unscoped, "scope": "workspace"}
+
+    here = _resolved(cwd)
+    workspace_root = _resolved(str(settings.WORKSPACE_ROOT))
+    if here == workspace_root or here.is_relative_to(workspace_root):
+        return {**unscoped, "scope": "workspace", "cwd": str(here)}
+
+    cur = await db.execute(
+        """SELECT id, COALESCE(NULLIF(name, ''), 'project') AS name,
+                  COALESCE(NULLIF(root_path, ''), path) AS root
+             FROM projects
+            WHERE is_active = 1 AND is_workspace = 0"""
+    )
+    best: tuple[int, str, int] | None = None  # (id, name, depth)
+    for row in await cur.fetchall():
+        root = row["root"]
+        if not root:
+            continue
+        project_root = _resolved(str(root))
+        if here != project_root and not here.is_relative_to(project_root):
+            continue
+        depth = len(project_root.parts)
+        if best is None or depth > best[2]:
+            best = (int(row["id"]), str(row["name"]), depth)
+
+    if best is None:
+        return {**unscoped, "cwd": str(here)}
+    return {
+        "scope": "project",
+        "cwd": str(here),
+        "project_id": best[0],
+        "project_name": best[1],
+    }
+
+
+def _builtin_projects_skill(claude_dir: Path) -> dict:
+    """The workspace's own ``projects`` skill, which has no DB row.
+
+    ``regenerate_workspace_links`` writes it into every workspace ``.claude/``
+    (``workspace_context_service.write_projects_skill``) and reserves its name,
+    so a workspace session really can invoke ``/projects``. Omitting it would
+    make the catalog incomplete in exactly the way that hides a working skill.
+    """
+    skill_dir = claude_dir / "skills" / workspace_context_service.PROJECTS_SKILL_NAME
+    name = workspace_context_service.PROJECTS_SKILL_NAME
+    return {
+        "kind": "builtin",
+        "name": name,
+        "alias": name,
+        "invoke_token": _slash_token(name),
+        "description": workspace_context_service.PROJECTS_SKILL_DESCRIPTION,
+        "project_id": None,
+        "project_name": None,
+        "canonical_path": str(skill_dir),
+        "link_path": str(skill_dir),
+        # The only row with no DB-backed verify state, so it is stat-ed: claiming
+        # "ok" for a file a wiped workspace no longer has would be a lie.
+        "verify_status": "ok" if skill_dir.is_dir() else "missing_target",
+        "shared": True,
+    }
+
+
+async def _workspace_invocables(db: aiosqlite.Connection) -> dict:
+    """Everything linked into the workspace ``.claude/``, keyed by kind.
+
+    Built from :func:`_collect_desired_links` rather than from the tables
+    directly: that collector *is* the definition of what the workspace links, so
+    a row here cannot claim an agent the linker dropped. Shadowed agents are
+    reported separately, never as invocable.
+    """
+    desired, conflicts = await _collect_desired_links(db)
+    claude_dir = settings.WORKSPACE_ROOT / ".claude"
+
+    org_rows = {row["id"]: row for row in await _fetch_org_agent_rows(db)}
+    project_rows = {
+        bucket: {row["id"]: row for row in await _fetch_project_asset_rows(db, bucket)}
+        for bucket in _PROJECT_ASSET_TABLES
+    }
+
+    agents: list[dict] = []
+    skills: list[dict] = [_builtin_projects_skill(claude_dir)]
+    commands: list[dict] = []
+
+    for item in desired:
+        bucket = item["bucket"]
+        link_path = str(claude_dir / bucket / item["filename"])
+        # The link path is derived the way the linker derives it, not read from
+        # the row: `link_path` holds a placeholder until a regeneration has run,
+        # and a picker must not wait for one to answer correctly.
+
+        if item["table"] == "org_agents":
+            row = org_rows.get(item["row_id"])
+            if row is None:
+                continue
+            name = str(row["name"])
+            agents.append(
+                {
+                    "kind": "org",
+                    "name": name,
+                    "alias": _display_alias(name, None),
+                    "invoke_token": _agent_token(name),
+                    "display_name": row["display_name"],
+                    "description": row["description"],
+                    "model": row["model"],
+                    "project_id": None,
+                    "project_name": None,
+                    "canonical_path": item["canonical_path"],
+                    "link_path": link_path,
+                    "verify_status": row["verify_status"],
+                    "shared": True,
+                }
+            )
+            continue
+
+        row = project_rows[bucket].get(item["row_id"])
+        if row is None:
+            continue
+        declared = str(row["name"])
+        project_name = str(row["project_name"])
+        common = {
+            "kind": "project",
+            "alias": _display_alias(declared, project_name),
+            "project_id": int(row["project_id"]),
+            "project_name": project_name,
+            "canonical_path": item["canonical_path"],
+            "link_path": link_path,
+            "verify_status": row["verify_status"],
+            "shared": True,
+        }
+
+        if bucket == "agents":
+            # The frontmatter name, not the (possibly slug-prefixed) filename:
+            # that prefix disambiguates the file on disk, never the invocation.
+            agents.append(
+                {
+                    **common,
+                    "name": declared,
+                    "invoke_token": _agent_token(declared),
+                    "display_name": None,
+                    "description": row["description"],
+                    "model": row["model"],
+                }
+            )
+        elif bucket == "skills":
+            # A skill resolves by its directory segment, so the workspace entry's
+            # name - prefix and all - is the invocable one.
+            linked = item["filename"]
+            skills.append(
+                {
+                    **common,
+                    "name": linked,
+                    "invoke_token": _slash_token(linked),
+                    # No description column on project_skills yet; #47 adds the
+                    # frontmatter read that fills this for commands and skills.
+                    "description": None,
+                }
+            )
+        else:
+            linked = Path(item["filename"]).stem
+            commands.append(
+                {
+                    **common,
+                    "name": linked,
+                    "invoke_token": _slash_token(linked),
+                    "description": None,
+                }
+            )
+
+    return {
+        "agents": agents,
+        "skills": skills,
+        "commands": commands,
+        "shadowed": conflicts,
+    }
+
+
+async def _project_invocables(
+    db: aiosqlite.Connection, project_id: int, project_name: str
+) -> dict:
+    """Everything a session rooted in one project resolves from its own ``.claude/``.
+
+    Not filtered by ``enabled``: that column controls whether an asset is *shared
+    into the workspace*, and a session already sitting in the project reads the
+    project's own files either way. For the same reason nothing here is shadowed
+    — a name collision only exists in the shared workspace, so an agent dropped
+    from it is still perfectly invocable at home.
+    """
+    agents: list[dict] = []
+    skills: list[dict] = []
+    commands: list[dict] = []
+
+    for bucket, sink in (
+        ("agents", agents),
+        ("skills", skills),
+        ("commands", commands),
+    ):
+        rows = await _fetch_project_asset_rows(
+            db, bucket, project_id=project_id, enabled_only=False, order="name"
+        )
+        for row in rows:
+            declared = str(row["name"])
+            canonical = Path(str(row["canonical_path"]))
+            shared = int(row["enabled"]) == 1
+            if bucket == "agents":
+                name = declared
+            elif bucket == "skills":
+                name = canonical.name
+            else:
+                name = canonical.stem
+            entry = {
+                "kind": "project",
+                "name": name,
+                "alias": _display_alias(declared, project_name),
+                "invoke_token": (
+                    _agent_token(name) if bucket == "agents" else _slash_token(name)
+                ),
+                "description": row["description"] if bucket == "agents" else None,
+                "project_id": project_id,
+                "project_name": project_name,
+                "canonical_path": str(canonical),
+                # Only a shared asset has a workspace link; reporting the column
+                # for an unshared one would name a path that is not there.
+                "link_path": str(row["link_path"]) if shared else None,
+                "verify_status": row["verify_status"],
+                "shared": shared,
+            }
+            if bucket == "agents":
+                entry["display_name"] = None
+                entry["model"] = row["model"]
+            sink.append(entry)
+
+    return {"agents": agents, "skills": skills, "commands": commands, "shadowed": []}
+
+
+async def list_invocables(db: aiosqlite.Connection, *, cwd: str | None = None) -> dict:
+    """Agents, skills and commands a session in *cwd* can invoke.
+
+    Shape::
+
+        {
+          "scope": "workspace" | "project" | "unknown",
+          "cwd": str|None,
+          "project_id": int|None,
+          "project_name": str|None,
+          "agents":   [{kind, name, alias, invoke_token, display_name, description,
+                        model, project_id, project_name, canonical_path, link_path,
+                        verify_status, shared}, ...],
+          "skills":   [{kind, name, alias, invoke_token, description, project_id,
+                        project_name, canonical_path, link_path, verify_status,
+                        shared}, ...],
+          "commands": [ ... same shape as skills ... ],
+          "shadowed": [{name, kind, project, canonical_path, shadowed_by,
+                        shadowed_by_kind, row_id}, ...]
+        }
+
+    ``invoke_token`` is the whole point: it is the literal text a composer
+    inserts, computed here from what the CLI actually resolves, so no caller has
+    to reconstruct it from a display name.
+
+    ``shadowed`` carries the agents left out of the workspace because another
+    agent already answers to their name (workspace scope only). They are absent
+    from ``agents`` by construction — a row in that list is always invocable.
+    """
+    scope = await _resolve_invocable_scope(db, cwd)
+    if scope["scope"] == "workspace":
+        found = await _workspace_invocables(db)
+    elif scope["scope"] == "project":
+        found = await _project_invocables(
+            db, int(scope["project_id"]), str(scope["project_name"])
+        )
+    else:
+        found = {"agents": [], "skills": [], "commands": [], "shadowed": []}
+    return {**scope, **found}
 
 
 async def promote_agent_to_org(
