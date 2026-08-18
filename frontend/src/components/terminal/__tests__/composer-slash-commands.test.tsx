@@ -74,7 +74,7 @@ vi.mock("../../../lib/agent-run-telemetry", () => ({
 vi.mock("../../../lib/api", () => ({
   useTasks: () => ({ data: [] }),
   useLibraryItems: () => ({ data: { items: [] } }),
-  useTeamMembers: () => ({ data: [] }),
+  useInvocables: () => ({ data: undefined }),
   fetchLibraryItemBySlug: vi.fn(async () => null),
   fetchSidecar: vi.fn(async () => []),
 }));

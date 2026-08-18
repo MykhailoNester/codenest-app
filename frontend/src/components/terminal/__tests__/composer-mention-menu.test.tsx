@@ -1,7 +1,12 @@
 // The `@`-mention overlay used to be a purely cosmetic, read-only div — this
-// pins that it is now a live suggestion trigger over Codenest agents, open
-// tasks and library snippets (Design decision 7/10), and that mounting it
-// costs nothing until an `@` token actually exists.
+// pins that it is now a live suggestion trigger over the workspace's invocable
+// agents and skills, open tasks and library snippets (Design decision 7/10),
+// and that mounting it costs nothing until an `@` token actually exists.
+//
+// The agent group reads the sidecar's invocables catalog, scoped to the pane's
+// cwd. It used to read the hand-curated `members` table, which is empty on a
+// normal install — so the group was structurally always empty however many
+// agents the workspace had linked, which is the bug these tests now guard.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -14,7 +19,7 @@ const {
   agentSendMock,
   useTasksMock,
   useLibraryItemsMock,
-  useTeamMembersMock,
+  useInvocablesMock,
   fetchLibraryItemBySlugMock,
 } = vi.hoisted(() => ({
   agentSendMock: vi.fn<(paneId: string, text: string) => Promise<undefined>>(
@@ -22,7 +27,7 @@ const {
   ),
   useTasksMock: vi.fn(),
   useLibraryItemsMock: vi.fn(),
-  useTeamMembersMock: vi.fn(),
+  useInvocablesMock: vi.fn<(cwd?: string | null) => unknown>(),
   fetchLibraryItemBySlugMock: vi.fn<(slug: string) => Promise<null>>(async () => null),
 }));
 
@@ -40,7 +45,7 @@ vi.mock("../../../lib/agent-run-telemetry", () => ({
 vi.mock("../../../lib/api", () => ({
   useTasks: () => useTasksMock(),
   useLibraryItems: () => useLibraryItemsMock(),
-  useTeamMembers: () => useTeamMembersMock(),
+  useInvocables: (cwd?: string | null) => useInvocablesMock(cwd),
   fetchLibraryItemBySlug: (slug: string) => fetchLibraryItemBySlugMock(slug),
   fetchSidecar: vi.fn(async () => []),
 }));
@@ -84,7 +89,7 @@ function fireStackResize(): void {
 
 const LEAF = "leaf-1";
 
-function renderComposer(): void {
+function renderComposer(cwd?: string): void {
   render(
     <AgentComposer
       leafId={LEAF}
@@ -92,9 +97,27 @@ function renderComposer(): void {
       providerId={null}
       model={null}
       permissionMode={null}
+      cwd={cwd}
       onRequestRestart={() => undefined}
     />,
   );
+}
+
+/** A catalog row as the sidecar returns it. */
+function invocable(over: Record<string, unknown>): Record<string, unknown> {
+  return {
+    kind: "project",
+    display_name: null,
+    description: null,
+    model: null,
+    project_id: 5,
+    project_name: "miragold",
+    canonical_path: "/repo/.claude/agents/x.md",
+    link_path: "/ws/.claude/agents/x.md",
+    verify_status: "ok",
+    shared: true,
+    ...over,
+  };
 }
 
 function editor(): HTMLTextAreaElement {
@@ -116,40 +139,43 @@ beforeEach(() => {
   fetchLibraryItemBySlugMock.mockClear();
   useTasksMock.mockClear();
   useLibraryItemsMock.mockClear();
-  useTeamMembersMock.mockClear();
+  useInvocablesMock.mockClear();
   useTasksMock.mockReturnValue({
     data: [{ id: 4, title: "Align the migration", status: "todo", description: "the plan" }],
   });
   useLibraryItemsMock.mockReturnValue({
     data: { items: [{ id: 1, slug: "aliasing-notes", title: "Aliasing notes", body: "…", tags: [], source: "", created_at: "", updated_at: "" }] },
   });
-  useTeamMembersMock.mockReturnValue({
-    data: [
-      {
-        id: 1,
-        name: "Alice Ops",
-        role: "ops",
-        type: "agent",
-        subtype: null,
-        department: null,
-        status: "active",
-        agent_file: "/w/.claude/agents/alice-ops.md",
-        joined_date: null,
-        notes: null,
-      },
-      {
-        id: 2,
-        name: "Bob Human",
-        role: "eng",
-        type: "human",
-        subtype: null,
-        department: null,
-        status: "active",
-        agent_file: null,
-        joined_date: null,
-        notes: null,
-      },
-    ],
+  useInvocablesMock.mockReturnValue({
+    data: {
+      scope: "workspace",
+      cwd: null,
+      project_id: null,
+      project_name: null,
+      agents: [
+        invocable({
+          name: "aliasing-agent",
+          alias: "miragold:aliasing-agent",
+          invoke_token: "@agent-aliasing-agent",
+          description: "Reviews aliasing.",
+        }),
+        invocable({
+          name: "miragold--code-reviewer",
+          alias: "miragold:code-reviewer",
+          invoke_token: "@agent-miragold--code-reviewer",
+          materialized: true,
+        }),
+      ],
+      skills: [
+        invocable({
+          name: "aliasing-skill",
+          alias: "miragold:aliasing-skill",
+          invoke_token: "/aliasing-skill",
+        }),
+      ],
+      commands: [],
+      shadowed: [],
+    },
   });
 });
 
@@ -164,19 +190,37 @@ afterEach(() => {
 });
 
 describe("@ mention menu", () => {
-  it("lists a matching agent, task and snippet with group headers", async () => {
+  it("lists a matching agent, skill, task and snippet with group headers", async () => {
     renderComposer();
     typeDraft("@ali");
 
     const listbox = await screen.findByRole("listbox");
-    expect(listbox.textContent).toContain("Alice Ops");
+    expect(listbox.textContent).toContain("miragold:aliasing-agent");
+    expect(listbox.textContent).toContain("miragold:aliasing-skill");
     expect(listbox.textContent).toContain("Align the migration");
     expect(listbox.textContent).toContain("Aliasing notes");
-    // Only the human member (not `type: "agent"`) and never appears.
-    expect(listbox.textContent).not.toContain("Bob Human");
     expect(listbox.textContent).toContain("agents");
+    expect(listbox.textContent).toContain("skills");
     expect(listbox.textContent).toContain("tasks");
     expect(listbox.textContent).toContain("snippets");
+  });
+
+  it("scopes the catalog to the pane's cwd", async () => {
+    renderComposer("/repo/miragold");
+    typeDraft("@ali");
+    await screen.findByRole("listbox");
+
+    expect(useInvocablesMock).toHaveBeenCalledWith("/repo/miragold");
+  });
+
+  it("still lists agents when the catalog fetch failed — no error state", async () => {
+    useInvocablesMock.mockReturnValue({ data: undefined });
+    renderComposer();
+    typeDraft("@ali");
+
+    const listbox = await screen.findByRole("listbox");
+    expect(listbox.textContent).toContain("Align the migration");
+    expect(listbox.textContent).not.toContain("agents");
   });
 
   it("opens nothing for a bare `@`", () => {
@@ -188,7 +232,7 @@ describe("@ mention menu", () => {
   it("opens nothing for a mid-word `@` that matches no one — round-1 gap 2", () => {
     useTasksMock.mockReturnValue({ data: [] });
     useLibraryItemsMock.mockReturnValue({ data: { items: [] } });
-    useTeamMembersMock.mockReturnValue({ data: [] });
+    useInvocablesMock.mockReturnValue({ data: undefined });
     renderComposer();
     typeDraft("user@host");
     expect(screen.queryByRole("listbox")).toBeNull();
@@ -221,15 +265,47 @@ describe("@ mention menu", () => {
     ]);
   });
 
-  it("inserts @agent-<slug> and attaches no pill when an agent row is picked", async () => {
+  it("inserts the catalog's own token and attaches no pill when an agent is picked", async () => {
     renderComposer();
     typeDraft("@ali");
     await screen.findByRole("listbox");
 
-    fireEvent.click(screen.getByText("Alice Ops"));
+    fireEvent.click(screen.getByText("miragold:aliasing-agent"));
 
-    await waitFor(() => expect(editor().value).toBe("@agent-alice-ops "));
+    await waitFor(() => expect(editor().value).toBe("@agent-aliasing-agent "));
     expect(useComposerStore.getState().panes[LEAF]?.pills ?? []).toEqual([]);
+  });
+
+  it("inserts a materialized alias's token, not its display label (#45)", async () => {
+    renderComposer();
+    typeDraft("@code-rev");
+    await screen.findByRole("listbox");
+
+    fireEvent.click(screen.getByText("miragold:code-reviewer"));
+
+    await waitFor(() =>
+      expect(editor().value).toBe("@agent-miragold--code-reviewer "),
+    );
+  });
+
+  it("inserts `/<skill>` when the pick is the whole draft", async () => {
+    renderComposer();
+    typeDraft("@alias");
+    await screen.findByRole("listbox");
+
+    fireEvent.click(screen.getByText("miragold:aliasing-skill"));
+
+    await waitFor(() => expect(editor().value).toBe("/aliasing-skill "));
+  });
+
+  it("inserts a bare skill name mid-sentence, where `/x` would not be a command", async () => {
+    renderComposer();
+    typeDraft("please use @alias");
+    await screen.findByRole("listbox");
+
+    fireEvent.click(screen.getByText("miragold:aliasing-skill"));
+
+    await waitFor(() => expect(editor().value).toBe("please use aliasing-skill "));
   });
 
   it("fetches by slug on Enter, and reports a miss or a failure — the shared resolver is really used", async () => {
@@ -255,10 +331,10 @@ describe("@ mention menu", () => {
   it("keeps the mention data probe out of the DOM until an `@` token exists — decision 10", () => {
     renderComposer();
     expect(screen.queryByRole("listbox")).toBeNull();
-    expect(useTeamMembersMock).not.toHaveBeenCalled();
+    expect(useInvocablesMock).not.toHaveBeenCalled();
 
     typeDraft("@ali");
-    expect(useTeamMembersMock).toHaveBeenCalled();
+    expect(useInvocablesMock).toHaveBeenCalled();
   });
 
   // The bug: picking a mention attaches a context pill, the pill row grows (a

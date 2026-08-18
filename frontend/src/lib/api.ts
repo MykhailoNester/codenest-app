@@ -4453,6 +4453,82 @@ export function useToggleWorkspaceProjectSkill(): UseMutationResult<
   });
 }
 
+/**
+ * One entry in the invocables catalog — an agent, skill or command a session
+ * can actually invoke.
+ *
+ * `invoke_token` is the only field a caller should ever *insert*: the sidecar
+ * computes it from what the CLI resolves (an agent by its frontmatter name, a
+ * skill by its directory segment, a command by its file stem), which is not
+ * something a display name can be munged into. `alias` is the label to *show*
+ * (`project:name`), `name` the resolved name behind the token.
+ */
+export interface InvocableItem {
+  kind: "org" | "project" | "builtin";
+  name: string;
+  alias: string;
+  invoke_token: string;
+  display_name?: string | null;
+  description: string | null;
+  model?: string | null;
+  project_id: number | null;
+  project_name: string | null;
+  canonical_path: string;
+  link_path: string | null;
+  verify_status: string;
+  shared: boolean;
+  /** Agents only: the workspace entry is a generated copy, not a link. */
+  materialized?: boolean;
+}
+
+/** An agent left out of the workspace because another one answers to its name.
+ *  Never invocable — reported so a surface can say why it is missing. */
+export interface ShadowedInvocable {
+  name: string;
+  kind: string;
+  project: string;
+  canonical_path: string;
+  shadowed_by: string;
+  shadowed_by_kind: string;
+  row_id: number;
+}
+
+export interface InvocablesCatalog {
+  scope: "workspace" | "project" | "unknown";
+  cwd: string | null;
+  project_id: number | null;
+  project_name: string | null;
+  agents: InvocableItem[];
+  skills: InvocableItem[];
+  commands: InvocableItem[];
+  shadowed: ShadowedInvocable[];
+}
+
+/**
+ * What a session started in `cwd` can invoke. `undefined` cwd means the
+ * workspace — the same default a new agent pane spawns with — so the query key
+ * carries `null` rather than dropping the entry.
+ *
+ * `staleTime` is short: agents and skills appear when a project is rescanned or
+ * a file is dropped into `.claude/`, and a picker offering yesterday's list is
+ * the bug this catalog exists to fix. #48 replaces the polling window with an
+ * invalidation on the workspace's own change event.
+ */
+export function useInvocables(
+  cwd?: string | null,
+): UseQueryResult<InvocablesCatalog, SidecarError> {
+  return useQuery<InvocablesCatalog, SidecarError>({
+    queryKey: ["command-center", "invocables", cwd ?? null],
+    queryFn: () =>
+      fetchSidecar<InvocablesCatalog>(
+        cwd
+          ? `${CC_BASE}/invocables?cwd=${encodeURIComponent(cwd)}`
+          : `${CC_BASE}/invocables`,
+      ),
+    staleTime: 5_000,
+  });
+}
+
 export function useWorkspaceHealth(): UseQueryResult<
   WorkspaceHealthData,
   SidecarError
