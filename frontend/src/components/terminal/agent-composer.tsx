@@ -12,7 +12,8 @@
  * and `/mode` are deliberately absent, since the MODEL and MODE dropdowns in
  * the row above already own those choices), and a typed `@` opens a
  * caret-anchored mention menu over
- * Codenest agents, open tasks and library snippets. See the plan's Design
+ * the workspace's invocable agents and skills, open tasks and library
+ * snippets. See the plan's Design
  * decisions 1-12 for the reasoning behind each choice below.
  */
 
@@ -119,6 +120,16 @@ interface AgentComposerProps {
   model: string | null;
   /** The permission mode persisted on the leaf; `null` means the CLI default. */
   permissionMode: string | null;
+  /**
+   * The directory this pane's session runs in, as persisted on the leaf.
+   *
+   * Only the `@`-menu uses it, to scope the invocables catalog: a workspace-rooted
+   * pane resolves the shared `.claude/`, a project-rooted one resolves that
+   * project's own. Undefined means the workspace — the same fallback
+   * `<AgentPane/>` applies when it spawns (`cwd ?? getWorkspacePath()`), so the
+   * menu offers what the session would actually resolve rather than a superset.
+   */
+  cwd?: string;
   /** Stop and respawn the session — the only way to apply a provider change,
    *  since the binary and env are fixed at spawn. */
   onRequestRestart: () => void;
@@ -656,6 +667,7 @@ export function AgentComposer({
   providerId,
   model,
   permissionMode,
+  cwd,
   onRequestRestart,
   views,
   selectedView,
@@ -1080,6 +1092,27 @@ export function AgentComposer({
     const { start } = trigger;
     if (row.kind === "agent") {
       const edit = replaceRange(draft, start, caret, row.insertText);
+      setDraft(leafId, edit.text);
+      focusCaretAt(edit.caret);
+      return;
+    }
+    if (row.kind === "skill") {
+      // A skill resolves as `/<name>`, and that form only means anything as the
+      // whole message — so a pick on an otherwise-empty draft inserts it, and a
+      // pick mid-sentence inserts the bare name instead. The name in a prompt is
+      // a hint the model can act on; a stray `/x` in the middle of a sentence is
+      // just text the CLI would not read as a command anyway.
+      // (Until #47 registers discovered skills in the slash registry, sending a
+      // bare `/<skill>` still draws the "not a Codenest command" note — the text
+      // reaches claude either way.)
+      const wholeDraft =
+        draft.slice(0, start).trim().length === 0 && draft.slice(caret).trim().length === 0;
+      const edit = replaceRange(
+        draft,
+        start,
+        caret,
+        wholeDraft ? row.insertText : row.name,
+      );
       setDraft(leafId, edit.text);
       focusCaretAt(edit.caret);
       return;
@@ -1575,7 +1608,7 @@ export function AgentComposer({
             />
           ) : null}
           {trigger?.kind === "mention" && !dismissed ? (
-            <MentionSourceProbe onSources={setSources} />
+            <MentionSourceProbe cwd={cwd} onSources={setSources} />
           ) : null}
         </div>
       </div>

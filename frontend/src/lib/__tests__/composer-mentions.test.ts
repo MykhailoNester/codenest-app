@@ -1,13 +1,43 @@
 import { describe, it, expect } from "vitest";
 import {
   buildMentionRows,
-  agentMentionSlug,
+  invocableMeta,
   replaceRange,
+  type InvocableSource,
   type MentionSources,
 } from "../composer-mentions";
 
 function sources(over: Partial<MentionSources> = {}): MentionSources {
-  return { agents: [], tasks: [], library: [], ...over };
+  return { agents: [], skills: [], tasks: [], library: [], ...over };
+}
+
+/** A catalog row as the probe projects it — the token is given, never derived. */
+function invocable(over: Partial<InvocableSource> & { name: string }): InvocableSource {
+  return {
+    label: over.name,
+    insertText: `@agent-${over.name}`,
+    projectName: null,
+    description: null,
+    ...over,
+  };
+}
+
+function agent(name: string, project?: string): InvocableSource {
+  return invocable({
+    name,
+    label: project ? `${project}:${name}` : name,
+    insertText: `@agent-${name}`,
+    projectName: project ?? null,
+  });
+}
+
+function skill(name: string, project?: string): InvocableSource {
+  return invocable({
+    name,
+    label: project ? `${project}:${name}` : name,
+    insertText: `/${name}`,
+    projectName: project ?? null,
+  });
 }
 
 describe("buildMentionRows", () => {
@@ -15,37 +45,133 @@ describe("buildMentionRows", () => {
     expect(buildMentionRows(sources(), "")).toEqual([]);
   });
 
-  it("matches an agent by name and a task by title, grouped agents then tasks then library", () => {
+  it("groups agents, then skills, then tasks, then library", () => {
     const s = sources({
-      agents: [{ name: "Alice Ops", role: "ops", agentFile: null }],
+      agents: [agent("aliasing-agent")],
+      skills: [skill("aliasing-skill")],
       tasks: [{ id: 1, title: "Fix aliasing bug", status: "todo", description: null }],
       library: [{ slug: "aliasing-notes", title: "Notes", body: "…" }],
     });
-    const rows = buildMentionRows(s, "ali");
-    expect(rows.map((r) => r.kind)).toEqual(["agent", "task", "library"]);
+    expect(buildMentionRows(s, "alias").map((r) => r.kind)).toEqual([
+      "agent",
+      "skill",
+      "task",
+      "library",
+    ]);
   });
 
-  it("caps each group at 5 and the total at 12", () => {
-    const agents = Array.from({ length: 8 }, (_, i) => ({
-      name: `Ali ${i}`,
-      role: "ops",
-      agentFile: null,
-    }));
-    const tasks = Array.from({ length: 8 }, (_, i) => ({
-      id: i,
-      title: `Ali task ${i}`,
-      status: "todo",
-      description: null,
-    }));
-    const library = Array.from({ length: 8 }, (_, i) => ({
-      slug: `ali-${i}`,
-      title: `Ali doc ${i}`,
-      body: "…",
-    }));
-    const rows = buildMentionRows(sources({ agents, tasks, library }), "ali");
-    expect(rows.filter((r) => r.kind === "agent")).toHaveLength(5);
-    expect(rows.filter((r) => r.kind === "task")).toHaveLength(5);
-    expect(rows).toHaveLength(12);
+  it("inserts the catalog's own token, including a materialized alias", () => {
+    const s = sources({
+      agents: [
+        {
+          name: "miragold--code-reviewer",
+          label: "miragold:code-reviewer",
+          insertText: "@agent-miragold--code-reviewer",
+          projectName: "miragold",
+          description: null,
+        },
+      ],
+    });
+    const [row] = buildMentionRows(s, "code-rev");
+    expect(row).toEqual({
+      kind: "agent",
+      label: "miragold:code-reviewer",
+      meta: "miragold",
+      insertText: "@agent-miragold--code-reviewer",
+    });
+  });
+
+  it("distinguishes each project's variant of one duplicated name", () => {
+    const s = sources({
+      agents: [
+        agent("codenest-app--code-reviewer", "codenest-app"),
+        agent("networa--code-reviewer", "Networa"),
+        agent("miragold--code-reviewer", "miragold"),
+      ],
+    });
+    const rows = buildMentionRows(s, "code-rev");
+    expect(rows.map((r) => r.kind === "agent" && r.insertText)).toEqual([
+      "@agent-codenest-app--code-reviewer",
+      "@agent-networa--code-reviewer",
+      "@agent-miragold--code-reviewer",
+    ]);
+  });
+
+  it("ranks a name prefix above a name substring above a project match", () => {
+    const s = sources({
+      agents: [
+        agent("test-engineer", "miragold"),
+        agent("planner", "debug-tools"),
+        agent("api-debugger", "miragold"),
+        agent("debugger", "miragold"),
+      ],
+    });
+    expect(buildMentionRows(s, "debug").map((r) => r.label)).toEqual([
+      "miragold:debugger",
+      "miragold:api-debugger",
+      "debug-tools:planner",
+    ]);
+  });
+
+  it("narrows to a project by name, because the label carries it", () => {
+    const s = sources({
+      agents: [agent("debugger", "miragold"), agent("coder-agent", "codenest-app")],
+    });
+    expect(buildMentionRows(s, "mira").map((r) => r.label)).toEqual([
+      "miragold:debugger",
+    ]);
+  });
+
+  it("does not match on the description — every needle would hit one", () => {
+    const s = sources({
+      agents: [
+        invocable({
+          name: "planner",
+          description: "Use when you need to debug a failing build",
+        }),
+      ],
+    });
+    expect(buildMentionRows(s, "debug")).toEqual([]);
+  });
+
+  it("caps each group at 8 and the total at 20", () => {
+    const many = (make: (n: string) => InvocableSource) =>
+      Array.from({ length: 12 }, (_, i) => make(`ali-${i}`));
+    const rows = buildMentionRows(
+      sources({
+        agents: many(agent),
+        skills: many(skill),
+        tasks: Array.from({ length: 12 }, (_, i) => ({
+          id: i,
+          title: `Ali task ${i}`,
+          status: "todo",
+          description: null,
+        })),
+        library: Array.from({ length: 12 }, (_, i) => ({
+          slug: `ali-${i}`,
+          title: `Ali doc ${i}`,
+          body: "…",
+        })),
+      }),
+      "ali",
+    );
+    expect(rows.filter((r) => r.kind === "agent")).toHaveLength(8);
+    expect(rows.filter((r) => r.kind === "skill")).toHaveLength(8);
+    expect(rows).toHaveLength(20);
+  });
+
+  it("carries a skill's name beside its `/` token, for the mid-sentence case", () => {
+    const rows = buildMentionRows(
+      sources({ skills: [skill("frontend-design", "miragold")] }),
+      "front",
+    );
+    expect(rows[0]).toEqual({
+      kind: "skill",
+      label: "miragold:frontend-design",
+      meta: "miragold",
+      insertText: "/frontend-design",
+      name: "frontend-design",
+    });
   });
 
   it("orders tasks in-progress, blocked, todo, backlog and excludes done", () => {
@@ -69,7 +195,8 @@ describe("buildMentionRows", () => {
 
   it("restricts to library rows for a `library:` query", () => {
     const s = sources({
-      agents: [{ name: "api helper", role: "ops", agentFile: null }],
+      agents: [agent("api-helper")],
+      skills: [skill("api-skill")],
       tasks: [{ id: 1, title: "api work", status: "todo", description: null }],
       library: [{ slug: "api-notes", title: "API notes", body: "…" }],
     });
@@ -88,28 +215,34 @@ describe("buildMentionRows", () => {
   it("offers nothing for an invalid slug", () => {
     expect(buildMentionRows(sources(), "library:Bad!")).toEqual([]);
   });
+
+  it("offers nothing when the catalog is empty — a failed fetch is not an error state", () => {
+    expect(buildMentionRows(sources(), "debug")).toEqual([]);
+  });
 });
 
-describe("agentMentionSlug", () => {
-  it("uses the agent-file stem when there is one", () => {
-    expect(
-      agentMentionSlug({ name: "Orion Ops", role: "ops", agentFile: "/w/.claude/agents/orion-ops.md" }),
-    ).toBe("orion-ops");
+describe("invocableMeta", () => {
+  it("flattens a description onto one line and clips it", () => {
+    const long = invocable({
+      name: "debugger",
+      description: "Diagnoses bugs.\n\nUse it for stack traces, crash logs, memory leaks and race conditions.",
+    });
+    const meta = invocableMeta(long);
+    expect(meta).not.toContain("\n");
+    expect(meta.length).toBeLessThanOrEqual(72);
+    expect(meta.endsWith("…")).toBe(true);
   });
 
-  it("slugifies the name when there is no agent file", () => {
-    expect(agentMentionSlug({ name: "Vega Research", role: "ops", agentFile: null })).toBe(
-      "vega-research",
+  it("flattens the literal `\\n` escapes the frontmatter scan leaves behind", () => {
+    const meta = invocableMeta(
+      invocable({ name: "x", description: "First line.\\nSecond line." }),
     );
+    expect(meta).toBe("First line. Second line.");
   });
 
-  it("is empty for a name that is all punctuation", () => {
-    expect(agentMentionSlug({ name: "!!!", role: "ops", agentFile: null })).toBe("");
-  });
-
-  it("drops an agent whose name slugifies to nothing, rather than inserting a bare @agent-", () => {
-    const s = sources({ agents: [{ name: "!!!", role: "ops", agentFile: null }] });
-    expect(buildMentionRows(s, "!!!")).toEqual([]);
+  it("falls back to the project when a file carries no description", () => {
+    expect(invocableMeta(agent("debugger", "miragold"))).toBe("miragold");
+    expect(invocableMeta(agent("orion-ops"))).toBe("");
   });
 });
 

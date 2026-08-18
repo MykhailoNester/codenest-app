@@ -974,6 +974,10 @@ export function AgentPane({
           providerId={providerId ?? null}
           model={model ?? null}
           permissionMode={permissionMode ?? null}
+          // Scopes the `@`-menu's catalog to what a session in this directory
+          // resolves; undefined falls back to the workspace, exactly as the
+          // spawn above does.
+          cwd={cwd}
           onRequestRestart={requestRestart}
           views={agentViews}
           selectedView={effectiveView}

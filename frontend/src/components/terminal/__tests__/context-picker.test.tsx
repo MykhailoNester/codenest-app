@@ -26,7 +26,7 @@ vi.mock("../../../lib/api", () => ({
   // reaches them. Vitest's proxy throws on *access*, not on link, so this
   // suite would very likely pass without them too — they are added so its
   // correctness does not depend on which branches happen to render.
-  useTeamMembers: () => ({ data: [] }),
+  useInvocables: () => ({ data: undefined }),
   fetchLibraryItemBySlug: vi.fn(async () => null),
   fetchSidecar: vi.fn(async () => []),
 }));

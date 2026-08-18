@@ -6,7 +6,12 @@
  * appear in `<AgentComposer/>` itself: that component must stay renderable
  * with no `QueryClientProvider` (`agent-pane-render.test.tsx`), so this probe
  * is mounted only while a mention is actually being typed (Design decision
- * 10), and reports its three raw arrays upward once via `onSources`.
+ * 10), and reports its raw arrays upward once via `onSources`.
+ *
+ * Agents and skills come from the sidecar's invocables catalog, scoped to the
+ * pane's cwd — not from the `members` table the agent group used to read, which
+ * is hand-curated and empty on a normal install, so the group it fed was
+ * structurally always empty however many agents the workspace had linked.
  *
  * This file exports components only — `react-refresh/only-export-components`
  * is an error in this repo's eslint config — so the `SuggestRow` type and the
@@ -14,8 +19,13 @@
  */
 
 import { useEffect, useMemo, useRef, type ReactElement } from "react";
-import { useLibraryItems, useTasks, useTeamMembers } from "../../lib/api";
-import type { MentionSources } from "../../lib/composer-mentions";
+import {
+  useInvocables,
+  useLibraryItems,
+  useTasks,
+  type InvocableItem,
+} from "../../lib/api";
+import type { InvocableSource, MentionSources } from "../../lib/composer-mentions";
 import type { SuggestRow } from "../../lib/composer-menu";
 import styles from "./agent-composer.module.css";
 
@@ -77,14 +87,31 @@ export function SuggestPanel({
   );
 }
 
+/** Catalog row → menu row. The token is carried, never derived: only the
+ *  sidecar knows what the CLI resolves for each kind. */
+function toInvocableSource(item: InvocableItem): InvocableSource {
+  return {
+    name: item.name,
+    label: item.alias,
+    insertText: item.invoke_token,
+    projectName: item.project_name,
+    description: item.description,
+  };
+}
+
 export function MentionSourceProbe({
+  cwd,
   onSources,
 }: {
+  /** The pane's working directory — scopes the catalog to what a session
+   *  started there could actually resolve. Undefined means the workspace, the
+   *  same default a pane spawns with. */
+  cwd?: string | null;
   onSources: (sources: MentionSources) => void;
 }): ReactElement | null {
-  // The same hooks `ContextPicker` uses, so they share the react-query cache
-  // rather than firing a second, redundant fetch.
-  const { data: members } = useTeamMembers();
+  // Tasks and library are the same hooks `ContextPicker` uses, so they share the
+  // react-query cache rather than firing a second, redundant fetch.
+  const { data: catalog } = useInvocables(cwd);
   const { data: tasks } = useTasks();
   const { data: library } = useLibraryItems();
 
@@ -94,9 +121,11 @@ export function MentionSourceProbe({
   // would set parent state on every render and infinite-loop.
   const sources = useMemo<MentionSources>(
     () => ({
-      agents: (members ?? [])
-        .filter((m) => m.type === "agent")
-        .map((m) => ({ name: m.name, role: m.role, agentFile: m.agent_file })),
+      // A failed or still-loading catalog degrades to no agents and no skills —
+      // the tasks and snippets groups keep working, and the menu never becomes
+      // an error surface.
+      agents: (catalog?.agents ?? []).map(toInvocableSource),
+      skills: (catalog?.skills ?? []).map(toInvocableSource),
       tasks: (tasks ?? []).map((t) => ({
         id: t.id,
         title: t.title,
@@ -109,7 +138,7 @@ export function MentionSourceProbe({
         body: item.body,
       })),
     }),
-    [members, tasks, library],
+    [catalog, tasks, library],
   );
 
   useEffect(() => {

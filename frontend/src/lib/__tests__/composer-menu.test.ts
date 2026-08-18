@@ -38,6 +38,13 @@ describe("mentionRowToSuggest", () => {
     const rows: MentionRow[] = [
       { kind: "agent", label: "Alice", meta: "ops", insertText: "@agent-alice" },
       { kind: "agent", label: "Bob", meta: "ops", insertText: "@agent-bob" },
+      {
+        kind: "skill",
+        label: "miragold:frontend-design",
+        meta: "miragold",
+        insertText: "/frontend-design",
+        name: "frontend-design",
+      },
       { kind: "task", label: "Fix it", meta: "#1 · todo", taskId: 1, title: "Fix it", description: null },
       {
         kind: "library",
@@ -51,7 +58,19 @@ describe("mentionRowToSuggest", () => {
 
     const suggested = rows.map((_row, i) => mentionRowToSuggest(rows, i));
 
-    expect(suggested.map((s) => s.group)).toEqual(["agents", null, "tasks", "snippets"]);
-    expect(suggested.map((s) => s.label)).toEqual(["Alice", "Bob", "Fix it", "Notes"]);
+    expect(suggested.map((s) => s.group)).toEqual([
+      "agents",
+      null,
+      "skills",
+      "tasks",
+      "snippets",
+    ]);
+    expect(suggested.map((s) => s.label)).toEqual([
+      "Alice",
+      "Bob",
+      "miragold:frontend-design",
+      "Fix it",
+      "Notes",
+    ]);
   });
 });

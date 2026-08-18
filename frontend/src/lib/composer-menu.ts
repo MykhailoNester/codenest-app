@@ -38,13 +38,14 @@ export function slashRowToSuggest(row: SlashRow, index: number): SuggestRow {
 
 const MENTION_GROUP: Record<MentionRow["kind"], string> = {
   agent: "agents",
+  skill: "skills",
   task: "tasks",
   library: "snippets",
   "library-ref": "snippets",
 };
 
 /**
- * `rows` is the whole ordered mention-row list — agents, then tasks, then
+ * `rows` is the whole ordered mention-row list — agents, skills, tasks, then
  * library, always grouped contiguously (`buildMentionRows`) — so the header
  * can be placed on the first row of each run and omitted on the rest. Takes
  * the array rather than a single row (a deliberate, documented departure
@@ -62,6 +63,8 @@ export function mentionRowToSuggest(
   switch (row.kind) {
     case "agent":
       return { key: `agent-${row.insertText}`, group, label: row.label, meta: row.meta };
+    case "skill":
+      return { key: `skill-${row.insertText}`, group, label: row.label, meta: row.meta };
     case "task":
       return { key: `task-${row.taskId}`, group, label: row.label, meta: row.meta };
     case "library":
