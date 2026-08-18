@@ -111,7 +111,7 @@ async def test_import_project_gets_default_profile_id(
 
     from app.services.project_import_service import import_project
 
-    async def _noop_regen(_db):
+    async def _noop_regen(_db, **_kwargs):
         return {"total": 0, "counts": {}, "failed": []}
 
     with patch(
@@ -155,7 +155,7 @@ async def test_import_project_explicit_profile_id(
 
     from app.services.project_import_service import import_project
 
-    async def _noop_regen(_db):
+    async def _noop_regen(_db, **_kwargs):
         return {"total": 0, "counts": {}, "failed": []}
 
     with patch(
@@ -199,7 +199,7 @@ async def test_list_profiles_project_count(
         proj_dir.mkdir()
         from app.services.project_import_service import import_project
 
-        async def _noop_regen(_db):
+        async def _noop_regen(_db, **_kwargs):
             return {"total": 0, "counts": {}, "failed": []}
 
         with patch(

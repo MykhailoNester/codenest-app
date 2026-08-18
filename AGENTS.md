@@ -50,7 +50,9 @@ frontend/src/         # React app: pages/, components/, lib/ (api.ts, ipc.ts, na
 src-tauri/src/        # Rust shell: lib.rs (commands/wiring), sidecar/ (spawn + health),
                       #   pty/ (terminals), agent/ (duplex claude stdio), session/,
                       #   scheduler/, tray/, workspace/, commands/,
-                      #   fswatch/ (live filesystem watcher for the workspace navigator)
+                      #   fswatch/ (live filesystem watcher for the workspace navigator;
+                      #     fswatch/catalog.rs watches each project's .claude/ and asks
+                      #     the sidecar to rescan it, on its own root set)
 src-tauri/resources/org-agents/   # bundled org agents + manifest.json (sha256 per file)
 migrations/           # append-only NNN_*.sql; 000_baseline_schema.sql is the initial DB state
 scripts/              # build-sidecar.sh, pyinstaller.spec, seed_demo.py

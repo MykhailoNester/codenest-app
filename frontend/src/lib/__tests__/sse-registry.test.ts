@@ -34,6 +34,7 @@ class FakeEventSource {
 describe("SseRegistry", () => {
   let SseRegistry: typeof import("../sse-registry").SseRegistry;
   let SSE_EVENT_NAMES: typeof import("../sse-registry").SSE_EVENT_NAMES;
+  let WORKSPACE_SSE_EVENT_NAMES: typeof import("../sse-registry").WORKSPACE_SSE_EVENT_NAMES;
 
   beforeEach(async () => {
     vi.useFakeTimers();
@@ -45,6 +46,7 @@ describe("SseRegistry", () => {
     const mod = await import("../sse-registry");
     SseRegistry = mod.SseRegistry;
     SSE_EVENT_NAMES = mod.SSE_EVENT_NAMES;
+    WORKSPACE_SSE_EVENT_NAMES = mod.WORKSPACE_SSE_EVENT_NAMES;
   });
 
   afterEach(() => {
@@ -83,6 +85,40 @@ describe("SseRegistry", () => {
     unsubB();
     expect(es.closed).toBe(true);
     expect(reg._hasEntry("agents")).toBe(false);
+  });
+
+  it("gives the workspace catalog its own connection to its own endpoint", () => {
+    // The two streams are separate connections on purpose: the catalog event
+    // (#48) is published by the Command Center, not by the agent hook ingest,
+    // and a webview with no terminal pane still needs it.
+    const reg = new SseRegistry();
+    const onCatalog = vi.fn();
+    const unsubAgents = reg.subscribe("agents", SSE_EVENT_NAMES, () => {});
+    const unsubCatalog = reg.subscribe(
+      "workspace",
+      WORKSPACE_SSE_EVENT_NAMES,
+      onCatalog,
+    );
+
+    expect(FakeEventSource.instances.length).toBe(2);
+    expect(FakeEventSource.instances[1]!.url).toBe(
+      "http://127.0.0.1:8002/api/v1/command-center/stream",
+    );
+
+    // The event name is the wire format shared with `catalog_events.py`; a
+    // rename on either side must fail here rather than silently stop firing.
+    FakeEventSource.instances[1]!.dispatch("workspace.catalog.changed", {
+      reason: "rescan",
+    });
+    expect(onCatalog).toHaveBeenCalledWith("workspace.catalog.changed", {
+      reason: "rescan",
+    });
+
+    unsubCatalog();
+    expect(FakeEventSource.instances[1]!.closed).toBe(true);
+    // …and the agents stream is untouched by the catalog's lifecycle.
+    expect(FakeEventSource.instances[0]!.closed).toBe(false);
+    unsubAgents();
   });
 
   it("reconnects after onerror with exponential backoff", () => {

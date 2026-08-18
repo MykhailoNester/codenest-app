@@ -4528,8 +4528,14 @@ export interface InvocablesCatalog {
  * `staleTime` is short: agents, skills and commands appear when a project is
  * rescanned or a file is dropped into `.claude/`, and a picker offering
  * yesterday's list is the bug this catalog exists to fix. A rescan invalidates
- * this key outright (`useRescanWorkspaceProject`); #48 replaces the polling
- * window for the on-disk case with the workspace's own change event.
+ * this key outright (`useRescanWorkspaceProject`), and so does the workspace's
+ * own `workspace.catalog.changed` event (`useCatalogChangeFeed`), which is what
+ * makes an on-disk change land in an already-open picker.
+ *
+ * `refetchOnWindowFocus` overrides the app-wide default (off) for this one
+ * query: it is the documented degradation path for the change event — a shell
+ * whose `.claude/` watcher could not start, or a project past its root cap,
+ * still refreshes the moment the user comes back to the window.
  */
 export function useInvocables(
   cwd?: string | null,
@@ -4543,6 +4549,7 @@ export function useInvocables(
           : `${CC_BASE}/invocables`,
       ),
     staleTime: 5_000,
+    refetchOnWindowFocus: true,
   });
 }
 

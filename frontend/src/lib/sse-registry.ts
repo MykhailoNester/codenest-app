@@ -14,6 +14,7 @@ import { SIDECAR_BASE_URL } from "./sidecar-url";
 
 const STREAM_URLS: Record<string, string> = {
   agents: `${SIDECAR_BASE_URL}/api/v1/agents/stream`,
+  workspace: `${SIDECAR_BASE_URL}/api/v1/command-center/stream`,
 };
 
 export const SSE_EVENT_NAMES = [
@@ -27,6 +28,13 @@ export const SSE_EVENT_NAMES = [
   "session_removed",
   "update",
 ] as const;
+
+/**
+ * The `workspace` stream's only event: the invocables catalog moved, refetch it
+ * (#48). Mirrors `catalog_events.CHANGED_EVENT` in the sidecar — the name is
+ * the wire format, so the two must agree.
+ */
+export const WORKSPACE_SSE_EVENT_NAMES = ["workspace.catalog.changed"] as const;
 
 export type SseHandler = (eventName: string, data: unknown) => void;
 

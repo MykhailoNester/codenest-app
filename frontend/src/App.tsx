@@ -37,6 +37,7 @@ import {
   useSidecarState,
 } from "./lib/ipc";
 
+import { CatalogFeedHost } from "./components/catalog-feed-host";
 import { CommandPalette } from "./components/command-palette";
 import { StartupSplash } from "./components/startup-splash";
 import { ToastHost } from "./components/toast-host";
@@ -497,6 +498,10 @@ export function App(): ReactElement {
   if (isTerminalsWindow) {
     return (
       <QueryClientProvider client={queryClient}>
+        {/* Its own document, so its own query cache and its own connection:
+            a composer here needs the catalog feed as much as the main
+            window's does. */}
+        <CatalogFeedHost />
         <TerminalWindowRoot />
       </QueryClientProvider>
     );
@@ -509,6 +514,10 @@ export function App(): ReactElement {
 
   return (
     <QueryClientProvider client={queryClient}>
+      {/* Keeps the invocables catalog live for as long as the window is open —
+          a new agent/skill/command file has to reach an already-open composer
+          without a restart (#48). */}
+      <CatalogFeedHost />
       <MemoryRouter initialEntries={["/command"]}>
         <AppInner />
       </MemoryRouter>
