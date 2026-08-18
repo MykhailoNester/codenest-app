@@ -15,6 +15,7 @@ import aiosqlite
 from app.config import settings
 from app.services import (
     agent_alias_service,
+    catalog_events,
     org_agent_service,
     symlink_service,
     workspace_context_service,
@@ -663,7 +664,7 @@ async def bootstrap(db: aiosqlite.Connection, *, force: bool = False) -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.warning("org-agent install/upgrade failed: %s", exc)
 
-    regen = await regenerate_workspace_links(db)
+    regen = await regenerate_workspace_links(db, reason="bootstrap")
 
     default_profile_id = await _ensure_default_profile(db)
     profiles_created = await _reconcile_provider_profiles(db)
@@ -684,12 +685,19 @@ async def bootstrap(db: aiosqlite.Connection, *, force: bool = False) -> dict:
     }
 
 
-async def regenerate_workspace_links(db: aiosqlite.Connection) -> dict:
+async def regenerate_workspace_links(
+    db: aiosqlite.Connection, *, reason: str = "regenerate"
+) -> dict:
     """Wipe-and-rebuild workspace .claude/ via staging dir + atomic rename.
 
     Concurrency: serialized by `_regen_lock`.
     Atomicity: writes into <workspace>/.claude.next/, then renames over .claude/.
     Crash safety: leftover .claude.next/ from a previous crash is wiped at start.
+
+    `reason` is carried into the `workspace.catalog.changed` event published at
+    the end (see `catalog_events`); it is diagnostic only — every caller's event
+    means the same thing to a client, "refetch the catalog" — so callers that
+    have nothing to add can leave it at the default.
     """
     async with _regen_lock:
         _ensure_workspace_dirs()
@@ -776,6 +784,18 @@ async def regenerate_workspace_links(db: aiosqlite.Connection) -> dict:
             logger.warning("workspace context regen failed (continuing): %s", exc)
 
         total = sum(counts.values())
+
+        # Tell every open webview the catalog moved (#48). Emitted here, after
+        # the swap and the context regen, because this is the only moment at
+        # which the workspace `.claude/` on disk, the link rows in the DB and
+        # the alias/conflict split all agree — a listener that refetches on
+        # this event can never read a half-built tree. Best-effort by
+        # construction (bounded queues, no awaiting), so a stalled subscriber
+        # cannot fail a regeneration.
+        catalog_events.publish_changed(
+            reason=reason, links=total, conflicts=len(conflicts)
+        )
+
         return {
             "total": total,
             "counts": counts,
@@ -1322,7 +1342,7 @@ async def promote_agent_to_org(
             "UPDATE project_agents SET enabled = 0 WHERE id = ?", (agent_id,)
         )
         await db.commit()
-        regen = await regenerate_workspace_links(db)
+        regen = await regenerate_workspace_links(db, reason="promote")
         return {"org_agent": detail, "already_existed": True, "regen": regen}
 
     # -- 3. Copy/symlink the file into ORG_AGENTS_DIR ------------------------
@@ -1367,7 +1387,7 @@ async def promote_agent_to_org(
     await db.commit()
 
     # -- 5. Regenerate workspace links so the new org agent gets its symlink --
-    regen = await regenerate_workspace_links(db)
+    regen = await regenerate_workspace_links(db, reason="promote")
 
     detail_cur = await db.execute(
         "SELECT id, name, display_name, description, model, install_path, "

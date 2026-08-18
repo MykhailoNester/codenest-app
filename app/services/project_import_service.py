@@ -150,7 +150,7 @@ async def import_project(
 
     await db.commit()
 
-    regen = await command_center_service.regenerate_workspace_links(db)
+    regen = await command_center_service.regenerate_workspace_links(db, reason="import")
 
     return {
         "project_id": project_id,
@@ -350,7 +350,7 @@ async def rescan_project(db: aiosqlite.Connection, project_id: int) -> dict:
     )
     await db.commit()
 
-    regen = await command_center_service.regenerate_workspace_links(db)
+    regen = await command_center_service.regenerate_workspace_links(db, reason="rescan")
 
     return {
         "project_id": project_id,

@@ -41,6 +41,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::commands::docs::require_home_scope;
 use crate::commands::fs_scope::{is_excluded_relative, resolve_in_home_scope, EXCLUDED_DIRS};
 
+/// The catalog's own watcher over each project's `.claude/` tree. Same
+/// `notify` plumbing, deliberately not the same root set — see the module doc.
+pub mod catalog;
+
 /// macOS FSEvents gives one cheap kernel watch per tree; Linux inotify needs
 /// a descriptor per directory and hits `max_user_watches` on a large
 /// monorepo. Past this many accepted roots, extras land in `rejected` with a

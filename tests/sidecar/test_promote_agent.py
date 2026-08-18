@@ -103,7 +103,7 @@ async def test_import_project_agents_enabled_by_default(
     from app.services.project_import_service import import_project
 
     # Patch regenerate to avoid needing a real workspace directory
-    async def _noop_regen(_db):
+    async def _noop_regen(_db, **_kwargs):
         return {"total": 0, "counts": {}, "failed": []}
 
     with patch(
@@ -142,7 +142,7 @@ async def test_import_project_skills_enabled_by_default(
 
     from app.services.project_import_service import import_project
 
-    async def _noop_regen(_db):
+    async def _noop_regen(_db, **_kwargs):
         return {"total": 0, "counts": {}, "failed": []}
 
     with patch(
@@ -204,7 +204,7 @@ async def test_rescan_new_agents_enabled_by_default(
 
     from app.services.project_import_service import rescan_project
 
-    async def _noop_regen(_db):
+    async def _noop_regen(_db, **_kwargs):
         return {"total": 0, "counts": {}, "failed": []}
 
     with patch(
@@ -254,7 +254,7 @@ async def test_promote_agent_creates_org_row(
         patch.object(real_settings, "WORKSPACE_ROOT", tmp_path / "workspace"),
     ):
         # Patch regenerate so we don't need a full workspace
-        async def _noop_regen(_db):
+        async def _noop_regen(_db, **_kwargs):
             return {"total": 0, "counts": {}, "failed": []}
 
         with patch(
@@ -302,7 +302,7 @@ async def test_promote_agent_idempotent(
         patch.object(real_settings, "WORKSPACE_ROOT", tmp_path / "workspace"),
     ):
 
-        async def _noop_regen(_db):
+        async def _noop_regen(_db, **_kwargs):
             return {"total": 0, "counts": {}, "failed": []}
 
         with patch(

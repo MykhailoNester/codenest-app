@@ -351,6 +351,14 @@ pub fn run() {
     let fs_watch = Arc::new(fswatch::FsWatchManager::new());
     let fs_watch_for_close = Arc::clone(&fs_watch);
 
+    // The catalog's own `.claude/` watcher (#48) — a separate root set from the
+    // navigator's on purpose (see `fswatch::catalog`'s module doc). Started in
+    // `setup` once the sidecar is up; pre-cloned for the CloseRequested handler
+    // so its thread is stopped before the sidecar it talks to goes down.
+    let catalog_watch = Arc::new(fswatch::catalog::CatalogWatcher::new());
+    let catalog_watch_for_setup = Arc::clone(&catalog_watch);
+    let catalog_watch_for_close = Arc::clone(&catalog_watch);
+
     // Registry of in-flight scheduled-run process groups. The scheduler inserts
     // on launch / removes on finish; the main window's CloseRequested handler
     // stops any survivors so closing the app never leaves scheduled `claude`
@@ -423,6 +431,13 @@ pub fn run() {
                     run_registry.clone(),
                 );
             }
+
+            // Watch every imported project's `.claude/` so an agent, skill or
+            // command file dropped in mid-session becomes invocable without a
+            // restart. Thread-only, like the scheduler: it retries the project
+            // fetch until the sidecar answers, so starting it here rather than
+            // gating on health costs nothing.
+            catalog_watch_for_setup.start();
 
             // Tray icon (Phase 3.4) — init after sidecar start so the initial
             // menu refresh can reach the API if the sidecar comes up quickly.
@@ -559,6 +574,9 @@ pub fn run() {
                     // before the sidecar goes down; no-op if nothing was
                     // ever watched.
                     fs_watch_for_close.stop();
+                    // Same for the catalog watcher — it POSTs rescans to the
+                    // sidecar, so it must stop before the sidecar does.
+                    catalog_watch_for_close.stop();
                     let sidecar = window.state::<sidecar::SidecarManager>();
                     sidecar.shutdown();
                     pty_manager.close_all();

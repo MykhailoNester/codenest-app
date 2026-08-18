@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.database import get_db
 from app.services import (
+    catalog_events,
     command_center_service,
     project_import_service,
     project_scanner_service,
@@ -78,6 +83,63 @@ async def list_invocables(cwd: str | None = None) -> dict[str, Any]:
     """
     db = await get_db()
     return await command_center_service.list_invocables(db, cwd=cwd)
+
+
+# ─── Catalog change stream ───────────────────────────────────────────────────
+#
+# The live half of the invocables catalog (#48): every mutation ends in
+# `regenerate_workspace_links`, which publishes one `workspace.catalog.changed`
+# message, and every open webview holds one connection here and refetches on it.
+# Nothing about the catalog itself rides the wire — the catalog is cwd-scoped, so
+# a broadcast has no single correct payload; the event only says "ask again".
+
+
+# How long to wait for an event before writing a keep-alive comment. Same 15 s
+# the agents and notifications streams use.
+_STREAM_PING_SECS = 15.0
+
+
+@router.get("/stream")
+async def stream_catalog_events() -> StreamingResponse:
+    """SSE stream of `workspace.catalog.changed` events."""
+
+    async def gen() -> AsyncGenerator[bytes, None]:
+        q = catalog_events.subscribe()
+        try:
+            yield b": connected\n\n"
+            # The reconnect reconciliation. A client that was disconnected while
+            # a regeneration happened has no way to learn it missed one, so a
+            # fresh connection always starts with a change event: one refetch per
+            # connection, which is also what makes a sidecar restart self-heal.
+            connected = json.dumps(
+                {
+                    "kind": catalog_events.CHANGED_EVENT,
+                    "reason": "stream_connected",
+                    "links": None,
+                    "conflicts": None,
+                }
+            )
+            yield f"event: {catalog_events.CHANGED_EVENT}\ndata: {connected}\n\n".encode()
+
+            while True:
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=_STREAM_PING_SECS)
+                    payload = json.dumps(msg, default=str)
+                    yield f"event: {catalog_events.CHANGED_EVENT}\ndata: {payload}\n\n".encode()
+                except asyncio.TimeoutError:
+                    yield b": ping\n\n"
+        finally:
+            catalog_events.unsubscribe(q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("/org-agents")
@@ -173,7 +235,7 @@ async def patch_agent(project_id: int, agent_id: int, req: ToggleAgentRequest) -
     await db.commit()
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="agent not found")
-    regen = await command_center_service.regenerate_workspace_links(db)
+    regen = await command_center_service.regenerate_workspace_links(db, reason="toggle")
     return {"ok": True, "links_regenerated": regen["total"]}
 
 
@@ -187,7 +249,7 @@ async def patch_skill(project_id: int, skill_id: int, req: ToggleAgentRequest) -
     await db.commit()
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="skill not found")
-    regen = await command_center_service.regenerate_workspace_links(db)
+    regen = await command_center_service.regenerate_workspace_links(db, reason="toggle")
     return {"ok": True, "links_regenerated": regen["total"]}
 
 
@@ -203,7 +265,7 @@ async def patch_command(
     await db.commit()
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="command not found")
-    regen = await command_center_service.regenerate_workspace_links(db)
+    regen = await command_center_service.regenerate_workspace_links(db, reason="toggle")
     return {"ok": True, "links_regenerated": regen["total"]}
 
 
@@ -483,5 +545,7 @@ async def delete_project(project_id: int) -> dict:
     # "Unassigned" and agent_sessions.project_id is nullified before the row
     # is deleted (avoids FK violation when tasks reference this project).
     await project_service.delete_project(db, project_id)
-    regen = await command_center_service.regenerate_workspace_links(db)
+    regen = await command_center_service.regenerate_workspace_links(
+        db, reason="project_delete"
+    )
     return {"deleted": True, "links_regenerated": regen["total"]}
