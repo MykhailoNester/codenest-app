@@ -23,6 +23,11 @@ class LinkType(str, Enum):
     SYMLINK = "symlink"
     HARDLINK = "hardlink"
     JUNCTION = "junction"
+    # Not a link at all: a generated file whose frontmatter differs from its
+    # source, written by agent_alias_service when two projects ship an agent of
+    # the same name. Recorded so a row says plainly that its workspace entry is
+    # a copy and edits to it do not reach the project. (migration 006)
+    COPY = "copy"
 
 
 def create_link(src: Path, dst: Path) -> LinkType:

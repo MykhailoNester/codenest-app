@@ -71,8 +71,13 @@ async def _insert_asset(
     *,
     enabled: int = 1,
     canonical: str | None = None,
+    aliasable: bool = True,
 ) -> int:
-    """Insert one project_agents / project_skills / project_commands row."""
+    """Insert one project_agents / project_skills / project_commands row.
+
+    ``aliasable=False`` leaves ``frontmatter_name_raw`` NULL, i.e. an agent file
+    that declares no ``name:`` and so cannot be given an alias.
+    """
     table = {
         "agents": "project_agents",
         "skills": "project_skills",
@@ -87,12 +92,13 @@ async def _insert_asset(
     if bucket == "agents":
         await db.execute(
             """INSERT INTO project_agents
-                   (project_id, name, description, model, canonical_path,
-                    link_path, link_type, enabled, verify_status)
-               VALUES (?, ?, ?, 'sonnet', ?, ?, 'symlink', ?, 'ok')""",
+                   (project_id, name, frontmatter_name_raw, description, model,
+                    canonical_path, link_path, link_type, enabled, verify_status)
+               VALUES (?, ?, ?, ?, 'sonnet', ?, ?, 'symlink', ?, 'ok')""",
             (
                 project_id,
                 name,
+                name if aliasable else None,
                 f"description of {name}",
                 path,
                 f"/placeholder/{project_id}/{name}.md",
@@ -179,15 +185,18 @@ async def test_agent_token_is_the_frontmatter_name(migrated_db, workspace):
     assert agents["coder-agent"]["alias"] == "codenest-app:coder-agent"
     assert agents["coder-agent"]["project_name"] == "codenest-app"
     assert agents["coder-agent"]["model"] == "sonnet"
+    # Uncontested, so it is linked rather than generated.
+    assert agents["coder-agent"]["materialized"] is False
 
 
 @pytest.mark.asyncio
-async def test_shadowed_agent_is_reported_but_never_invocable(migrated_db, workspace):
-    """Two projects shipping `code-reviewer`: one is linked, the other is not.
+async def test_duplicated_agent_names_are_all_invocable_under_aliases(
+    migrated_db, workspace
+):
+    """Two projects shipping `code-reviewer`: both reachable, neither ambiguous.
 
-    The CLI resolves an agent by frontmatter name, so the second file could only
-    ever be ambiguous — it must not appear in `agents` with a token that would
-    reach the first one.
+    The token carries the alias the generated copy declares; the label keeps the
+    name the project itself uses, so a picker row still reads like the project.
     """
     first = await _insert_project(migrated_db, "codenest-app", "/repo/codenest-app")
     second = await _insert_project(migrated_db, "miragold", "/repo/miragold")
@@ -196,7 +205,33 @@ async def test_shadowed_agent_is_reported_but_never_invocable(migrated_db, works
 
     result = await list_invocables(migrated_db)
 
+    assert result["shadowed"] == []
+    assert {a["invoke_token"] for a in result["agents"]} == {
+        "@agent-codenest-app--code-reviewer",
+        "@agent-miragold--code-reviewer",
+    }
+    assert {a["alias"] for a in result["agents"]} == {
+        "codenest-app:code-reviewer",
+        "miragold:code-reviewer",
+    }
+    assert all(a["materialized"] for a in result["agents"])
+
+
+@pytest.mark.asyncio
+async def test_an_unaliasable_duplicate_is_reported_never_invocable(
+    migrated_db, workspace
+):
+    """A file with no frontmatter `name:` cannot be renamed, so when two of them
+    claim one name the second is reported instead of offered."""
+    first = await _insert_project(migrated_db, "codenest-app", "/repo/codenest-app")
+    second = await _insert_project(migrated_db, "miragold", "/repo/miragold")
+    await _insert_asset(migrated_db, "agents", first, "code-reviewer", aliasable=False)
+    await _insert_asset(migrated_db, "agents", second, "code-reviewer", aliasable=False)
+
+    result = await list_invocables(migrated_db)
+
     assert [a["project_name"] for a in result["agents"]] == ["codenest-app"]
+    assert [a["invoke_token"] for a in result["agents"]] == ["@agent-code-reviewer"]
     assert len(result["shadowed"]) == 1
     shadowed = result["shadowed"][0]
     assert shadowed["name"] == "code-reviewer"
@@ -329,9 +364,11 @@ async def test_project_scope_includes_unshared_assets(migrated_db, workspace, tm
 
 
 @pytest.mark.asyncio
-async def test_shadowed_agent_is_still_invocable_in_its_own_project(
+async def test_an_aliased_agent_keeps_its_bare_name_in_its_own_project(
     migrated_db, workspace, tmp_path
 ):
+    """The alias exists to disambiguate the *shared* workspace. A session rooted in
+    the project reads the project's own file, which declares the plain name."""
     root = tmp_path / "repo" / "miragold"
     root.mkdir(parents=True)
     first = await _insert_project(migrated_db, "codenest-app", tmp_path / "repo/cn")

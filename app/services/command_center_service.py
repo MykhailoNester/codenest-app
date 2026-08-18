@@ -13,7 +13,12 @@ from pathlib import Path
 import aiosqlite
 
 from app.config import settings
-from app.services import org_agent_service, symlink_service, workspace_context_service
+from app.services import (
+    agent_alias_service,
+    org_agent_service,
+    symlink_service,
+    workspace_context_service,
+)
 from app.services import workspace_state_service as ws_state
 from app.services._sql import slugify as _slugify_base
 
@@ -147,21 +152,36 @@ async def _collect_desired_links(
 ) -> tuple[list[dict], list[dict]]:
     """Return ``(desired_links, agent_name_conflicts)`` from the DB.
 
-    Each desired item: {table, row_id, bucket, filename, canonical_path}.
-    Org agents win on collision (org_agents are listed first).
+    Each desired item: {table, row_id, bucket, filename, alias, materialize,
+    canonical_path}. ``alias`` is the name the entry is invocable by;
+    ``materialize`` asks the linker for a generated copy rather than a link.
+    Org agents claim their names first and are never aliased.
 
-    **Agents are additionally deduplicated by invocable name.** Claude Code
-    resolves an agent by its frontmatter ``name:``, not by its filename, so the
-    slug-prefixed filenames below do *not* disambiguate two projects that both
-    ship a ``code-reviewer``: both files would still declare that one name and
-    the CLI would silently pick one of them. A symlink cannot fix that — the link
-    and its target are the same bytes — so the shadowed agent is left out of the
-    workspace entirely and reported instead. Linking a file the CLI will ignore
-    would only make the ambiguity invisible.
+    **Agents are named by their frontmatter, not their filename.** Claude Code
+    resolves an agent by the ``name:`` inside the file, so a slug-prefixed
+    *filename* does nothing to separate two projects that both ship a
+    ``code-reviewer`` — both files still declare that one name, and a symlink
+    cannot change that because the link and its target are the same bytes. So a
+    contested name is handed out differently: every claimant is aliased to
+    ``<project-slug>--<name>`` and the entry is materialized (a copy with its
+    frontmatter rewritten — ``agent_alias_service``) instead of linked.
 
-    Skills and commands are *not* deduplicated this way: they resolve by path
-    segment (``skills/<name>/SKILL.md``, ``commands/<name>.md``), so prefixing
-    their workspace entry genuinely does disambiguate them.
+    Nobody keeps the bare form of a contested name, deliberately: if the first
+    project to be imported kept it, importing a second would leave prompts
+    pointing at whichever project happened to win a race. A name only one project
+    claims stays bare and stays a symlink, so the common case keeps edit-through
+    and short tokens.
+
+    The one row that still cannot be given a name is a file that declares no
+    frontmatter ``name:`` (``frontmatter_name_raw IS NULL``) and whose bare name
+    is already taken: there is nothing in it to rewrite, so it is reported as a
+    conflict rather than linked under a name it does not answer to. An
+    un-aliasable claimant is given the bare name in preference to an aliasable
+    one for exactly that reason.
+
+    Skills and commands need none of this: they resolve by path segment
+    (``skills/<name>/SKILL.md``, ``commands/<name>.md``), so prefixing their
+    workspace entry genuinely does disambiguate them.
 
     Names are compared exactly. A case-only difference is left as two distinct
     agents deliberately: hiding one that the CLI might well treat as separate is
@@ -186,19 +206,65 @@ async def _collect_desired_links(
                 "row_id": row_id,
                 "bucket": "agents",
                 "filename": filename,
+                "alias": name,
+                "materialize": False,
                 "canonical_path": install_path,
                 "count_key": "org_agents_linked",
             }
         )
 
     # Project agents (enabled AND project is_active)
-    for row in await _fetch_project_asset_rows(db, "agents"):
+    #
+    # Two passes: count who claims each name, then hand the names out. Counting
+    # first is what makes the outcome independent of import order — a contested
+    # name is aliased for every claimant, including the one that would have won
+    # a first-come race.
+    project_agent_rows = await _fetch_project_asset_rows(db, "agents")
+    claimant_count: dict[str, int] = {}
+    for row in project_agent_rows:
+        claimant_count[row["name"]] = claimant_count.get(row["name"], 0) + 1
+
+    for row in project_agent_rows:
         row_id, name = row["id"], row["name"]
         canonical_path, pname = row["canonical_path"], row["project_name"]
-        # Shadowed: something already answers to this invocable name, so linking
-        # this file would add a second agent the CLI cannot tell apart.
-        owner = claimed_names.get(name)
-        if owner is not None:
+        safe_name = _safe_agent_name(name)
+        slug = _slugify(pname)
+        # Aliasing rewrites the frontmatter `name:` line, so a file that declares
+        # none cannot be aliased at all. The scanner records exactly that as
+        # `frontmatter_name_raw IS NULL`, so the decision stays a DB read.
+        aliasable = row["frontmatter_name_raw"] is not None
+        contested = claimant_count[name] > 1 or name in claimed_names
+
+        if contested and aliasable:
+            # NB: the alias is *not* run through _safe_agent_name — that collapses
+            # runs of dashes, which would eat the `--` seam. Both halves are
+            # already sanitised individually.
+            alias = agent_alias_service.alias_name(slug, safe_name)
+            attempts = [
+                (alias, f"{alias}.md"),
+                (f"{alias}-{row_id}", f"{alias}-{row_id}.md"),
+            ]
+        else:
+            # Bare name, symlinked, as before — including the filename-only
+            # escapes for two distinct names that sanitise to the same file.
+            attempts = [
+                (name, f"{safe_name}.md"),
+                (name, f"{slug}--{safe_name}.md"),
+                (name, f"{slug}--{safe_name}-{row_id}.md"),
+            ]
+
+        chosen: tuple[str, str] | None = next(
+            (
+                (invocable, filename)
+                for invocable, filename in attempts
+                if invocable not in claimed_names and filename not in seen_filenames
+            ),
+            None,
+        )
+        if chosen is None:
+            # Nothing left to call it: something already answers to this name and
+            # the file cannot be rewritten to answer to another.
+            owner = claimed_names.get(name, {"kind": "project_agent", "owner": pname})
             conflicts.append(
                 {
                     "name": name,
@@ -211,23 +277,13 @@ async def _collect_desired_links(
                 }
             )
             continue
-        claimed_names[name] = {
+
+        invocable, filename = chosen
+        claimed_names[invocable] = {
             "kind": "project_agent",
             "owner": pname,
-            "name": name,
+            "name": invocable,
         }
-        safe_name = _safe_agent_name(name)
-        slug = _slugify(pname)
-        base = f"{safe_name}.md"
-        # On collision with org agents OR another project agent, prefix with slug
-        if base in seen_filenames or f"{slug}--{safe_name}.md" in seen_filenames:
-            filename = f"{slug}--{safe_name}.md"
-        else:
-            # Default: use plain frontmatter name; prefix only on collision
-            filename = base
-        # If still colliding after prefix, append row_id
-        if filename in seen_filenames:
-            filename = f"{slug}--{safe_name}-{row_id}.md"
         seen_filenames.add(filename)
         desired.append(
             {
@@ -235,6 +291,10 @@ async def _collect_desired_links(
                 "row_id": row_id,
                 "bucket": "agents",
                 "filename": filename,
+                "alias": invocable,
+                # An aliased entry has to be generated: a link would carry the
+                # project's own `name:` and collide all over again.
+                "materialize": invocable != name,
                 "canonical_path": canonical_path,
                 "count_key": "project_agents_linked",
             }
@@ -260,6 +320,9 @@ async def _collect_desired_links(
                 "row_id": row_id,
                 "bucket": "skills",
                 "filename": filename,  # NB: a directory name, not .md
+                # A skill resolves by that directory name, so it is also the alias.
+                "alias": filename,
+                "materialize": False,
                 "canonical_path": canonical_path,
                 "count_key": "skills_linked",
             }
@@ -283,6 +346,9 @@ async def _collect_desired_links(
                 "row_id": row_id,
                 "bucket": "commands",
                 "filename": filename,
+                # A command resolves by its file stem.
+                "alias": Path(filename).stem,
+                "materialize": False,
                 "canonical_path": canonical_path,
                 "count_key": "commands_linked",
             }
@@ -654,7 +720,14 @@ async def regenerate_workspace_links(db: aiosqlite.Connection) -> dict:
             src = Path(item["canonical_path"])
             dst = staging / item["bucket"] / item["filename"]
             try:
-                lt = symlink_service.create_link(src, dst)
+                if item["materialize"]:
+                    # An aliased agent is generated rather than linked: the copy
+                    # declares `name: <alias>`, which is the only way the CLI can
+                    # tell it apart from the namesake it shares a project-relative
+                    # path with.
+                    lt = agent_alias_service.materialize(src, dst, alias=item["alias"])
+                else:
+                    lt = symlink_service.create_link(src, dst)
                 counts[item["count_key"]] += 1
                 final_link_path = str(claude / item["bucket"] / item["filename"])
                 await db.execute(
@@ -669,6 +742,17 @@ async def regenerate_workspace_links(db: aiosqlite.Connection) -> dict:
                     (_now_iso(), item["row_id"]),
                 )
                 failed.append({"link": str(dst), "reason": "missing_target"})
+            except agent_alias_service.AliasRewriteError as exc:
+                # The file no longer declares the name the last scan recorded, so
+                # there is nothing to rewrite. `mismatch` is the row state for
+                # precisely that, and only project_agents is ever materialized —
+                # the other two tables' CHECK does not allow the value.
+                await db.execute(
+                    f"UPDATE {item['table']} SET verify_status = 'mismatch', "
+                    f"last_verified_at = ? WHERE id = ?",
+                    (_now_iso(), item["row_id"]),
+                )
+                failed.append({"link": str(dst), "reason": f"alias rewrite: {exc}"})
             except OSError as exc:
                 failed.append({"link": str(dst), "reason": str(exc)})
 
@@ -980,7 +1064,7 @@ async def _workspace_invocables(db: aiosqlite.Connection) -> dict:
             row = org_rows.get(item["row_id"])
             if row is None:
                 continue
-            name = str(row["name"])
+            name = str(item["alias"])  # org agents are never aliased
             agents.append(
                 {
                     "kind": "org",
@@ -996,6 +1080,7 @@ async def _workspace_invocables(db: aiosqlite.Connection) -> dict:
                     "link_path": link_path,
                     "verify_status": row["verify_status"],
                     "shared": True,
+                    "materialized": False,
                 }
             )
             continue
@@ -1016,23 +1101,26 @@ async def _workspace_invocables(db: aiosqlite.Connection) -> dict:
             "shared": True,
         }
 
+        # Whatever the collector allocated is what the CLI will resolve: the
+        # frontmatter name for an agent (rewritten to `<slug>--<name>` when the
+        # entry is a materialized alias), the directory segment for a skill, the
+        # file stem for a command.
+        linked = str(item["alias"])
         if bucket == "agents":
-            # The frontmatter name, not the (possibly slug-prefixed) filename:
-            # that prefix disambiguates the file on disk, never the invocation.
             agents.append(
                 {
                     **common,
-                    "name": declared,
-                    "invoke_token": _agent_token(declared),
+                    "name": linked,
+                    "invoke_token": _agent_token(linked),
                     "display_name": None,
                     "description": row["description"],
                     "model": row["model"],
+                    # True when the workspace entry is a generated copy rather
+                    # than a link — edits to it do not reach the project.
+                    "materialized": bool(item["materialize"]),
                 }
             )
         elif bucket == "skills":
-            # A skill resolves by its directory segment, so the workspace entry's
-            # name - prefix and all - is the invocable one.
-            linked = item["filename"]
             skills.append(
                 {
                     **common,
@@ -1044,7 +1132,6 @@ async def _workspace_invocables(db: aiosqlite.Connection) -> dict:
                 }
             )
         else:
-            linked = Path(item["filename"]).stem
             commands.append(
                 {
                     **common,
@@ -1115,6 +1202,8 @@ async def _project_invocables(
             if bucket == "agents":
                 entry["display_name"] = None
                 entry["model"] = row["model"]
+                # A project reads its own file directly; nothing is generated.
+                entry["materialized"] = False
             sink.append(entry)
 
     return {"agents": agents, "skills": skills, "commands": commands, "shadowed": []}
