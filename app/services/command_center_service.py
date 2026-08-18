@@ -912,6 +912,10 @@ async def list_configured_agents(db: aiosqlite.Connection) -> dict:
 #              workspace entry genuinely is a distinct skill: ``/<dirname>``.
 #   commands — by the file stem, likewise: ``/<stem>``.
 #
+# All three carry a ``description`` read from the file's frontmatter at scan time
+# (migration 007), and a command carries its ``argument-hint`` too — a picker row
+# that can only say a name is barely worth offering.
+#
 # Scope comes first, because a token no session could resolve is worse than no
 # row at all: a pane rooted in the workspace resolves the workspace ``.claude/``,
 # a pane rooted in an imported project resolves that project's own ``.claude/``,
@@ -1126,9 +1130,7 @@ async def _workspace_invocables(db: aiosqlite.Connection) -> dict:
                     **common,
                     "name": linked,
                     "invoke_token": _slash_token(linked),
-                    # No description column on project_skills yet; #47 adds the
-                    # frontmatter read that fills this for commands and skills.
-                    "description": None,
+                    "description": row["description"],
                 }
             )
         else:
@@ -1137,7 +1139,10 @@ async def _workspace_invocables(db: aiosqlite.Connection) -> dict:
                     **common,
                     "name": linked,
                     "invoke_token": _slash_token(linked),
-                    "description": None,
+                    "description": row["description"],
+                    # Commands only: the CLI's own `argument-hint` frontmatter
+                    # key, so a `/` menu row can say what follows the name.
+                    "argument_hint": row["argument_hint"],
                 }
             )
 
@@ -1189,7 +1194,7 @@ async def _project_invocables(
                 "invoke_token": (
                     _agent_token(name) if bucket == "agents" else _slash_token(name)
                 ),
-                "description": row["description"] if bucket == "agents" else None,
+                "description": row["description"],
                 "project_id": project_id,
                 "project_name": project_name,
                 "canonical_path": str(canonical),
@@ -1204,6 +1209,8 @@ async def _project_invocables(
                 entry["model"] = row["model"]
                 # A project reads its own file directly; nothing is generated.
                 entry["materialized"] = False
+            elif bucket == "commands":
+                entry["argument_hint"] = row["argument_hint"]
             sink.append(entry)
 
     return {"agents": agents, "skills": skills, "commands": commands, "shadowed": []}
@@ -1225,7 +1232,7 @@ async def list_invocables(db: aiosqlite.Connection, *, cwd: str | None = None) -
           "skills":   [{kind, name, alias, invoke_token, description, project_id,
                         project_name, canonical_path, link_path, verify_status,
                         shared}, ...],
-          "commands": [ ... same shape as skills ... ],
+          "commands": [ ... same shape as skills, plus argument_hint ... ],
           "shadowed": [{name, kind, project, canonical_path, shadowed_by,
                         shadowed_by_kind, row_id}, ...]
         }

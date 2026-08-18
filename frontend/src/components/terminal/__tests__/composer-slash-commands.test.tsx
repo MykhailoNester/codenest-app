@@ -67,14 +67,27 @@ vi.mock("../../../lib/agent-run-telemetry", () => ({
     recordAgentExitedMock(paneId, exitCode, sessionId),
 }));
 
-// No test in this file types an `@`, but a `vi.mock` factory replaces the
-// module wholesale, and `agent-composer.tsx` statically imports
-// `composer-suggest.tsx` (the mention menu's data probe), which reaches
-// these on any render path that mounts it.
+// A `vi.mock` factory replaces the module wholesale, and `agent-composer.tsx`
+// statically imports `composer-suggest.tsx` (the menus' data probe), which
+// reaches these on any render path that mounts it — which now includes typing a
+// `/`, because the slash menu is fed from the same invocables catalog (#47).
+// `catalogRef` is a hoisted holder so a test can seed that catalog before
+// rendering; `undefined` is the still-loading/failed shape.
+//
+// Each hook returns one *stable* `data`, the way react-query does. Rebuilding
+// `{ data: [] }` per call would make the probe's `sources` memo recompute every
+// render, its `onSources` effect fire every render, and the parent setState that
+// effect performs re-render forever — a live infinite loop, not a stale value.
+const { catalogRef, EMPTY_TASKS, EMPTY_LIBRARY } = vi.hoisted(() => ({
+  catalogRef: { current: undefined as unknown },
+  EMPTY_TASKS: { data: [] as unknown[] },
+  EMPTY_LIBRARY: { data: { items: [] as unknown[] } },
+}));
+
 vi.mock("../../../lib/api", () => ({
-  useTasks: () => ({ data: [] }),
-  useLibraryItems: () => ({ data: { items: [] } }),
-  useInvocables: () => ({ data: undefined }),
+  useTasks: () => EMPTY_TASKS,
+  useLibraryItems: () => EMPTY_LIBRARY,
+  useInvocables: () => ({ data: catalogRef.current }),
   fetchLibraryItemBySlug: vi.fn(async () => null),
   fetchSidecar: vi.fn(async () => []),
 }));
@@ -114,6 +127,60 @@ function seedCatalog(): void {
     loading: false,
     lastUsed: { providerId: 1, model: null },
   });
+}
+
+/** The four commands this repo actually ships, as the catalog reports them. */
+const PROJECT_COMMANDS = [
+  {
+    name: "code-review-pr",
+    alias: "codenest-app:code-review-pr",
+    invoke_token: "/code-review-pr",
+    description: "Reviews a pull request opened by someone else.",
+    argument_hint: "<PR number | branch | URL>",
+  },
+  {
+    name: "commit-message",
+    alias: "codenest-app:commit-message",
+    invoke_token: "/commit-message",
+    description: "Generates a git commit message in project format.",
+    argument_hint: null,
+  },
+  {
+    name: "generate-pull-request",
+    alias: "codenest-app:generate-pull-request",
+    invoke_token: "/generate-pull-request",
+    description: "Prepares pull request text locally.",
+    argument_hint: null,
+  },
+  {
+    name: "ship",
+    alias: "codenest-app:ship",
+    invoke_token: "/ship",
+    description: "Autonomous delivery pipeline, two lanes.",
+    argument_hint: "<#24 #25 …>",
+  },
+];
+
+function seedInvocables(): void {
+  catalogRef.current = {
+    scope: "project",
+    cwd: "/repo",
+    project_id: 3,
+    project_name: "codenest-app",
+    agents: [],
+    skills: [],
+    commands: PROJECT_COMMANDS.map((c) => ({
+      kind: "project",
+      project_id: 3,
+      project_name: "codenest-app",
+      canonical_path: `/repo/.claude/commands/${c.name}.md`,
+      link_path: null,
+      verify_status: "ok",
+      shared: true,
+      ...c,
+    })),
+    shadowed: [],
+  };
 }
 
 function seedSession(over: Partial<ConversationState> = {}): void {
@@ -162,6 +229,7 @@ function suggestOptions(): HTMLElement[] {
 }
 
 beforeEach(() => {
+  catalogRef.current = undefined;
   useComposerStore.setState({ panes: {}, history: [] });
   useAgentSessionStore.setState({ panes: {}, sessionAllowed: {} });
   agentInterruptMock.mockClear();
@@ -426,5 +494,112 @@ describe("menu navigation — decision 12's memo-identity argument", () => {
     // Wraps back to the first row — and moved *again*, proving the first
     // ArrowDown's highlight was not reset by its own re-render.
     expect(rows()[0]?.getAttribute("data-active")).toBe("true");
+  });
+});
+
+describe("a project's own commands — #47", () => {
+  it("offers them below the built-ins, with their descriptions, for a bare `/`", async () => {
+    seedInvocables();
+    renderComposer();
+
+    typeDraft("/");
+
+    // The probe reports the catalog on the effect after the `/` renders.
+    await waitFor(() => expect(suggestOptions()).toHaveLength(3 + 4));
+    const labels = suggestOptions().map((row) => row.textContent);
+    expect(labels[0]).toContain("/clear");
+    expect(labels[3]).toContain("/code-review-pr");
+    expect(labels[3]).toContain("Reviews a pull request opened by someone else.");
+    // Two group headers, one per run — built-ins first.
+    const groups = within(screen.getByRole("listbox"))
+      .getAllByText(/^(commands|project commands)$/)
+      .map((el) => el.textContent);
+    expect(groups).toEqual(["commands", "project commands"]);
+  });
+
+  it("stops calling a shipped command unregistered, and forwards it verbatim", async () => {
+    seedInvocables();
+    seedSession();
+    renderComposer();
+
+    typeDraft("/ship");
+    await waitFor(() => expect(suggestOptions()).toHaveLength(1));
+    // Dismissing the menu is what used to reveal the warning — so this asserts
+    // the *lookup* found the command, not just that the menu suppressed the row.
+    pressKey("Escape");
+    expect(screen.queryByText(/is not a Codenest command/)).toBeNull();
+
+    pressKey("Enter");
+    await waitFor(() => expect(agentSendMock).toHaveBeenCalledWith(LEAF, "/ship"));
+  });
+
+  it("sends the argument along as typed", async () => {
+    seedInvocables();
+    seedSession();
+    renderComposer();
+
+    typeDraft("/ship #47 --dry-run");
+    // One row: the typed argument, labelled with the file's argument-hint.
+    await waitFor(() => expect(suggestOptions()).toHaveLength(1));
+    expect(suggestOptions()[0]?.textContent).toContain("<#24 #25 …>");
+
+    pressKey("Enter");
+    await waitFor(() =>
+      expect(agentSendMock).toHaveBeenCalledWith(LEAF, "/ship #47 --dry-run"),
+    );
+  });
+
+  it("completes to `/name ` rather than firing a command that expects an argument", async () => {
+    seedInvocables();
+    seedSession();
+    renderComposer();
+
+    typeDraft("/ship");
+    await waitFor(() => expect(suggestOptions()).toHaveLength(1));
+    pressKey("Enter");
+
+    // Deliberate two-step for a command declaring an `argument-hint`: the pick
+    // hands the caret back with the argument still to write. A command with no
+    // hint has nothing to wait for and runs on pick, like every built-in.
+    expect(editor().value).toBe("/ship ");
+    expect(agentSendMock).not.toHaveBeenCalled();
+  });
+
+  it("still warns about a genuinely unknown command", async () => {
+    seedInvocables();
+    renderComposer();
+
+    typeDraft("/nope");
+    await waitFor(() =>
+      expect(screen.getByText(/^\/nope is not a Codenest command/)).toBeTruthy(),
+    );
+    pressKey("Enter");
+    await waitFor(() => expect(agentSendMock).toHaveBeenCalledWith(LEAF, "/nope"));
+  });
+
+  it("lists them in the /help panel too", async () => {
+    seedInvocables();
+    renderComposer();
+
+    typeDraft("/help");
+    pressKey("Enter");
+
+    const panel = await screen.findByRole("note");
+    await waitFor(() =>
+      expect(within(panel).getByText(/^\/ship(\s|$)/)).toBeTruthy(),
+    );
+    for (const name of ["clear", "compact", "help", "commit-message"]) {
+      expect(within(panel).getByText(new RegExp(`^/${name}(\\s|$)`))).toBeTruthy();
+    }
+  });
+
+  it("degrades to the three built-ins when the catalog has not answered", async () => {
+    // `catalogRef` is left undefined — a failed or still-loading fetch must not
+    // turn the menu into an error surface.
+    renderComposer();
+    typeDraft("/");
+
+    await waitFor(() => expect(suggestOptions()).toHaveLength(3));
+    expect(screen.queryByText("project commands")).toBeNull();
   });
 });

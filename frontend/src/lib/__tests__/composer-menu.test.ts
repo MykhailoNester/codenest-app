@@ -1,35 +1,104 @@
 import { describe, it, expect } from "vitest";
 import { slashRowToSuggest, mentionRowToSuggest } from "../composer-menu";
-import { findCommand, type SlashRow } from "../composer-commands";
+import {
+  buildSlashRows,
+  findCommand,
+  projectCommand,
+  type SlashRow,
+} from "../composer-commands";
 import type { MentionRow } from "../composer-mentions";
+
+function builtin(name: string) {
+  const command = findCommand(name, []);
+  if (!command) throw new Error(`${name} command missing from registry`);
+  return command;
+}
 
 describe("slashRowToSuggest", () => {
   it("labels a command row `/name` and its meta the summary", () => {
-    const compact = findCommand("compact");
-    if (!compact) throw new Error("compact command missing from registry");
-    const row: SlashRow = { kind: "command", command: compact };
-    expect(slashRowToSuggest(row, 0)).toEqual({
+    const compact = builtin("compact");
+    const rows: SlashRow[] = [{ kind: "command", command: compact }];
+    expect(slashRowToSuggest(rows, 0)).toEqual({
       key: "command-compact",
-      group: null,
+      group: "commands",
       label: "/compact",
       meta: compact.summary,
     });
   });
 
-  // No registered command declares a `complete` callback since `/model` and
-  // `/mode` were removed, so the row is built by hand: this pins the mapping
-  // for whichever command reintroduces argument completion.
+  // No *built-in* declares a `complete` callback since `/model` and `/mode`
+  // were removed; a discovered command with an `argument-hint` does, and this
+  // pins the mapping for both.
   it("labels an arg row by the option value and its meta the label", () => {
-    const compact = findCommand("compact");
-    if (!compact) throw new Error("compact command missing from registry");
-    const row: SlashRow = {
-      kind: "arg",
-      command: compact,
-      option: { value: "claude-opus-4-6", label: "Opus 4.6" },
-    };
-    const suggest = slashRowToSuggest(row, 0);
+    const compact = builtin("compact");
+    const rows: SlashRow[] = [
+      {
+        kind: "arg",
+        command: compact,
+        option: { value: "claude-opus-4-6", label: "Opus 4.6" },
+      },
+    ];
+    const suggest = slashRowToSuggest(rows, 0);
     expect(suggest.label).toBe("claude-opus-4-6");
     expect(suggest.meta).toBe("Opus 4.6");
+    // An arg row is never mixed with command rows, so it carries no header.
+    expect(suggest.group).toBeNull();
+  });
+
+  it("puts one header on each of the two groups, and only on its first row", () => {
+    const rows = buildSlashRows("", {
+      live: true,
+      commands: [
+        {
+          name: "ship",
+          label: "codenest-app:ship",
+          insertText: "/ship",
+          projectName: "codenest-app",
+          description: "Autonomous delivery pipeline.",
+          argHint: "<#24>",
+        },
+        {
+          name: "commit-message",
+          label: "codenest-app:commit-message",
+          insertText: "/commit-message",
+          projectName: "codenest-app",
+          description: null,
+          argHint: null,
+        },
+      ],
+    });
+    expect(rows.map((_row, i) => slashRowToSuggest(rows, i))).toEqual([
+      { key: "command-clear", group: "commands", label: "/clear", meta: builtin("clear").summary },
+      { key: "command-compact", group: null, label: "/compact", meta: builtin("compact").summary },
+      { key: "command-help", group: null, label: "/help", meta: builtin("help").summary },
+      {
+        key: "command-ship",
+        group: "project commands",
+        label: "/ship",
+        meta: "Autonomous delivery pipeline.",
+      },
+      {
+        key: "command-commit-message",
+        group: null,
+        label: "/commit-message",
+        // No description in the file, so the row says where it came from.
+        meta: "command from codenest-app",
+      },
+    ]);
+  });
+
+  it("clips a paragraph-long description to one row's worth", () => {
+    const command = projectCommand({
+      name: "ship",
+      label: "codenest-app:ship",
+      insertText: "/ship",
+      projectName: "codenest-app",
+      description: "x".repeat(200),
+      argHint: null,
+    });
+    const meta = slashRowToSuggest([{ kind: "command", command }], 0).meta;
+    expect(meta).toHaveLength(72);
+    expect(meta.endsWith("…")).toBe(true);
   });
 });
 

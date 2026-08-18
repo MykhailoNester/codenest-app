@@ -83,17 +83,27 @@ const TOTAL_CAP = 20;
 const META_LIMIT = 72;
 
 /**
- * A one-line meta for an invocable row.
+ * One line of meta, flattened and clipped to what a row can hold.
  *
  * Catalog descriptions are whole paragraphs — some carry literal `\n` escapes
- * from the frontmatter scan — and the row is one line of a 260-420px panel, so
- * everything past the first clause is noise. Falls back to the owning project,
- * the next most useful thing to say about a row whose file has no description.
+ * from the frontmatter scan — and the row is one line of a 260-420px panel whose
+ * meta cell does not ellipsize itself, so everything past the first clause is
+ * noise at best. Shared with the slash menu's rows via `composer-menu.ts`, so
+ * both menus clip at one limit.
+ */
+export function clipMeta(text: string): string {
+  const flat = text.replace(/\\n|\s+/g, " ").trim();
+  return flat.length > META_LIMIT ? `${flat.slice(0, META_LIMIT - 1)}…` : flat;
+}
+
+/**
+ * A one-line meta for an invocable row. Falls back to the owning project, the
+ * next most useful thing to say about a row whose file has no description.
  */
 export function invocableMeta(item: InvocableSource): string {
-  const flat = (item.description ?? "").replace(/\\n|\s+/g, " ").trim();
+  const flat = clipMeta(item.description ?? "");
   if (flat.length === 0) return item.projectName ?? "";
-  return flat.length > META_LIMIT ? `${flat.slice(0, META_LIMIT - 1)}…` : flat;
+  return flat;
 }
 
 /**

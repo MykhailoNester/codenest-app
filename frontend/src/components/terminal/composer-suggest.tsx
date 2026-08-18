@@ -5,13 +5,15 @@
  * `MentionSourceProbe` is the reason the react-query hooks it calls never
  * appear in `<AgentComposer/>` itself: that component must stay renderable
  * with no `QueryClientProvider` (`agent-pane-render.test.tsx`), so this probe
- * is mounted only while a mention is actually being typed (Design decision
- * 10), and reports its raw arrays upward once via `onSources`.
+ * is mounted only while a menu trigger is actually being typed (Design decision
+ * 10), and reports its raw arrays upward via `onSources` and `onCommands`.
  *
- * Agents and skills come from the sidecar's invocables catalog, scoped to the
- * pane's cwd — not from the `members` table the agent group used to read, which
- * is hand-curated and empty on a normal install, so the group it fed was
- * structurally always empty however many agents the workspace had linked.
+ * Agents, skills and commands come from the sidecar's invocables catalog, scoped
+ * to the pane's cwd — not from the `members` table the agent group used to read,
+ * which is hand-curated and empty on a normal install, so the group it fed was
+ * structurally always empty however many agents the workspace had linked. The
+ * commands feed the `/` menu rather than the `@` one, which is why they are
+ * reported separately: a mention picks context, a slash command acts.
  *
  * This file exports components only — `react-refresh/only-export-components`
  * is an error in this repo's eslint config — so the `SuggestRow` type and the
@@ -25,6 +27,7 @@ import {
   useTasks,
   type InvocableItem,
 } from "../../lib/api";
+import type { CommandSource } from "../../lib/composer-commands";
 import type { InvocableSource, MentionSources } from "../../lib/composer-mentions";
 import type { SuggestRow } from "../../lib/composer-menu";
 import styles from "./agent-composer.module.css";
@@ -99,15 +102,30 @@ function toInvocableSource(item: InvocableItem): InvocableSource {
   };
 }
 
+/** Catalog row → slash-registry row. Same carried-never-derived token, plus the
+ *  arg hint a command's frontmatter declares. */
+function toCommandSource(item: InvocableItem): CommandSource {
+  return {
+    name: item.name,
+    label: item.alias,
+    insertText: item.invoke_token,
+    projectName: item.project_name,
+    description: item.description,
+    argHint: item.argument_hint ?? null,
+  };
+}
+
 export function MentionSourceProbe({
   cwd,
   onSources,
+  onCommands,
 }: {
   /** The pane's working directory — scopes the catalog to what a session
    *  started there could actually resolve. Undefined means the workspace, the
    *  same default a pane spawns with. */
   cwd?: string | null;
   onSources: (sources: MentionSources) => void;
+  onCommands: (commands: readonly CommandSource[]) => void;
 }): ReactElement | null {
   // Tasks and library are the same hooks `ContextPicker` uses, so they share the
   // react-query cache rather than firing a second, redundant fetch.
@@ -141,9 +159,22 @@ export function MentionSourceProbe({
     [catalog, tasks, library],
   );
 
+  // Sibling of `sources` above, and load-bearing for the same reason: the array
+  // identity is what the composer memoizes its `CommandData` on, and with it the
+  // menu rows whose stable identity keeps arrow-key navigation alive across a
+  // re-render (Design decision 12).
+  const commands = useMemo<readonly CommandSource[]>(
+    () => (catalog?.commands ?? []).map(toCommandSource),
+    [catalog],
+  );
+
   useEffect(() => {
     onSources(sources);
   }, [sources, onSources]);
+
+  useEffect(() => {
+    onCommands(commands);
+  }, [commands, onCommands]);
 
   return null;
 }

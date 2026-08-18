@@ -6,11 +6,12 @@
  * real state — nothing renders from a literal (see the plan's "NO MOCK UI"
  * rule).
  *
- * On top of that: a leading `/` opens a caret-anchored command menu
- * (`/clear`, `/compact`, `/help` — a mirror of the CLI TUI's own menu,
+ * On top of that: a leading `/` opens a caret-anchored command menu — the three
+ * built-ins (`/clear`, `/compact`, `/help` — a mirror of the CLI TUI's own menu,
  * restored because the composer replaced a raw PTY running that CLI; `/model`
  * and `/mode` are deliberately absent, since the MODEL and MODE dropdowns in
- * the row above already own those choices), and a typed `@` opens a
+ * the row above already own those choices) above the commands this pane's
+ * `.claude/commands/` actually ships (#47) — and a typed `@` opens a
  * caret-anchored mention menu over
  * the workspace's invocable agents and skills, open tasks and library
  * snippets. See the plan's Design
@@ -71,6 +72,7 @@ import {
   helpRows,
   type CommandData,
   type CommandOutcome,
+  type CommandSource,
   type SlashCommandEffects,
   type SlashRow,
 } from "../../lib/composer-commands";
@@ -728,6 +730,15 @@ export function AgentComposer({
   const [helpOpen, setHelpOpen] = useState(false);
   const [note, setNote] = useState<CommandOutcome | null>(null);
   const [sources, setSources] = useState<MentionSources | null>(null);
+  // The `/` menu's half of the probe's report. An array rather than
+  // `null`-until-loaded because "no commands discovered" and "catalog not back
+  // yet" call for exactly the same menu — the three built-ins — and it outlives
+  // the probe's unmount on purpose: the draft `/ship` is still a command line
+  // after Escape dismisses the menu, and the warning row must not reappear over
+  // a command that will run.
+  const [commandSources, setCommandSources] = useState<readonly CommandSource[]>(
+    [],
+  );
   const [activeIndex, setActiveIndex] = useState(0);
   const [anchor, setAnchor] = useState({ left: 0, bottom: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -795,9 +806,13 @@ export function AgentComposer({
   // Pure data only (Design decision 12) — this is what lets `commandRows`,
   // and with it `menuRows`, keep a stable identity across renders that don't
   // actually change anything, which is what lets arrow-key navigation survive
-  // a re-render at all. The model and mode lists left with `/model` and
+  // a re-render at all. `commandSources` holds a react-query-stable array for
+  // exactly that reason. The model and mode lists left with `/model` and
   // `/mode`; the header dropdowns own those choices now.
-  const data: CommandData = useMemo(() => ({ live }), [live]);
+  const data: CommandData = useMemo(
+    () => ({ live, commands: commandSources }),
+    [live, commandSources],
+  );
 
   const commandRows: SlashRow[] = useMemo(
     () => (trigger?.kind === "slash" ? buildSlashRows(trigger.query, data) : []),
@@ -813,7 +828,7 @@ export function AgentComposer({
   const menuRows: SuggestRow[] = useMemo(
     () =>
       commandRows.length > 0
-        ? commandRows.map(slashRowToSuggest)
+        ? commandRows.map((_row, i) => slashRowToSuggest(commandRows, i))
         : mentionRows.map((_row, i) => mentionRowToSuggest(mentionRows, i)),
     [commandRows, mentionRows],
   );
@@ -826,7 +841,8 @@ export function AgentComposer({
   const menuOpen = !dismissed && menuRows.length > 0;
 
   const parsed = parseCommandLine(draft);
-  const command = parsed !== null ? findCommand(parsed.name) : undefined;
+  const command =
+    parsed !== null ? findCommand(parsed.name, commandSources) : undefined;
   // Bundled together (rather than narrowing `parsed` from a `command !==
   // undefined` check at each use site) so the disposition row below reads
   // without a non-null assertion.
@@ -1069,9 +1085,10 @@ export function AgentComposer({
   }
 
   /** Accepting a `/`-menu row: a bare `runsBare` command runs immediately; a
-   *  `runsBare: false` command (only `/model` today) completes to `"/name "`
-   *  and leaves the arg menu open, since picking `/model` is not yet a
-   *  choice of *which* model. An `arg` row always runs immediately. */
+   *  `runsBare: false` command (a discovered one declaring an `argument-hint`)
+   *  completes to `"/name "` and leaves the arg menu open, since picking a
+   *  command that expects an argument is not yet a choice of *which* argument.
+   *  An `arg` row always runs immediately. */
   function acceptSlashRow(row: SlashRow): void {
     if (row.kind === "command") {
       if (row.command.runsBare) {
@@ -1102,9 +1119,10 @@ export function AgentComposer({
       // pick mid-sentence inserts the bare name instead. The name in a prompt is
       // a hint the model can act on; a stray `/x` in the middle of a sentence is
       // just text the CLI would not read as a command anyway.
-      // (Until #47 registers discovered skills in the slash registry, sending a
-      // bare `/<skill>` still draws the "not a Codenest command" note — the text
-      // reaches claude either way.)
+      // (A bare `/<skill>` still draws the "not a Codenest command" note: #47
+      // registered discovered *commands*, and a skill is not one — the CLI
+      // resolves it from the prompt, not from the command menu. The text reaches
+      // claude either way.)
       const wholeDraft =
         draft.slice(0, start).trim().length === 0 && draft.slice(caret).trim().length === 0;
       const edit = replaceRange(
@@ -1527,7 +1545,7 @@ export function AgentComposer({
                 ×
               </button>
             </div>
-            {helpRows().map((row) => (
+            {helpRows(commandSources).map((row) => (
               <div key={row.name} className={styles.helpRow}>
                 <span className={styles.helpName}>
                   /{row.name}
@@ -1607,8 +1625,16 @@ export function AgentComposer({
               }
             />
           ) : null}
-          {trigger?.kind === "mention" && !dismissed ? (
-            <MentionSourceProbe cwd={cwd} onSources={setSources} />
+          {trigger !== null && !dismissed ? (
+            // Mounted for either trigger, not just `@`: the `/` menu is fed from
+            // the same catalog (#47), and a first `/` keystroke is exactly when
+            // the pane's command list is needed. Both callbacks are `useState`
+            // setters, so neither remounts the effects inside it.
+            <MentionSourceProbe
+              cwd={cwd}
+              onSources={setSources}
+              onCommands={setCommandSources}
+            />
           ) : null}
         </div>
       </div>

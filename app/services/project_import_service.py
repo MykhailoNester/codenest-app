@@ -113,9 +113,17 @@ async def import_project(
             # Auto-enable on import (D3): newly discovered skills are enabled=1.
             await db.execute(
                 """INSERT INTO project_skills
-                   (project_id, name, canonical_path, link_path, enabled, last_scanned_at)
-                   VALUES (?, ?, ?, ?, 1, ?)""",
-                (project_id, s.name, s.canonical_path, s.canonical_path, now_iso),
+                   (project_id, name, description, canonical_path, link_path,
+                    enabled, last_scanned_at)
+                   VALUES (?, ?, ?, ?, ?, 1, ?)""",
+                (
+                    project_id,
+                    s.name,
+                    s.description,
+                    s.canonical_path,
+                    s.canonical_path,
+                    now_iso,
+                ),
             )
             skills_created += 1
 
@@ -125,9 +133,18 @@ async def import_project(
             # Auto-enable on import (D3): newly discovered commands are enabled=1.
             await db.execute(
                 """INSERT INTO project_commands
-                   (project_id, name, canonical_path, link_path, enabled, last_scanned_at)
-                   VALUES (?, ?, ?, ?, 1, ?)""",
-                (project_id, c.name, c.canonical_path, c.canonical_path, now_iso),
+                   (project_id, name, description, argument_hint, canonical_path,
+                    link_path, enabled, last_scanned_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 1, ?)""",
+                (
+                    project_id,
+                    c.name,
+                    c.description,
+                    c.argument_hint,
+                    c.canonical_path,
+                    c.canonical_path,
+                    now_iso,
+                ),
             )
             commands_created += 1
 
@@ -148,7 +165,11 @@ async def import_project(
 
 
 async def rescan_project(db: aiosqlite.Connection, project_id: int) -> dict:
-    """Re-walk a project's .claude/ directory; add new agents, mark removed ones disabled."""
+    """Re-walk a project's .claude/ directory; add new assets, mark removed ones disabled.
+
+    Covers all three buckets — agents, skills and commands — which makes it the
+    backfill for anything a past import left out (see the commands branch below).
+    """
     row = await (
         await db.execute(
             "SELECT root_path, name FROM projects WHERE id = ? AND is_workspace = 0",
@@ -232,17 +253,27 @@ async def rescan_project(db: aiosqlite.Connection, project_id: int) -> dict:
     for s in scan.skills:
         if s.name in existing_skills:
             await db.execute(
-                "UPDATE project_skills SET canonical_path = ?, last_scanned_at = ? WHERE id = ?",
-                (s.canonical_path, now_iso, existing_skills[s.name]),
+                """UPDATE project_skills SET
+                       description = ?, canonical_path = ?, last_scanned_at = ?
+                   WHERE id = ?""",
+                (s.description, s.canonical_path, now_iso, existing_skills[s.name]),
             )
             skills_updated += 1
         else:
             # Auto-enable newly discovered skills on rescan (D3).
             await db.execute(
                 """INSERT INTO project_skills
-                   (project_id, name, canonical_path, link_path, enabled, last_scanned_at)
-                   VALUES (?, ?, ?, ?, 1, ?)""",
-                (project_id, s.name, s.canonical_path, s.canonical_path, now_iso),
+                   (project_id, name, description, canonical_path, link_path,
+                    enabled, last_scanned_at)
+                   VALUES (?, ?, ?, ?, ?, 1, ?)""",
+                (
+                    project_id,
+                    s.name,
+                    s.description,
+                    s.canonical_path,
+                    s.canonical_path,
+                    now_iso,
+                ),
             )
             skills_added += 1
 
@@ -267,17 +298,41 @@ async def rescan_project(db: aiosqlite.Connection, project_id: int) -> dict:
     for c in scan.commands:
         if c.name in existing_commands:
             await db.execute(
-                "UPDATE project_commands SET canonical_path = ?, last_scanned_at = ? WHERE id = ?",
-                (c.canonical_path, now_iso, existing_commands[c.name]),
+                """UPDATE project_commands SET
+                       description = ?, argument_hint = ?, canonical_path = ?,
+                       last_scanned_at = ?
+                   WHERE id = ?""",
+                (
+                    c.description,
+                    c.argument_hint,
+                    c.canonical_path,
+                    now_iso,
+                    existing_commands[c.name],
+                ),
             )
             commands_updated += 1
         else:
             # Auto-enable newly discovered commands on rescan (D3).
+            #
+            # This is also the backfill path for a project imported before
+            # commands were enabled at import (`enable_commands` defaulted to
+            # false, so every project imported by onboarding has zero command
+            # rows): a rescan finds them, inserts them enabled, and the very next
+            # `regenerate_workspace_links` below links them into the workspace.
             await db.execute(
                 """INSERT INTO project_commands
-                   (project_id, name, canonical_path, link_path, enabled, last_scanned_at)
-                   VALUES (?, ?, ?, ?, 1, ?)""",
-                (project_id, c.name, c.canonical_path, c.canonical_path, now_iso),
+                   (project_id, name, description, argument_hint, canonical_path,
+                    link_path, enabled, last_scanned_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 1, ?)""",
+                (
+                    project_id,
+                    c.name,
+                    c.description,
+                    c.argument_hint,
+                    c.canonical_path,
+                    c.canonical_path,
+                    now_iso,
+                ),
             )
             commands_added += 1
 
