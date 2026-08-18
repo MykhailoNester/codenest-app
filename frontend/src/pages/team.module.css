@@ -216,6 +216,12 @@
   border: 1px solid rgba(245, 158, 11, 0.28);
 }
 
+.glyphCommand {
+  background: var(--bg-3);
+  color: var(--fg-2);
+  border: 1px solid var(--line-2);
+}
+
 .name {
   flex-shrink: 0;
   font-size: 12.5px;
@@ -234,6 +240,22 @@
   border-radius: 50%;
   background: var(--ok);
   box-shadow: 0 0 5px var(--ok);
+}
+
+/* the literal text that resolves this entry — what `.claude/` links it under */
+.token {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  padding: 1px 6px;
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .desc {
@@ -279,6 +301,35 @@
   white-space: nowrap;
 }
 
+/* where the entry came from: a project name, or who owns it */
+.origin {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  padding: 1px 6px;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.copy {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--violet);
+  background: var(--violet-soft);
+  border: 1px solid rgba(168, 85, 247, 0.28);
+  border-radius: var(--r-1);
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
 .shared {
   display: inline-flex;
   align-items: center;
@@ -316,6 +367,86 @@
   width: 12px;
   height: 12px;
   color: var(--fg-4);
+}
+
+/* ── Conflict notice ────────────────────────────────────────────────── */
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: var(--warn-soft);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: var(--r-2);
+}
+
+.noticeIcon {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+.noticeIcon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.noticeBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.noticeTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+
+.noticeList {
+  margin: 5px 0 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fg-3);
+}
+
+.noticeList code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-2);
+}
+
+.noticeList b {
+  color: var(--fg-2);
+  font-weight: 600;
+}
+
+.noticeBtn {
+  flex-shrink: 0;
+  padding: 5px 11px;
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--fg-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.noticeBtn:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: var(--accent-line);
+}
+
+.noticeBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* ── States ─────────────────────────────────────────────────────────── */

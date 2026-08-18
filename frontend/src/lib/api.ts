@@ -4392,6 +4392,12 @@ export interface WorkspaceHealthData {
     detail: string | null;
   }>;
   issue_count: number;
+  /** Agents the workspace could not link because another agent already answers
+   *  to their name. Not a `verify_status` row — the file is intact, it is simply
+   *  not in `.claude/` — which is why it is carried separately from `issues`.
+   *  Same rows as an invocables catalog's `shadowed`, from the same collector. */
+  agent_name_conflicts: ShadowedInvocable[];
+  conflict_count: number;
 }
 
 const CC_BASE = "/api/v1/command-center";
@@ -4865,6 +4871,12 @@ export function useRegenerateWorkspace(): UseMutationResult<
       fetchSidecar(`${CC_BASE}/workspace/regenerate`, { method: "POST" }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["workspace"] });
+      // A regeneration is precisely a change to what `.claude/` links, so the
+      // catalog and the configured-agents list are stale by definition. The
+      // sidecar also publishes `workspace.catalog.changed` for this, but a
+      // surface that offers the button must not depend on the stream being up
+      // to show the result of pressing it.
+      void qc.invalidateQueries({ queryKey: ["command-center"] });
     },
   });
 }
