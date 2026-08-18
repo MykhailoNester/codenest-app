@@ -24,12 +24,15 @@ class DiscoveredAgent:
 class DiscoveredSkill:
     name: str
     canonical_path: str
+    description: str | None  # SKILL.md frontmatter `description:`
 
 
 @dataclass
 class DiscoveredCommand:
     name: str
     canonical_path: str
+    description: str | None  # frontmatter `description:`
+    argument_hint: str | None  # frontmatter `argument-hint:`
 
 
 @dataclass
@@ -66,6 +69,22 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
         if key:
             out[key] = value
     return out
+
+
+def _read_frontmatter(path: Path, label: str, warnings: list[str]) -> dict[str, str]:
+    """Frontmatter of ``path``, or ``{}`` if it cannot be read or has none.
+
+    Unreadable is a warning, not a failure: a command whose file the scan cannot
+    open is still a command the CLI will resolve by its stem, so it is discovered
+    with no meta rather than dropped. Mirrors how the agent branch below reports
+    a file it could not read.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        warnings.append(f"unreadable {label} file {path.name}: {exc}")
+        return {}
+    return _parse_frontmatter(text)
 
 
 def _slugify(s: str) -> str:
@@ -197,12 +216,18 @@ def scan_project(root_path: str | Path) -> ScanResult:
         for sub in sorted(skills_dir.iterdir()):
             if not sub.is_dir():
                 continue
-            if not (sub / "SKILL.md").exists():
+            skill_md = sub / "SKILL.md"
+            if not skill_md.exists():
                 continue
+            fm = _read_frontmatter(skill_md, "skill", result.warnings)
             result.skills.append(
                 DiscoveredSkill(
                     name=sub.name,
                     canonical_path=str(sub.resolve()),
+                    # A skill resolves by its directory segment, so the
+                    # frontmatter `name:` is deliberately not read — only the
+                    # description, which is what a picker row shows.
+                    description=fm.get("description") or None,
                 )
             )
 
@@ -210,10 +235,17 @@ def scan_project(root_path: str | Path) -> ScanResult:
     commands_dir = claude_dir / "commands"
     if commands_dir.is_dir():
         for md in sorted(commands_dir.glob("*.md")):
+            fm = _read_frontmatter(md, "command", result.warnings)
             result.commands.append(
                 DiscoveredCommand(
                     name=md.stem,
                     canonical_path=str(md.resolve()),
+                    # A command resolves by its file stem, so — as for a skill —
+                    # only the meta is read: `description` for the row, and
+                    # `argument-hint` (the CLI's own key, hyphenated) for what
+                    # the command expects after its name.
+                    description=fm.get("description") or None,
+                    argument_hint=fm.get("argument-hint") or None,
                 )
             )
 

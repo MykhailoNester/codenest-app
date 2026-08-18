@@ -983,7 +983,12 @@ export function useRichImportProjects(): UseMutationResult<
               tech_stack: item.stack ?? undefined,
               enable_agents: true,
               enable_skills: true,
-              enable_commands: false,
+              // All three, because all three are things a session started in the
+              // project can invoke. Commands were false here until #47, which is
+              // why `project_commands` was empty on every install and the
+              // composer's `/` menu could only ever offer its three built-ins —
+              // the scanner had been finding the files all along.
+              enable_commands: true,
               ...(item.profile_id != null
                 ? { profile_id: item.profile_id }
                 : {}),
@@ -4353,8 +4358,17 @@ export interface ImportPreviewResult {
     canonical_path: string;
     has_name_mismatch: boolean;
   }>;
-  skills: Array<{ name: string; canonical_path: string }>;
-  commands: Array<{ name: string; canonical_path: string }>;
+  skills: Array<{
+    name: string;
+    canonical_path: string;
+    description: string | null;
+  }>;
+  commands: Array<{
+    name: string;
+    canonical_path: string;
+    description: string | null;
+    argument_hint: string | null;
+  }>;
   warnings: string[];
 }
 
@@ -4479,6 +4493,8 @@ export interface InvocableItem {
   shared: boolean;
   /** Agents only: the workspace entry is a generated copy, not a link. */
   materialized?: boolean;
+  /** Commands only: the file's frontmatter `argument-hint`, if it declares one. */
+  argument_hint?: string | null;
 }
 
 /** An agent left out of the workspace because another one answers to its name.
@@ -4509,10 +4525,11 @@ export interface InvocablesCatalog {
  * workspace — the same default a new agent pane spawns with — so the query key
  * carries `null` rather than dropping the entry.
  *
- * `staleTime` is short: agents and skills appear when a project is rescanned or
- * a file is dropped into `.claude/`, and a picker offering yesterday's list is
- * the bug this catalog exists to fix. #48 replaces the polling window with an
- * invalidation on the workspace's own change event.
+ * `staleTime` is short: agents, skills and commands appear when a project is
+ * rescanned or a file is dropped into `.claude/`, and a picker offering
+ * yesterday's list is the bug this catalog exists to fix. A rescan invalidates
+ * this key outright (`useRescanWorkspaceProject`); #48 replaces the polling
+ * window for the on-disk case with the workspace's own change event.
  */
 export function useInvocables(
   cwd?: string | null,
@@ -4807,6 +4824,10 @@ export function useRescanWorkspaceProject(): UseMutationResult<
         queryKey: ["workspace", "project", projectId, "skills"],
       });
       void qc.invalidateQueries({ queryKey: ["command-center", "agents"] });
+      // A rescan is how a project's commands are backfilled (#47), so the
+      // composer's menus must not keep serving the list from before it —
+      // `useInvocables` keys on the pane's cwd, so every scope is dropped.
+      void qc.invalidateQueries({ queryKey: ["command-center", "invocables"] });
     },
   });
 }

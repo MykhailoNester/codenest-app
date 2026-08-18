@@ -9,14 +9,21 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AgentComposer } from "../agent-composer";
 import { useComposerStore } from "../../../stores/composer-store";
 
-const { useTasksMock, useLibraryItemsMock } = vi.hoisted(() => ({
+const { useTasksMock, useLibraryItemsMock, NO_CATALOG } = vi.hoisted(() => ({
   useTasksMock: vi.fn(),
   useLibraryItemsMock: vi.fn(),
+  // One stable object, like react-query's `data`: a fresh one per call makes the
+  // probe's report-upward effect fire every render and the parent setState it
+  // performs loop forever.
+  NO_CATALOG: { data: undefined },
 }));
 
 vi.mock("../../../lib/api", () => ({
   useTasks: (filters?: unknown) => useTasksMock(filters),
   useLibraryItems: () => useLibraryItemsMock(),
+  // A draft that reads as a command line opens the `/` menu, which mounts the
+  // probe that calls this. `data: undefined` is the still-loading shape.
+  useInvocables: () => NO_CATALOG,
 }));
 
 vi.mock("../../../lib/ipc", () => ({

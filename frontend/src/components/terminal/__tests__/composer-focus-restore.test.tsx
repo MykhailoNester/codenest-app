@@ -16,9 +16,22 @@ const { agentSendMock } = vi.hoisted(() => ({
   agentSendMock: vi.fn(async () => undefined),
 }));
 
+// One stable `data` per hook, like react-query's — see the note in
+// `composer-slash-commands.test.tsx`: a fresh object per call turns the mention
+// probe's report-upward effect into an infinite render loop. `useInvocables` is
+// mocked because a draft that reads as a command line (`/tmp/shot.png` is one)
+// opens the `/` menu, which mounts that probe.
+const { EMPTY_TASKS, EMPTY_LIBRARY, NO_CATALOG } = vi.hoisted(() => ({
+  EMPTY_TASKS: { data: [] as unknown[] },
+  EMPTY_LIBRARY: { data: { items: [] as unknown[] } },
+  NO_CATALOG: { data: undefined },
+}));
+
 vi.mock("../../../lib/api", () => ({
-  useTasks: () => ({ data: [] }),
-  useLibraryItems: () => ({ data: { items: [] } }),
+  useTasks: () => EMPTY_TASKS,
+  useLibraryItems: () => EMPTY_LIBRARY,
+  useInvocables: () => NO_CATALOG,
+  fetchLibraryItemBySlug: vi.fn(async () => null),
   fetchSidecar: vi.fn(async () => []),
 }));
 
