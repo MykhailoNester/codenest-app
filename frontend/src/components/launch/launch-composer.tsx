@@ -519,14 +519,13 @@ export function LaunchComposer({
     saveName.trim() !== "" &&
     projectId !== null &&
     presetPanes !== null &&
-    hasAgentPane &&
+    state.panes.length > 0 &&
     state.panes.length <= 8;
   const saveDisabledReason = (): string | undefined => {
     if (saveName.trim() === "") return "Name the preset first";
     if (projectId === null)
       return "Pick a project with a path to save a preset";
-    if (!hasAgentPane)
-      return "A saved preset needs at least one agent pane (shell-only presets aren't storable yet)";
+    if (state.panes.length === 0) return "A preset needs at least one pane";
     if (state.panes.length > 8) return "A preset can hold at most 8 panes";
     if (presetPanes === null)
       return "A pane uses a provider that no longer exists";

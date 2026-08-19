@@ -560,13 +560,17 @@ async def update_provider(
 async def delete_provider(db: aiosqlite.Connection, provider_id: int) -> None:
     """Delete a provider row.
 
-    ``launch_presets.provider_id`` is wired with ``ON DELETE CASCADE`` so saved
-    presets that target this provider are removed automatically.  Two other
-    tables also carry the FK without any ``ON DELETE`` clause and would block
-    the deletion: ``agent_sessions.provider_id`` (historical telemetry) and
+    Two tables carry the FK without any ``ON DELETE`` clause and would block the
+    deletion: ``agent_sessions.provider_id`` (historical telemetry) and
     ``profiles.provider_id`` (default-provider hint).  We NULL those out so the
     rows survive — the provider is gone, but the sessions / profiles remain
     and simply fall back to the "Unknown" bucket / no default.
+
+    Saved launch presets are not touched.  They used to be cascade-deleted
+    through ``launch_presets.provider_id``, but migration
+    ``008_launch_presets_drop_grid`` removed that column: a preset now names its
+    providers inside ``panes_json``, and ``launch_preset_service`` reports each
+    such pane as ``unresolved`` at read time rather than the preset vanishing.
     """
     await get_provider(db, provider_id)
     await db.execute(

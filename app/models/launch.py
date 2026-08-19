@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class Provider(BaseModel):
@@ -84,30 +84,20 @@ class ProviderStats(BaseModel):
     linked_tasks: int
 
 
-class LaunchCell(BaseModel):
-    """One cell in a heterogeneous workspace-mode grid."""
-
-    row: int = Field(ge=0)
-    col: int = Field(ge=0)
-    project_id: int
-    provider_id: int
-    extra_args: str = ""
-    profile_id: int | None = None
-    env_overlay: dict[str, str] = Field(default_factory=dict)
-
-
 # ---------------------------------------------------------------------------
-# Launch presets — pane list (migration 005_launch_preset_panes)
+# Launch presets — pane list (migrations 005_launch_preset_panes,
+#                             008_launch_presets_drop_grid)
 # ---------------------------------------------------------------------------
 #
-# A preset now stores what the launch composer actually produces: an ordered
-# list of typed panes plus a split mode, rather than only a rows x cols grid
-# with one provider for the whole preset. `SplitMode` mirrors the type of the
-# same name in `frontend/src/lib/launch-composer.ts:27`; `PresetPane` mirrors
-# `ComposerPane` (`lib/launch-composer.ts:54`).
+# A preset stores what the launch composer actually produces: an ordered list
+# of typed panes plus a split mode. 008 dropped the rows x cols x provider_id
+# grid header the table had carried since 2024, so this is now the only shape a
+# preset has — there is no grid body to accept and no grid row to read back.
+# `SplitMode` mirrors the type of the same name in
+# `frontend/src/lib/launch-composer.ts:27`; `PresetPane` mirrors `ComposerPane`
+# (`lib/launch-composer.ts:54`).
 
 SplitMode = Literal["cols", "rows", "grid"]
-PresetShape = Literal["panes", "grid"]
 
 
 class AgentPresetPane(BaseModel):
@@ -148,65 +138,23 @@ class LaunchPresetBase(BaseModel):
 
 
 class LaunchPresetCreate(LaunchPresetBase):
-    # Grid-shape fields — required unless `panes` is supplied (see
-    # `require_grid_fields_when_no_panes` below).
-    provider_id: int | None = None
-    rows: int | None = Field(default=None, ge=1, le=4)
-    cols: int | None = Field(default=None, ge=1, le=4)
-    cells: list[LaunchCell] | None = None
-    # Pane-shape fields.
-    panes: list[PresetPane] | None = None
+    """A preset body: an ordered pane list plus how to split the window.
+
+    `panes` is required and `split` defaults to "cols" in the service. Any
+    composition the composer can build is storable, shell-only included — the
+    `provider_id`/`rows`/`cols` the old body carried existed only to satisfy
+    NOT NULL columns that migration 008 removed.
+    """
+
+    panes: list[PresetPane]
     split: SplitMode | None = None
-
-    @model_validator(mode="after")
-    def derive_dims_from_cells(self) -> LaunchPresetCreate:
-        """When cells are supplied, derive rows/cols and validate uniqueness."""
-        if not self.cells:
-            return self
-
-        # Reject duplicate (row, col) pairs.
-        coords = [(c.row, c.col) for c in self.cells]
-        if len(coords) != len(set(coords)):
-            raise ValueError("cells contains duplicate (row, col) pairs")
-
-        # Derive dimensions from max coordinates.
-        self.rows = max(c.row for c in self.cells) + 1
-        self.cols = max(c.col for c in self.cells) + 1
-
-        return self
-
-    @model_validator(mode="after")
-    def require_grid_fields_when_no_panes(self) -> LaunchPresetCreate:
-        """A body without `panes` must carry the columns launch_presets needs NOT NULL.
-
-        rows/cols may be omitted when `cells` is present — derive_dims_from_cells
-        supplies them from the cell coordinates.
-        """
-        if self.panes is not None:
-            return self
-        missing: list[str] = []
-        if self.provider_id is None:
-            missing.append("provider_id")
-        if not self.cells:
-            if self.rows is None:
-                missing.append("rows")
-            if self.cols is None:
-                missing.append("cols")
-        if missing:
-            raise ValueError("a preset without `panes` requires " + ", ".join(missing))
-        return self
 
 
 class LaunchPreset(LaunchPresetBase):
     id: int
     created_at: str
-    provider_id: int
-    rows: int
-    cols: int
-    cells: list[LaunchCell] | None = None
     panes: list[PresetPane]
     split: SplitMode
-    shape: PresetShape
     unresolved: list[PresetUnresolved] = []
 
 

@@ -3561,17 +3561,6 @@ export function useTerminalSettings(): UseQueryResult<
 
 // ─── Launch Presets (launch-agents-grid) ─────────────────────────────────────
 
-/** Mirrors `app/models/launch.py:LaunchCell`. */
-export interface LaunchCellCreate {
-  row: number;
-  col: number;
-  project_id: number;
-  provider_id: number;
-  extra_args: string;
-  profile_id: number | null;
-  env_overlay: Record<string, string>;
-}
-
 /** Mirrors `app/models/launch.py:SplitMode`. */
 export type PresetSplit = "cols" | "rows" | "grid";
 
@@ -3606,17 +3595,12 @@ export interface LaunchPreset {
   id: number;
   name: string;
   project_id: number;
-  provider_id: number;
-  rows: number;
-  cols: number;
   extra_args: string;
   target: "embedded" | "popout";
   profile_id: number | null;
   created_at: string;
-  cells: LaunchCellCreate[] | null;
   panes: LaunchPresetPane[];
   split: PresetSplit;
-  shape: "panes" | "grid";
   unresolved: LaunchPresetUnresolved[];
 }
 
@@ -3624,14 +3608,10 @@ export interface LaunchPreset {
 export interface LaunchPresetCreate {
   name: string;
   project_id: number;
-  provider_id?: number;
-  rows?: number;
-  cols?: number;
   extra_args: string;
   target: "embedded" | "popout";
   profile_id: number | null;
-  cells?: LaunchCellCreate[] | null;
-  panes?: LaunchPresetPane[];
+  panes: LaunchPresetPane[];
   split?: PresetSplit;
 }
 

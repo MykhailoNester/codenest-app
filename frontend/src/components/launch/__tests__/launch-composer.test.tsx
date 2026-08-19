@@ -146,14 +146,10 @@ function fakePreset(overrides: Partial<LaunchPreset> = {}): LaunchPreset {
     id: 7,
     name: "Saved preset",
     project_id: 1,
-    provider_id: 1,
-    rows: 1,
-    cols: 2,
     extra_args: "",
     target: "embedded",
     profile_id: null,
     created_at: "2026-01-01 00:00:00",
-    cells: null,
     panes: [
       {
         kind: "agent",
@@ -165,7 +161,6 @@ function fakePreset(overrides: Partial<LaunchPreset> = {}): LaunchPreset {
       { kind: "shell", shell: "", command: "npm run dev" },
     ],
     split: "cols",
-    shape: "panes",
     unresolved: [],
     ...overrides,
   };
@@ -568,7 +563,7 @@ describe("+ Save as preset", () => {
     expect(payload).not.toHaveProperty("provider_id");
   });
 
-  it("with an all-shell composition, Save is disabled with the at-least-one-agent-pane reason as its title", () => {
+  it("saves an all-shell composition — Save is enabled and the payload is the shell panes (task #36)", () => {
     render(<LaunchComposer open onClose={vi.fn()} onLaunch={vi.fn()} />);
     fireEvent.click(recipeButton("Single agent"));
     fireEvent.click(paneKindToggle("Shell"));
@@ -584,8 +579,14 @@ describe("+ Save as preset", () => {
       document.querySelectorAll<HTMLButtonElement>(".lp-savebar .lp-btn"),
     ).find((b) => b.textContent === "Save");
     if (!saveButton) throw new Error("expected the Save button");
-    expect(saveButton.disabled).toBe(true);
-    expect(saveButton.getAttribute("title")).toContain("agent pane");
+    expect(saveButton.disabled).toBe(false);
+    expect(saveButton.getAttribute("title")).toBeNull();
+
+    fireEvent.click(saveButton);
+    const payload = createPresetMutateAsync.mock
+      .calls[0]?.[0] as LaunchPresetCreate;
+    expect(payload.name).toBe("All shell");
+    expect(payload.panes).toEqual([{ kind: "shell", shell: "", command: "" }]);
   });
 
   it("a rejected save leaves the bar open and renders .lp-saveerr; nothing launches", async () => {
