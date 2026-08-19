@@ -1,12 +1,17 @@
 """Tests for the launch presets service and router.
 
 Covers:
-- Create and read-back a preset.
+- Create and read-back a preset, including a shell-only one.
 - Duplicate name returns 409.
 - Delete returns 200 / ``ok: true``.
 - FK cascade: deleting the referenced project removes the preset.
-- POST with a missing project_id returns 400.
-- POST with a missing provider_id returns 400.
+- POST with a missing project_id, a missing provider_id, no panes, or too
+  many panes.
+- Read-time ``unresolved`` reporting for missing / disabled providers.
+
+The grid shape (``rows``/``cols``/``provider_id``/``cells``) is gone —
+migration 008 dropped those columns and converted every surviving grid row to
+a pane list, so the conversion itself is pinned in ``test_migrations``.
 """
 
 from __future__ import annotations
@@ -20,9 +25,9 @@ from fastapi.testclient import TestClient
 import app.database as db_module
 from app.models.launch import (
     AgentPresetPane,
-    LaunchCell,
     LaunchPresetCreate,
     PresetUnresolved,
+    ShellPresetPane,
 )
 from app.routers import launch_presets as presets_router
 from app.services import launch_preset_service
@@ -84,7 +89,7 @@ def _pane_payload(
     split: str = "cols",
     panes: list[dict] | None = None,
 ) -> dict:
-    """Build a valid pane-shape preset payload: one agent pane + one shell pane."""
+    """Build a valid preset payload: one agent pane + one shell pane."""
     return {
         "name": name,
         "project_id": project_id,
@@ -108,16 +113,38 @@ def _pane_payload(
 
 
 def _valid_payload(project_id: int, provider_id: int, name: str = "My Preset") -> dict:
+    """The smallest body the API accepts: one agent pane."""
     return {
         "name": name,
         "project_id": project_id,
-        "provider_id": provider_id,
-        "rows": 2,
-        "cols": 2,
         "extra_args": "",
         "target": "embedded",
         "profile_id": None,
+        "panes": [
+            {
+                "kind": "agent",
+                "provider_id": provider_id,
+                "model": None,
+                "permission_mode": "",
+                "send_prompt": True,
+            },
+        ],
     }
+
+
+def _agent_preset(
+    name: str, project_id: int, provider_id: int, **kwargs
+) -> LaunchPresetCreate:
+    """A one-agent-pane `LaunchPresetCreate`, for the service-layer tests."""
+    return LaunchPresetCreate(
+        name=name,
+        project_id=project_id,
+        extra_args="",
+        target=kwargs.pop("target", "embedded"),
+        profile_id=None,
+        panes=[AgentPresetPane(provider_id=provider_id)],
+        **kwargs,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,21 +176,13 @@ async def test_create_and_list_preset(migrated_db: aiosqlite.Connection):
     proj_id = await _insert_project(migrated_db)
     prov_id = await _get_claude_id(migrated_db)
 
-    payload = LaunchPresetCreate(
-        name="Preset A",
-        project_id=proj_id,
-        provider_id=prov_id,
-        rows=1,
-        cols=1,
-        extra_args="",
-        target="embedded",
-        profile_id=None,
+    created = await launch_preset_service.create_preset(
+        migrated_db, _agent_preset("Preset A", proj_id, prov_id)
     )
-    created = await launch_preset_service.create_preset(migrated_db, payload)
     assert created.id > 0
     assert created.name == "Preset A"
-    assert created.rows == 1
-    assert created.cols == 1
+    assert [p.kind for p in created.panes] == ["agent"]
+    assert created.split == "cols"  # the default when the body omits it
 
     presets = await launch_preset_service.list_presets(migrated_db)
     assert any(p.id == created.id for p in presets)
@@ -179,16 +198,7 @@ async def test_create_preset_duplicate_name_raises_409(
     proj_id = await _insert_project(migrated_db, "DupProject")
     prov_id = await _get_claude_id(migrated_db)
 
-    payload = LaunchPresetCreate(
-        name="Dup Preset",
-        project_id=proj_id,
-        provider_id=prov_id,
-        rows=1,
-        cols=1,
-        extra_args="",
-        target="embedded",
-        profile_id=None,
-    )
+    payload = _agent_preset("Dup Preset", proj_id, prov_id)
     await launch_preset_service.create_preset(migrated_db, payload)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -204,18 +214,10 @@ async def test_create_preset_missing_project_raises_400(
     from fastapi import HTTPException
 
     prov_id = await _get_claude_id(migrated_db)
-    payload = LaunchPresetCreate(
-        name="Bad Project",
-        project_id=99999,
-        provider_id=prov_id,
-        rows=1,
-        cols=1,
-        extra_args="",
-        target="embedded",
-        profile_id=None,
-    )
     with pytest.raises(HTTPException) as exc_info:
-        await launch_preset_service.create_preset(migrated_db, payload)
+        await launch_preset_service.create_preset(
+            migrated_db, _agent_preset("Bad Project", 99999, prov_id)
+        )
     assert exc_info.value.status_code == 400
 
 
@@ -223,22 +225,14 @@ async def test_create_preset_missing_project_raises_400(
 async def test_create_preset_missing_provider_raises_400(
     migrated_db: aiosqlite.Connection,
 ):
-    """create_preset must raise HTTPException(400) when provider_id is absent."""
+    """create_preset must raise HTTPException(400) when a pane's provider is absent."""
     from fastapi import HTTPException
 
     proj_id = await _insert_project(migrated_db, "BadProvProject")
-    payload = LaunchPresetCreate(
-        name="Bad Provider",
-        project_id=proj_id,
-        provider_id=99999,
-        rows=1,
-        cols=1,
-        extra_args="",
-        target="embedded",
-        profile_id=None,
-    )
     with pytest.raises(HTTPException) as exc_info:
-        await launch_preset_service.create_preset(migrated_db, payload)
+        await launch_preset_service.create_preset(
+            migrated_db, _agent_preset("Bad Provider", proj_id, 99999)
+        )
     assert exc_info.value.status_code == 400
 
 
@@ -248,17 +242,9 @@ async def test_delete_preset_removes_row(migrated_db: aiosqlite.Connection):
     proj_id = await _insert_project(migrated_db, "DelProject")
     prov_id = await _get_claude_id(migrated_db)
 
-    payload = LaunchPresetCreate(
-        name="To Delete",
-        project_id=proj_id,
-        provider_id=prov_id,
-        rows=1,
-        cols=1,
-        extra_args="",
-        target="popout",
-        profile_id=None,
+    created = await launch_preset_service.create_preset(
+        migrated_db, _agent_preset("To Delete", proj_id, prov_id, target="popout")
     )
-    created = await launch_preset_service.create_preset(migrated_db, payload)
     await launch_preset_service.delete_preset(migrated_db, created.id)
 
     presets = await launch_preset_service.list_presets(migrated_db)
@@ -279,21 +265,17 @@ async def test_delete_preset_missing_raises_404(migrated_db: aiosqlite.Connectio
 async def test_fk_cascade_deletes_preset_on_project_delete(
     migrated_db: aiosqlite.Connection,
 ):
-    """Deleting a project must cascade-delete its associated presets."""
+    """Deleting a project must cascade-delete its associated presets.
+
+    The rebuild in migration 008 kept `project_id`'s ON DELETE CASCADE; only
+    the provider FK went away.
+    """
     proj_id = await _insert_project(migrated_db, "CascadeProject")
     prov_id = await _get_claude_id(migrated_db)
 
-    payload = LaunchPresetCreate(
-        name="Cascade Preset",
-        project_id=proj_id,
-        provider_id=prov_id,
-        rows=1,
-        cols=1,
-        extra_args="",
-        target="embedded",
-        profile_id=None,
+    created = await launch_preset_service.create_preset(
+        migrated_db, _agent_preset("Cascade Preset", proj_id, prov_id)
     )
-    created = await launch_preset_service.create_preset(migrated_db, payload)
 
     await migrated_db.execute("DELETE FROM projects WHERE id = ?", (proj_id,))
     await migrated_db.commit()
@@ -304,6 +286,32 @@ async def test_fk_cascade_deletes_preset_on_project_delete(
     row = await cur.fetchone()
     assert row is not None
     assert row["cnt"] == 0, "preset should have been cascade-deleted with its project"
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_provider_leaves_the_preset_standing(
+    migrated_db: aiosqlite.Connection,
+):
+    """A preset survives the deletion of a provider one of its panes names.
+
+    Before 008 the header `provider_id` carried ON DELETE CASCADE, so deleting
+    a provider silently deleted every preset built on it. There is no such
+    column now: the pane reads back `unresolved` instead.
+    """
+    proj_id = await _insert_project(migrated_db, "ProviderGoneProject")
+    prov_id = await _get_claude_id(migrated_db)
+
+    created = await launch_preset_service.create_preset(
+        migrated_db, _agent_preset("Survivor", proj_id, prov_id)
+    )
+
+    await migrated_db.execute("DELETE FROM providers WHERE id = ?", (prov_id,))
+    await migrated_db.commit()
+
+    preset = await launch_preset_service.get_preset(migrated_db, created.id)
+    assert preset.unresolved == [
+        PresetUnresolved(pane_index=0, provider_id=prov_id, reason="missing")
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -325,9 +333,8 @@ async def test_http_create_preset_returns_201(test_app):
     assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "HTTP Preset"
-    assert data["rows"] == 2
-    assert data["cols"] == 2
     assert data["target"] == "embedded"
+    assert len(data["panes"]) == 1
     assert "id" in data
     assert "created_at" in data
 
@@ -411,264 +418,13 @@ async def test_http_create_missing_project_returns_400(test_app):
 
 
 # ---------------------------------------------------------------------------
-# Workspace (cells) branch
-# ---------------------------------------------------------------------------
-
-
-def _workspace_payload(
-    project_id: int,
-    provider_id: int,
-    name: str = "Workspace Preset",
-) -> dict:
-    """Build a valid workspace-mode preset payload with a 2×2 heterogeneous grid."""
-    cells = [
-        {
-            "row": 0,
-            "col": 0,
-            "project_id": project_id,
-            "provider_id": provider_id,
-            "extra_args": "--flag1",
-            "profile_id": None,
-            "env_overlay": {"MY_VAR": "hello"},
-        },
-        {
-            "row": 0,
-            "col": 1,
-            "project_id": project_id,
-            "provider_id": provider_id,
-            "extra_args": "",
-            "profile_id": None,
-            "env_overlay": {},
-        },
-        {
-            "row": 1,
-            "col": 0,
-            "project_id": project_id,
-            "provider_id": provider_id,
-            "extra_args": "--debug",
-            "profile_id": None,
-            "env_overlay": {"ANOTHER": "world"},
-        },
-        # (1,1) intentionally omitted — sparse preset
-    ]
-    return {
-        "name": name,
-        "project_id": project_id,
-        "provider_id": provider_id,
-        # rows/cols are ignored when cells is present (derived by service)
-        "rows": 1,
-        "cols": 1,
-        "extra_args": "",
-        "target": "embedded",
-        "profile_id": None,
-        "cells": cells,
-    }
-
-
-@pytest.mark.asyncio
-async def test_workspace_create_and_read_back(migrated_db: aiosqlite.Connection):
-    """Workspace preset round-trip: create stores cells_json; read deserializes it."""
-    from app.models.launch import LaunchCell, LaunchPresetCreate
-
-    proj_id = await _insert_project(migrated_db, "WsProject")
-    prov_id = await _get_claude_id(migrated_db)
-
-    cells = [
-        LaunchCell(
-            row=0, col=0, project_id=proj_id, provider_id=prov_id, extra_args="--a"
-        ),
-        LaunchCell(
-            row=0,
-            col=1,
-            project_id=proj_id,
-            provider_id=prov_id,
-            env_overlay={"K": "V"},
-        ),
-        LaunchCell(row=1, col=0, project_id=proj_id, provider_id=prov_id),
-    ]
-    payload = LaunchPresetCreate(
-        name="WsPreset",
-        project_id=proj_id,
-        provider_id=prov_id,
-        rows=1,  # will be overridden to 2 by validator
-        cols=1,  # will be overridden to 2 by validator
-        extra_args="",
-        target="embedded",
-        profile_id=None,
-        cells=cells,
-    )
-
-    # Validator should derive rows=2, cols=2 from max(row)+1, max(col)+1.
-    assert payload.rows == 2
-    assert payload.cols == 2
-
-    from app.services import launch_preset_service
-
-    created = await launch_preset_service.create_preset(migrated_db, payload)
-
-    assert created.cells is not None
-    assert len(created.cells) == 3
-    assert any(
-        c.row == 0 and c.col == 0 and c.extra_args == "--a" for c in created.cells
-    )
-    assert any(
-        c.row == 0 and c.col == 1 and c.env_overlay == {"K": "V"} for c in created.cells
-    )
-    assert created.rows == 2
-    assert created.cols == 2
-
-    # Read back via list.
-    presets = await launch_preset_service.list_presets(migrated_db)
-    found = next((p for p in presets if p.id == created.id), None)
-    assert found is not None
-    assert found.cells is not None
-    assert len(found.cells) == 3
-
-
-@pytest.mark.asyncio
-async def test_workspace_rejects_duplicate_coords(migrated_db: aiosqlite.Connection):
-    """LaunchPresetCreate must reject cells with duplicate (row, col) pairs."""
-    from pydantic import ValidationError
-
-    from app.models.launch import LaunchCell, LaunchPresetCreate
-
-    proj_id = await _insert_project(migrated_db, "DupCoordsProject")
-    prov_id = await _get_claude_id(migrated_db)
-
-    with pytest.raises(ValidationError) as exc_info:
-        LaunchPresetCreate(
-            name="DupCoords",
-            project_id=proj_id,
-            provider_id=prov_id,
-            rows=1,
-            cols=1,
-            extra_args="",
-            target="embedded",
-            profile_id=None,
-            cells=[
-                LaunchCell(row=0, col=0, project_id=proj_id, provider_id=prov_id),
-                LaunchCell(row=0, col=0, project_id=proj_id, provider_id=prov_id),
-            ],
-        )
-    assert "duplicate" in str(exc_info.value).lower()
-
-
-@pytest.mark.asyncio
-async def test_workspace_rejects_unknown_project_in_cell(
-    migrated_db: aiosqlite.Connection,
-):
-    """create_preset must return 400 when a cell references a non-existent project."""
-    from fastapi import HTTPException
-
-    from app.models.launch import LaunchCell, LaunchPresetCreate
-    from app.services import launch_preset_service
-
-    proj_id = await _insert_project(migrated_db, "GoodProject")
-    prov_id = await _get_claude_id(migrated_db)
-
-    payload = LaunchPresetCreate(
-        name="BadCellProject",
-        project_id=proj_id,
-        provider_id=prov_id,
-        rows=1,
-        cols=1,
-        extra_args="",
-        target="embedded",
-        profile_id=None,
-        cells=[
-            LaunchCell(row=0, col=0, project_id=99999, provider_id=prov_id),
-        ],
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        await launch_preset_service.create_preset(migrated_db, payload)
-    assert exc_info.value.status_code == 400
-    assert "project_id" in exc_info.value.detail
-
-
-@pytest.mark.asyncio
-async def test_workspace_http_create_and_read_back(test_app):
-    """POST with workspace cells returns the preset including cells on read."""
-    client, db = test_app
-    proj_id = await _insert_project(db, "WsHttpProject")
-    prov_id = await _get_claude_id(db)
-
-    payload = _workspace_payload(proj_id, prov_id, "WsHttpPreset")
-    resp = client.post("/api/v1/launch-presets", json=payload)
-    assert resp.status_code == 201
-    data = resp.json()
-    assert data["rows"] == 2  # derived from max(row)=1 → 2
-    assert data["cols"] == 2  # derived from max(col)=1 → 2
-    assert isinstance(data["cells"], list)
-    assert len(data["cells"]) == 3
-    # Verify env_overlay round-trip
-    cell00 = next((c for c in data["cells"] if c["row"] == 0 and c["col"] == 0), None)
-    assert cell00 is not None
-    assert cell00["env_overlay"] == {"MY_VAR": "hello"}
-
-    # Re-read via list endpoint
-    list_resp = client.get("/api/v1/launch-presets")
-    assert list_resp.status_code == 200
-    all_presets = list_resp.json()
-    found = next((p for p in all_presets if p["name"] == "WsHttpPreset"), None)
-    assert found is not None
-    assert found["cells"] is not None
-    assert len(found["cells"]) == 3
-
-
-@pytest.mark.asyncio
-async def test_workspace_http_duplicate_coords_returns_422(test_app):
-    """POST with duplicate (row, col) pairs in cells must return 422 (validation error)."""
-    client, db = test_app
-    proj_id = await _insert_project(db, "DupCoordsHttpProject")
-    prov_id = await _get_claude_id(db)
-
-    payload = {
-        "name": "DupCoordsHttp",
-        "project_id": proj_id,
-        "provider_id": prov_id,
-        "rows": 1,
-        "cols": 1,
-        "extra_args": "",
-        "target": "embedded",
-        "profile_id": None,
-        "cells": [
-            {
-                "row": 0,
-                "col": 0,
-                "project_id": proj_id,
-                "provider_id": prov_id,
-                "extra_args": "",
-                "profile_id": None,
-                "env_overlay": {},
-            },
-            {
-                "row": 0,
-                "col": 0,
-                "project_id": proj_id,
-                "provider_id": prov_id,
-                "extra_args": "",
-                "profile_id": None,
-                "env_overlay": {},
-            },
-        ],
-    }
-    resp = client.post("/api/v1/launch-presets", json=payload)
-    assert resp.status_code == 422
-
-
-# ---------------------------------------------------------------------------
-# Pane shape (migration 005 — ordered typed pane list)
+# Pane shape (005 — ordered typed pane list; 008 — the only shape there is)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_pane_preset_round_trip(test_app):
-    """POST an agent+shell pane list and read it back byte-identical.
-
-    Pins acceptance criterion 1: a preset saved from an "agent + shell"
-    composition reloads as exactly that composition.
-    """
+    """POST an agent+shell pane list and read it back byte-identical."""
     client, db = test_app
     proj_id = await _insert_project(db, "PaneRoundTripProject")
     prov_id = await _get_claude_id(db)
@@ -679,40 +435,81 @@ async def test_pane_preset_round_trip(test_app):
     data = resp.json()
     assert data["panes"] == payload["panes"]
     assert data["split"] == "cols"
-    assert data["shape"] == "panes"
 
     list_resp = client.get("/api/v1/launch-presets")
     found = next(p for p in list_resp.json() if p["id"] == data["id"])
     assert found["panes"] == payload["panes"]
     assert found["split"] == "cols"
-    assert found["shape"] == "panes"
 
 
 @pytest.mark.asyncio
-async def test_pane_preset_writes_legacy_projection(test_app):
-    """A 2-pane 'cols' preset projects onto rows=1, cols=2, header provider (D2)."""
+async def test_shell_only_preset_round_trips(test_app):
+    """Three shell panes, no agent, saves and reloads as exactly that.
+
+    Pins the ticket's acceptance criterion 1 — the "at least one agent pane"
+    400 was a projection of `provider_id NOT NULL`, which migration 008 removed.
+    """
     client, db = test_app
-    proj_id = await _insert_project(db, "LegacyProjectionProject")
-    prov_id = await _get_claude_id(db)
+    proj_id = await _insert_project(db, "ShellOnlyProject")
 
-    payload = _pane_payload(proj_id, prov_id, "LegacyProjectionPreset")
+    panes = [
+        {"kind": "shell", "shell": "/bin/zsh", "command": "pnpm build"},
+        {"kind": "shell", "shell": "/bin/zsh", "command": "tail -f app.log"},
+        {"kind": "shell", "shell": "", "command": ""},
+    ]
+    payload = {
+        "name": "build + logs + tail",
+        "project_id": proj_id,
+        "extra_args": "",
+        "target": "embedded",
+        "profile_id": None,
+        "split": "rows",
+        "panes": panes,
+    }
     resp = client.post("/api/v1/launch-presets", json=payload)
-    preset_id = resp.json()["id"]
+    assert resp.status_code == 201, resp.json()
+    data = resp.json()
+    assert data["panes"] == panes
+    assert data["split"] == "rows"
+    assert data["unresolved"] == []
 
-    cur = await db.execute(
-        "SELECT rows, cols, provider_id FROM launch_presets WHERE id = ?",
-        (preset_id,),
+    found = next(
+        p for p in client.get("/api/v1/launch-presets").json() if p["id"] == data["id"]
     )
-    row = await cur.fetchone()
-    assert row is not None
-    assert row["rows"] == 1
-    assert row["cols"] == 2
-    assert row["provider_id"] == prov_id
+    assert found["panes"] == panes
+    assert found["split"] == "rows"
+
+
+@pytest.mark.asyncio
+async def test_shell_only_preset_needs_no_provider_at_all(
+    migrated_db: aiosqlite.Connection,
+):
+    """A shell-only preset saves on a DB with zero provider rows."""
+    proj_id = await _insert_project(migrated_db, "NoProvidersProject")
+
+    created = await launch_preset_service.create_preset(
+        migrated_db,
+        LaunchPresetCreate(
+            name="Shells only",
+            project_id=proj_id,
+            extra_args="",
+            target="embedded",
+            profile_id=None,
+            split="grid",
+            panes=[ShellPresetPane(command="make watch"), ShellPresetPane()],
+        ),
+    )
+    assert [p.kind for p in created.panes] == ["shell", "shell"]
+    assert created.split == "grid"
+    assert created.unresolved == []
 
 
 @pytest.mark.asyncio
 async def test_pane_preset_ignores_top_level_provider_id(test_app):
-    """A bogus top-level provider_id sent alongside panes is ignored, never a 500."""
+    """A stray top-level provider_id is ignored, never a 500.
+
+    The grid body is gone, so `provider_id` is now simply an unknown key.
+    """
     client, db = test_app
     proj_id = await _insert_project(db, "IgnoreTopLevelProject")
     prov_id = await _get_claude_id(db)
@@ -721,57 +518,7 @@ async def test_pane_preset_ignores_top_level_provider_id(test_app):
     payload["provider_id"] = 99999
     resp = client.post("/api/v1/launch-presets", json=payload)
     assert resp.status_code == 201
-
-    cur = await db.execute(
-        "SELECT provider_id FROM launch_presets WHERE id = ?", (resp.json()["id"],)
-    )
-    row = await cur.fetchone()
-    assert row is not None
-    assert row["provider_id"] == prov_id
-
-
-@pytest.mark.asyncio
-async def test_pane_preset_grid_split_projection_is_clamped(test_app):
-    """8 panes with split='grid' land inside the rows/cols 1..4 CHECK."""
-    client, db = test_app
-    proj_id = await _insert_project(db, "GridSplitClampProject")
-    prov_id = await _get_claude_id(db)
-
-    panes = [
-        {
-            "kind": "agent",
-            "provider_id": prov_id,
-            "model": None,
-            "permission_mode": "",
-            "send_prompt": True,
-        },
-    ] + [{"kind": "shell", "shell": "", "command": ""} for _ in range(7)]
-    payload = _pane_payload(
-        proj_id, prov_id, "GridSplitClampPreset", split="grid", panes=panes
-    )
-    resp = client.post("/api/v1/launch-presets", json=payload)
-    assert resp.status_code == 201
-    data = resp.json()
-    assert 1 <= data["rows"] <= 4
-    assert 1 <= data["cols"] <= 4
-
-
-@pytest.mark.asyncio
-async def test_pane_preset_rejects_shell_only(test_app):
-    """A pane list with no agent pane is a 400 (D3)."""
-    client, db = test_app
-    proj_id = await _insert_project(db, "ShellOnlyProject")
-    prov_id = await _get_claude_id(db)
-
-    payload = _pane_payload(
-        proj_id,
-        prov_id,
-        "ShellOnlyPreset",
-        panes=[{"kind": "shell", "shell": "", "command": ""}],
-    )
-    resp = client.post("/api/v1/launch-presets", json=payload)
-    assert resp.status_code == 400
-    assert "agent pane" in resp.json()["detail"]
+    assert resp.json()["panes"] == payload["panes"]
 
 
 @pytest.mark.asyncio
@@ -810,30 +557,6 @@ async def test_pane_preset_rejects_unknown_provider(test_app):
 
 
 @pytest.mark.asyncio
-async def test_pane_preset_rejects_cells_and_panes_together(test_app):
-    """panes and cells are mutually exclusive — 400."""
-    client, db = test_app
-    proj_id = await _insert_project(db, "PanesAndCellsProject")
-    prov_id = await _get_claude_id(db)
-
-    payload = _pane_payload(proj_id, prov_id, "PanesAndCellsPreset")
-    payload["cells"] = [
-        {
-            "row": 0,
-            "col": 0,
-            "project_id": proj_id,
-            "provider_id": prov_id,
-            "extra_args": "",
-            "profile_id": None,
-            "env_overlay": {},
-        },
-    ]
-    resp = client.post("/api/v1/launch-presets", json=payload)
-    assert resp.status_code == 400
-    assert "mutually exclusive" in resp.json()["detail"]
-
-
-@pytest.mark.asyncio
 async def test_pane_preset_rejects_over_cap(test_app):
     """More than 8 panes is a 400."""
     client, db = test_app
@@ -856,18 +579,16 @@ async def test_pane_preset_rejects_over_cap(test_app):
 
 
 @pytest.mark.asyncio
-async def test_grid_preset_without_provider_id_is_422(test_app):
-    """A grid-shape body (rows/cols, no panes) missing provider_id is a 422, not a 500 (D11)."""
+async def test_body_without_panes_is_422(test_app):
+    """`panes` is required — a body without it is a 422, not a 500."""
     client, db = test_app
-    proj_id = await _insert_project(db, "NoProviderIdProject")
+    proj_id = await _insert_project(db, "NoPanesProject")
 
     resp = client.post(
         "/api/v1/launch-presets",
         json={
-            "name": "NoProviderIdPreset",
+            "name": "NoPanesPreset",
             "project_id": proj_id,
-            "rows": 1,
-            "cols": 1,
             "extra_args": "",
             "target": "embedded",
             "profile_id": None,
@@ -877,151 +598,35 @@ async def test_grid_preset_without_provider_id_is_422(test_app):
 
 
 @pytest.mark.asyncio
-async def test_grid_preset_with_cells_may_omit_rows_cols(test_app):
-    """A grid body with cells + provider_id but no rows/cols is accepted (derived)."""
-    client, db = test_app
-    proj_id = await _insert_project(db, "CellsNoRowsColsProject")
-    prov_id = await _get_claude_id(db)
-
-    resp = client.post(
-        "/api/v1/launch-presets",
-        json={
-            "name": "CellsNoRowsColsPreset",
-            "project_id": proj_id,
-            "provider_id": prov_id,
-            "extra_args": "",
-            "target": "embedded",
-            "profile_id": None,
-            "cells": [
-                {
-                    "row": 0,
-                    "col": 0,
-                    "project_id": proj_id,
-                    "provider_id": prov_id,
-                    "extra_args": "",
-                    "profile_id": None,
-                    "env_overlay": {},
-                },
-                {
-                    "row": 1,
-                    "col": 1,
-                    "project_id": proj_id,
-                    "provider_id": prov_id,
-                    "extra_args": "",
-                    "profile_id": None,
-                    "env_overlay": {},
-                },
-            ],
-        },
-    )
-    assert resp.status_code == 201
-    data = resp.json()
-    assert data["rows"] == 2
-    assert data["cols"] == 2
-
-
-@pytest.mark.asyncio
-async def test_create_preset_rejects_unvalidated_grid_payload_with_422(
+async def test_create_preset_rejects_empty_pane_list_with_400(
     migrated_db: aiosqlite.Connection,
 ):
-    """A direct (non-HTTP) caller that bypasses model validation still gets a
-    422 from the service's own gate, never an AssertionError or IntegrityError.
-
-    Pins D11's "explicit gate, not an assert" — an assert would surface as
-    AssertionError here instead.
-    """
+    """An empty pane list is a 400 — including for a direct caller that
+    bypassed model validation and handed over ``None``."""
     from fastapi import HTTPException
 
-    proj_id = await _insert_project(migrated_db, "UnvalidatedGridProject")
+    proj_id = await _insert_project(migrated_db, "EmptyPanesProject")
 
-    payload = LaunchPresetCreate.model_construct(
-        name="UnvalidatedGridPreset",
-        project_id=proj_id,
-        extra_args="",
-        target="embedded",
-        profile_id=None,
-        provider_id=None,
-        rows=None,
-        cols=None,
-        cells=None,
-        panes=None,
-        split=None,
-    )
-    with pytest.raises(HTTPException) as exc_info:
-        await launch_preset_service.create_preset(migrated_db, payload)
-    assert exc_info.value.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_legacy_grid_preset_reads_as_panes(migrated_db: aiosqlite.Connection):
-    """A pre-migration grid preset (no cells_json) reads as N agent panes on the
-    header provider. Pins acceptance criterion 2.
-    """
-    proj_id = await _insert_project(migrated_db, "LegacyGridProject")
-    prov_id = await _get_claude_id(migrated_db)
-
-    await migrated_db.execute(
-        """INSERT INTO launch_presets
-           (name, project_id, provider_id, rows, cols, extra_args, target, profile_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("LegacyGridPreset", proj_id, prov_id, 2, 2, "", "embedded", None),
-    )
-    await migrated_db.commit()
-    cur = await migrated_db.execute(
-        "SELECT id FROM launch_presets WHERE name = 'LegacyGridPreset'"
-    )
-    row = await cur.fetchone()
-    assert row is not None
-    preset_id = row["id"]
-
-    preset = await launch_preset_service.get_preset(migrated_db, preset_id)
-    assert len(preset.panes) == 4
-    assert all(p.kind == "agent" and p.provider_id == prov_id for p in preset.panes)
-    assert preset.split == "grid"
-    assert preset.shape == "grid"
-    assert preset.cells is None
-    assert preset.rows == 2
-    assert preset.cols == 2
-
-
-@pytest.mark.asyncio
-async def test_legacy_cells_preset_reads_as_panes_in_row_major_order(
-    migrated_db: aiosqlite.Connection,
-):
-    """A sparse 2x2 legacy preset reads as 4 panes in row-major order, each
-    per-cell provider when set, else the header provider (D4)."""
-    proj_id = await _insert_project(migrated_db, "RowMajorProject")
-    prov_a = await _get_claude_id(migrated_db)
-    prov_b = await _insert_provider(migrated_db, "test-row-major-second")
-
-    payload = LaunchPresetCreate(
-        name="RowMajorPreset",
-        project_id=proj_id,
-        provider_id=prov_a,
-        rows=1,
-        cols=1,
-        extra_args="",
-        target="embedded",
-        profile_id=None,
-        cells=[
-            LaunchCell(row=0, col=0, project_id=proj_id, provider_id=prov_a),
-            LaunchCell(row=0, col=1, project_id=proj_id, provider_id=prov_b),
-            LaunchCell(row=1, col=0, project_id=proj_id, provider_id=prov_a),
-            # (1,1) intentionally omitted — falls back to the header provider.
-        ],
-    )
-    created = await launch_preset_service.create_preset(migrated_db, payload)
-    assert created.rows == 2
-    assert created.cols == 2
-
-    assert [p.provider_id for p in created.panes] == [prov_a, prov_b, prov_a, prov_a]
-    assert all(p.kind == "agent" for p in created.panes)
+    for panes in ([], None):
+        payload = LaunchPresetCreate.model_construct(
+            name=f"EmptyPanes{panes}",
+            project_id=proj_id,
+            extra_args="",
+            target="embedded",
+            profile_id=None,
+            panes=panes,
+            split=None,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await launch_preset_service.create_preset(migrated_db, payload)
+        assert exc_info.value.status_code == 400
+        assert "at least one pane" in exc_info.value.detail
 
 
 @pytest.mark.asyncio
 async def test_unresolved_reports_missing_provider(migrated_db: aiosqlite.Connection):
     """A pane whose provider was deleted comes back `unresolved` with reason
-    'missing', and the preset itself survives. Pins acceptance criterion 3."""
+    'missing', and the preset itself survives."""
     proj_id = await _insert_project(migrated_db, "MissingProviderProject")
     prov_a = await _get_claude_id(migrated_db)
     prov_b = await _insert_provider(migrated_db, "test-missing-second")

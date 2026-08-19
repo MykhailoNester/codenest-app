@@ -5,6 +5,9 @@ Asserts:
   migrations may add columns, so we do not assert an exact match).
 - The clean-slate schema ships with ZERO seeded provider rows (E0.1 decision).
 - All FK / CHECK constraints are present in the schema text.
+- Migration 008's table rebuild: the grid columns are gone and every row that
+  was still grid-shaped came through it as the pane list the read path used to
+  derive.
 """
 
 from __future__ import annotations
@@ -42,13 +45,12 @@ async def test_launch_presets_table_schema(migrated_db) -> None:
         "id",
         "name",
         "project_id",
-        "provider_id",
-        "rows",
-        "cols",
         "extra_args",
         "target",
         "profile_id",
         "created_at",
+        "panes_json",
+        "split",
     }
     assert required.issubset(col_names), (
         f"required columns missing from launch_presets: {required - col_names}"
@@ -98,29 +100,15 @@ async def _insert_provider(db, name: str = "test-prov") -> int:
 
 
 @pytest.mark.asyncio
-async def test_launch_presets_check_rows_cols(migrated_db) -> None:
-    """rows/cols outside [1,4] must be rejected by the CHECK constraint."""
-    import aiosqlite
-
-    await migrated_db.execute(
-        "INSERT INTO projects (name, description, tech_stack, status) VALUES (?, ?, ?, ?)",
-        ("TestProject", None, None, "active"),
+async def test_launch_presets_has_no_grid_columns(migrated_db) -> None:
+    """Migration 008 must leave no trace of the rows x cols x provider grid."""
+    cur = await migrated_db.execute("PRAGMA table_info(launch_presets)")
+    rows = await cur.fetchall()
+    col_names = {r["name"] for r in rows}
+    gone = {"rows", "cols", "provider_id", "cells_json"}
+    assert not (gone & col_names), (
+        f"grid columns still on launch_presets: {gone & col_names}"
     )
-    await migrated_db.commit()
-    cur = await migrated_db.execute("SELECT id FROM projects WHERE name='TestProject'")
-    proj = await cur.fetchone()
-    assert proj is not None
-    proj_id = proj["id"]
-
-    prov_id = await _insert_provider(migrated_db, "check-rows-prov")
-
-    with pytest.raises(aiosqlite.IntegrityError):
-        await migrated_db.execute(
-            """INSERT INTO launch_presets
-               (name, project_id, provider_id, rows, cols, target)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            ("bad-preset", proj_id, prov_id, 5, 1, "embedded"),
-        )
 
 
 @pytest.mark.asyncio
@@ -137,14 +125,12 @@ async def test_launch_presets_target_check(migrated_db) -> None:
     proj = await cur.fetchone()
     assert proj is not None
 
-    prov_id = await _insert_provider(migrated_db, "target-check-prov")
-
     with pytest.raises(aiosqlite.IntegrityError):
         await migrated_db.execute(
             """INSERT INTO launch_presets
-               (name, project_id, provider_id, rows, cols, target)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            ("bad-target", proj["id"], prov_id, 1, 1, "warp"),
+               (name, project_id, target, panes_json, split)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("bad-target", proj["id"], "warp", "[]", "cols"),
         )
 
 
@@ -161,13 +147,11 @@ async def test_launch_presets_project_fk_cascade(migrated_db) -> None:
     assert proj is not None
     proj_id = proj["id"]
 
-    prov_id = await _insert_provider(migrated_db, "cascade-prov")
-
     await migrated_db.execute(
         """INSERT INTO launch_presets
-           (name, project_id, provider_id, rows, cols, target)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        ("cascade-preset", proj_id, prov_id, 1, 1, "embedded"),
+           (name, project_id, target, panes_json, split)
+           VALUES (?, ?, ?, ?, ?)""",
+        ("cascade-preset", proj_id, "embedded", "[]", "cols"),
     )
     await migrated_db.commit()
 
@@ -444,13 +428,11 @@ async def test_launch_presets_split_check(migrated_db) -> None:
     proj = await cur.fetchone()
     assert proj is not None
 
-    prov_id = await _insert_provider(migrated_db, "split-check-prov")
-
     await migrated_db.execute(
         """INSERT INTO launch_presets
-           (name, project_id, provider_id, rows, cols, target)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        ("split-check-preset", proj["id"], prov_id, 1, 1, "embedded"),
+           (name, project_id, target, panes_json)
+           VALUES (?, ?, ?, ?)""",
+        ("split-check-preset", proj["id"], "embedded", "[]"),
     )
     await migrated_db.commit()
 
@@ -531,5 +513,284 @@ async def test_migration_005_applies_over_existing_grid_presets(tmp_path) -> Non
         assert after["cols"] == before["cols"]
         assert after["panes_json"] is None
         assert after["split"] is None
+    finally:
+        await conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Migration 008 — launch_presets drops the legacy grid columns
+# ---------------------------------------------------------------------------
+
+_M008 = "008_launch_presets_drop_grid"
+
+
+async def _pre_008_db(tmp_path, filename: str = "pre-008.db"):
+    """A connection with every migration before 008 applied, plus one project
+    and two providers. Returns `(conn, project_id, provider_a, provider_b)`."""
+    import pathlib
+
+    import aiosqlite
+
+    from app.database import apply_migration_file
+
+    migrations_dir = pathlib.Path(__file__).parents[2] / "migrations"
+    conn = await aiosqlite.connect(str(tmp_path / filename))
+    conn.row_factory = aiosqlite.Row
+    await conn.execute("PRAGMA foreign_keys=ON")
+    for migration_file in sorted(
+        f for f in migrations_dir.glob("*.sql") if f.stem < _M008
+    ):
+        await apply_migration_file(conn, migration_file)
+
+    await conn.execute(
+        "INSERT INTO projects (name, description, tech_stack, status) VALUES (?, ?, ?, ?)",
+        ("Pre008Proj", None, None, "active"),
+    )
+    await conn.commit()
+    proj = await (
+        await conn.execute("SELECT id FROM projects WHERE name='Pre008Proj'")
+    ).fetchone()
+    assert proj is not None
+    prov_a = await _insert_provider(conn, "pre-008-prov-a")
+    prov_b = await _insert_provider(conn, "pre-008-prov-b")
+    return conn, proj["id"], prov_a, prov_b
+
+
+async def _apply_008(conn) -> None:
+    import pathlib
+
+    from app.database import apply_migration_file
+
+    await apply_migration_file(
+        conn, pathlib.Path(__file__).parents[2] / "migrations" / f"{_M008}.sql"
+    )
+
+
+@pytest.mark.asyncio
+async def test_migration_008_converts_a_grid_preset_to_agent_panes(tmp_path) -> None:
+    """A grid-shaped row with no cells_json becomes rows*cols agent panes on the
+    header provider, keeping its id and created_at. Pins the ticket's
+    acceptance criterion 2 for the plain case."""
+    from app.services import launch_preset_service
+
+    conn, proj_id, prov_a, _ = await _pre_008_db(tmp_path)
+    try:
+        await conn.execute(
+            """INSERT INTO launch_presets
+               (name, project_id, provider_id, rows, cols, extra_args, target, profile_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("GridPreset", proj_id, prov_a, 2, 2, "--flag", "popout", None),
+        )
+        await conn.commit()
+        before = await (
+            await conn.execute(
+                "SELECT id, created_at FROM launch_presets WHERE name='GridPreset'"
+            )
+        ).fetchone()
+        assert before is not None
+
+        await _apply_008(conn)
+
+        preset = await launch_preset_service.get_preset(conn, before["id"])
+        assert len(preset.panes) == 4
+        assert all(
+            p.kind == "agent"
+            and p.provider_id == prov_a
+            and p.model is None
+            and p.permission_mode == ""
+            and p.send_prompt is True
+            for p in preset.panes
+        )
+        assert preset.split == "grid"
+        assert preset.created_at == before["created_at"]
+        assert preset.extra_args == "--flag"
+        assert preset.target == "popout"
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_008_converts_cells_row_major_with_per_cell_providers(
+    tmp_path,
+) -> None:
+    """A sparse 2x2 cells_json becomes 4 panes in row-major order: each cell's
+    own provider where it has one, the header provider where it does not.
+
+    This is the exact projection the departing
+    `launch_preset_service._panes_from_grid` performed at read time."""
+    import json
+
+    from app.services import launch_preset_service
+
+    conn, proj_id, prov_a, prov_b = await _pre_008_db(tmp_path, "pre-008-cells.db")
+    try:
+        cells = [
+            {
+                "row": 0,
+                "col": 0,
+                "project_id": proj_id,
+                "provider_id": prov_a,
+                "extra_args": "--a",
+                "profile_id": None,
+                "env_overlay": {},
+            },
+            {
+                "row": 0,
+                "col": 1,
+                "project_id": proj_id,
+                "provider_id": prov_b,
+                "extra_args": "",
+                "profile_id": None,
+                "env_overlay": {"K": "V"},
+            },
+            {
+                "row": 1,
+                "col": 0,
+                "project_id": proj_id,
+                "provider_id": prov_a,
+                "extra_args": "",
+                "profile_id": None,
+                "env_overlay": {},
+            },
+            # (1,1) intentionally omitted — falls back to the header provider.
+        ]
+        await conn.execute(
+            """INSERT INTO launch_presets
+               (name, project_id, provider_id, rows, cols, target, cells_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "CellsPreset",
+                proj_id,
+                prov_b,
+                2,
+                2,
+                "embedded",
+                json.dumps(cells, separators=(",", ":")),
+            ),
+        )
+        await conn.commit()
+        row = await (
+            await conn.execute("SELECT id FROM launch_presets WHERE name='CellsPreset'")
+        ).fetchone()
+        assert row is not None
+
+        await _apply_008(conn)
+
+        preset = await launch_preset_service.get_preset(conn, row["id"])
+        assert [p.provider_id for p in preset.panes] == [
+            prov_a,
+            prov_b,
+            prov_a,
+            prov_b,  # (1,1) had no cell — header provider
+        ]
+        assert all(p.kind == "agent" for p in preset.panes)
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_008_leaves_a_pane_shaped_row_untouched(tmp_path) -> None:
+    """A row written by 005's pane path keeps its panes_json and split verbatim,
+    shell panes included."""
+    conn, proj_id, prov_a, _ = await _pre_008_db(tmp_path, "pre-008-panes.db")
+    try:
+        panes_json = (
+            '[{"kind":"shell","shell":"/bin/zsh","command":"pnpm dev"},'
+            f'{{"kind":"agent","provider_id":{prov_a},"model":"opus",'
+            '"permission_mode":"acceptEdits","send_prompt":false}]'
+        )
+        await conn.execute(
+            """INSERT INTO launch_presets
+               (name, project_id, provider_id, rows, cols, target, panes_json, split)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("PanePreset", proj_id, prov_a, 1, 2, "embedded", panes_json, "rows"),
+        )
+        await conn.commit()
+
+        await _apply_008(conn)
+
+        after = await (
+            await conn.execute(
+                "SELECT panes_json, split FROM launch_presets WHERE name='PanePreset'"
+            )
+        ).fetchone()
+        assert after is not None
+        assert after["panes_json"] == panes_json
+        assert after["split"] == "rows"
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_008_derives_split_from_the_grid_shape(tmp_path) -> None:
+    """1xN -> 'cols', Nx1 -> 'rows', anything else -> 'grid' (and 1x1 -> 'cols',
+    matching the old `_split_from_grid`, which tested rows first)."""
+    conn, proj_id, prov_a, _ = await _pre_008_db(tmp_path, "pre-008-split.db")
+    try:
+        for name, n_rows, n_cols in (
+            ("one-by-one", 1, 1),
+            ("one-row", 1, 3),
+            ("one-col", 4, 1),
+            ("square", 2, 2),
+        ):
+            await conn.execute(
+                """INSERT INTO launch_presets
+                   (name, project_id, provider_id, rows, cols, target)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (name, proj_id, prov_a, n_rows, n_cols, "embedded"),
+            )
+        await conn.commit()
+
+        await _apply_008(conn)
+
+        got = {
+            r["name"]: (r["split"], r["panes_json"])
+            for r in await (
+                await conn.execute("SELECT name, split, panes_json FROM launch_presets")
+            ).fetchall()
+        }
+        assert got["one-by-one"][0] == "cols"
+        assert got["one-row"][0] == "cols"
+        assert got["one-col"][0] == "rows"
+        assert got["square"][0] == "grid"
+        # Pane counts follow rows*cols, not the 8-pane save cap: an existing
+        # 4x4 preset must not lose panes to a limit it predates.
+        import json as _json
+
+        assert len(_json.loads(got["one-by-one"][1])) == 1
+        assert len(_json.loads(got["one-row"][1])) == 3
+        assert len(_json.loads(got["one-col"][1])) == 4
+        assert len(_json.loads(got["square"][1])) == 4
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_008_leaves_foreign_keys_on(tmp_path) -> None:
+    """The rebuild toggles PRAGMA foreign_keys off; it must be back on when the
+    migration returns — every later statement on the connection depends on it."""
+    conn, proj_id, _, _ = await _pre_008_db(tmp_path, "pre-008-fk.db")
+    try:
+        await _apply_008(conn)
+        cur = await conn.execute("PRAGMA foreign_keys")
+        row = await cur.fetchone()
+        assert row is not None
+        assert row[0] == 1, "migration 008 left foreign key enforcement off"
+
+        # ... and the surviving project FK still cascades.
+        await conn.execute(
+            """INSERT INTO launch_presets
+               (name, project_id, target, panes_json, split)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("fk-preset", proj_id, "embedded", "[]", "cols"),
+        )
+        await conn.commit()
+        await conn.execute("DELETE FROM projects WHERE id = ?", (proj_id,))
+        await conn.commit()
+        cnt = await (
+            await conn.execute("SELECT COUNT(*) AS cnt FROM launch_presets")
+        ).fetchone()
+        assert cnt is not None
+        assert cnt["cnt"] == 0
     finally:
         await conn.close()
