@@ -57,6 +57,26 @@ function safeParseJson(raw: string | null): Record<string, unknown> | null {
   }
 }
 
+/** True when the event still carries a tool body. New rows are trimmed at the
+ *  sidecar insert (payload allowlist, #159) and carry neither; legacy rows do. */
+function hasStoredToolBody(payload: Record<string, unknown> | null): boolean {
+  if (payload === null) return false;
+  const toolInput = payload["tool_input"];
+  if (
+    typeof toolInput === "object" &&
+    toolInput !== null &&
+    !Array.isArray(toolInput) &&
+    Object.keys(toolInput).length > 0
+  ) {
+    return true;
+  }
+  const toolResponse = payload["tool_response"];
+  if (toolResponse !== null && toolResponse !== undefined) {
+    return true;
+  }
+  return false;
+}
+
 function fmtTimestamp(iso: string): string {
   try {
     const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
@@ -368,6 +388,17 @@ function GenericJsonRenderer({
   );
 }
 
+/** Explains a trimmed tool event: the body was policy-dropped at the
+ *  sidecar insert (#159), not lost by a bug in this renderer. */
+function BodyNotStored(): ReactElement {
+  return (
+    <div className={styles.bodyNote}>
+      Tool body not stored — Codenest keeps the summary and provenance fields
+      only.
+    </div>
+  );
+}
+
 // ─── Renderer dispatcher ──────────────────────────────────────────────────────
 
 function renderBody(ev: EventLike): ReactElement {
@@ -379,6 +410,14 @@ function renderBody(ev: EventLike): ReactElement {
 
   if (ev.event_type === "PreToolUse" || ev.event_type === "PostToolUse") {
     const tool = ev.tool_name ?? "";
+    if (!hasStoredToolBody(payload)) {
+      return (
+        <>
+          <BodyNotStored />
+          <GenericJsonRenderer payload={payload} />
+        </>
+      );
+    }
     if (tool === "Bash") {
       return <BashRenderer payload={payload} />;
     }

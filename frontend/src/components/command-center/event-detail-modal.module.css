@@ -366,3 +366,11 @@
   color: var(--fg-4);
   font-style: italic;
 }
+
+/* ── Trimmed-payload note ──────────────────────────────────────────────────── */
+.bodyNote {
+  font-size: 12px;
+  color: var(--fg-4);
+  font-style: italic;
+  margin-bottom: 10px;
+}

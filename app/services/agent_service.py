@@ -209,6 +209,110 @@ async def _upsert_session_start(
         )
 
 
+# ─── Payload trim ───────────────────────────────────────────────────────────
+#
+# `agent_events.payload_json` used to store the hook payload verbatim, which
+# means every `tool_response` (command output, file contents, search results)
+# and every future field a Claude Code hook version adds landed on disk
+# forever. The functions below are the single allowlist that decides what
+# survives; `_append_event` is the single call site (#159).
+
+# Top-level hook-payload keys kept verbatim. Allowlist, not denylist: an
+# unknown field a future Claude Code version adds is dropped by default.
+_PAYLOAD_TOP_LEVEL: frozenset[str] = frozenset(
+    {
+        "session_id",
+        "cwd",
+        "hook_event_name",
+        "permission_mode",
+        "effort",
+        "source_kind",
+        "source_id",
+        "tool_name",
+        "tool_use_id",
+        "prompt_id",
+    }
+)
+# Per-tool tool_input allowlist, keyed by lowercased tool_name.
+_TOOL_INPUT_KEEP: dict[str, frozenset[str]] = {
+    "todowrite": frozenset({"todos"}),
+    "task": frozenset({"subagent_type", "name", "description"}),
+    "agent": frozenset({"subagent_type", "name", "description"}),
+}
+_MAX_PAYLOAD_STR = 2048  # characters (~2 KB ASCII), per retained string
+
+
+def _cap_value(value: Any) -> tuple[Any, bool]:
+    """Recursively cap every string at _MAX_PAYLOAD_STR.
+
+    Returns (capped value, cut) where `cut` is True if any string was sliced.
+    dicts and lists are rebuilt (never mutated); other scalars pass through.
+    """
+    if isinstance(value, str):
+        if len(value) > _MAX_PAYLOAD_STR:
+            return value[:_MAX_PAYLOAD_STR], True
+        return value, False
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        cut = False
+        for k, v in value.items():
+            capped, child_cut = _cap_value(v)
+            out[k] = capped
+            cut = cut or child_cut
+        return out, cut
+    if isinstance(value, (list, tuple)):
+        items: list[Any] = []
+        cut = False
+        for item in value:
+            capped, child_cut = _cap_value(item)
+            items.append(capped)
+            cut = cut or child_cut
+        return items, cut
+    return value, False
+
+
+def _trim_event_payload(tool_name: str | None, payload: Any) -> dict[str, Any]:
+    """Return the storable projection of a hook payload.
+
+    Called from _append_event immediately before json.dumps so no caller can
+    bypass it. NOTE: `_summarize_tool_input` and
+    `attribution_service.extract_touched_path` read the UNTRIMMED payload and
+    run before the insert — do not move this into the record_* recorders.
+    """
+    if not isinstance(payload, dict):
+        return {}
+
+    dropped = False
+    out: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in _PAYLOAD_TOP_LEVEL:
+            capped, cut = _cap_value(value)
+            out[key] = capped
+            dropped = dropped or cut
+        else:
+            dropped = True
+
+    name = tool_name or payload.get("tool_name") or ""
+    name = name.lower() if isinstance(name, str) else ""
+    keep_set = _TOOL_INPUT_KEEP.get(name)
+    tool_input = payload.get("tool_input")
+    if keep_set is not None and isinstance(tool_input, dict):
+        kept: dict[str, Any] = {}
+        for k, v in tool_input.items():
+            if k in keep_set:
+                capped, cut = _cap_value(v)
+                kept[k] = capped
+                dropped = dropped or cut
+            else:
+                dropped = True
+        if kept:
+            out["tool_input"] = kept
+
+    if dropped:
+        out["truncated"] = True
+    return out
+
+
 async def _append_event(
     db: aiosqlite.Connection,
     session_id: str,
@@ -219,6 +323,7 @@ async def _append_event(
     payload: dict,
     project_id: int | None = None,
 ) -> int:
+    trimmed = _trim_event_payload(tool_name, payload)
     cursor = await db.execute(
         """INSERT INTO agent_events
            (session_id, event_type, tool_name, tool_use_id, summary, payload_json, created_at, project_id)
@@ -229,7 +334,7 @@ async def _append_event(
             tool_name,
             tool_use_id,
             summary,
-            json.dumps(payload, default=str),
+            json.dumps(trimmed, default=str),
             _now(),
             project_id,
         ),
