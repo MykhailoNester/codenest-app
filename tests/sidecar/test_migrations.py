@@ -794,3 +794,181 @@ async def test_migration_008_leaves_foreign_keys_on(tmp_path) -> None:
         assert cnt["cnt"] == 0
     finally:
         await conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Migration 009 — agent_sessions provenance columns
+# ---------------------------------------------------------------------------
+
+_M009 = "009_agent_sessions_provenance"
+
+_PROVENANCE_COLUMNS = (
+    "source_app",
+    "source_detail",
+    "git_branch",
+    "cli_version",
+    "permission_mode",
+    "effort",
+    "title",
+    "title_source",
+)
+
+
+async def _pre_009_db(tmp_path, filename: str = "pre-009.db"):
+    """A connection with every migration before 009 applied."""
+    import pathlib
+
+    import aiosqlite
+
+    from app.database import apply_migration_file
+
+    migrations_dir = pathlib.Path(__file__).parents[2] / "migrations"
+    conn = await aiosqlite.connect(str(tmp_path / filename))
+    conn.row_factory = aiosqlite.Row
+    await conn.execute("PRAGMA foreign_keys=ON")
+    for migration_file in sorted(
+        f for f in migrations_dir.glob("*.sql") if f.stem < _M009
+    ):
+        await apply_migration_file(conn, migration_file)
+    return conn
+
+
+async def _apply_009(conn) -> None:
+    import pathlib
+
+    from app.database import apply_migration_file
+
+    await apply_migration_file(
+        conn, pathlib.Path(__file__).parents[2] / "migrations" / f"{_M009}.sql"
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_has_provenance_columns(migrated_db) -> None:
+    """Migration 009 must add all eight provenance columns to agent_sessions."""
+    cur = await migrated_db.execute("PRAGMA table_info(agent_sessions)")
+    rows = await cur.fetchall()
+    col_names = {r["name"] for r in rows}
+    missing = set(_PROVENANCE_COLUMNS) - col_names
+    assert not missing, f"provenance columns missing from agent_sessions: {missing}"
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_provenance_columns_are_nullable_text(
+    migrated_db,
+) -> None:
+    """Each provenance column must be TEXT, nullable, with no DEFAULT — the AC's
+    'all nullable TEXT, default NULL', which stops a later drive-by
+    `NOT NULL DEFAULT ''`."""
+    cur = await migrated_db.execute("PRAGMA table_info(agent_sessions)")
+    rows = await cur.fetchall()
+    by_name = {r["name"]: r for r in rows}
+    for name in _PROVENANCE_COLUMNS:
+        col = by_name[name]
+        assert col["type"] == "TEXT", f"{name} type is {col['type']!r}, want TEXT"
+        assert col["notnull"] == 0, f"{name} is NOT NULL, want nullable"
+        assert col["dflt_value"] is None, (
+            f"{name} has a DEFAULT ({col['dflt_value']!r}), want none"
+        )
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_provenance_has_no_check_constraint(
+    migrated_db,
+) -> None:
+    """Behavioural pin of the ADR's rejection of a source_app CHECK/allowlist:
+    an arbitrary, out-of-any-plausible-vocabulary value round-trips."""
+    await migrated_db.execute(
+        """INSERT INTO agent_sessions
+               (session_id, source_app, permission_mode, title_source)
+           VALUES (?, ?, ?, ?)""",
+        (
+            "prov-no-check",
+            "not-a-real-client-xyz",
+            "not-a-real-mode-xyz",
+            "not-a-real-source-xyz",
+        ),
+    )
+    await migrated_db.commit()
+    row = await (
+        await migrated_db.execute(
+            "SELECT source_app, permission_mode, title_source FROM agent_sessions "
+            "WHERE session_id = ?",
+            ("prov-no-check",),
+        )
+    ).fetchone()
+    assert row is not None
+    assert row["source_app"] == "not-a-real-client-xyz"
+    assert row["permission_mode"] == "not-a-real-mode-xyz"
+    assert row["title_source"] == "not-a-real-source-xyz"
+
+
+@pytest.mark.asyncio
+async def test_migration_009_preserves_existing_agent_sessions_rows(
+    tmp_path,
+) -> None:
+    """A row inserted before 009 keeps every prior value and reads NULL in all
+    eight new slots."""
+    conn = await _pre_009_db(tmp_path)
+    try:
+        await conn.execute(
+            """INSERT INTO agent_sessions (session_id, profile, cwd, total_tool_calls)
+               VALUES (?, ?, ?, ?)""",
+            ("pre-009-session", "work", "/repo/pre-009", 7),
+        )
+        await conn.commit()
+
+        await _apply_009(conn)
+
+        row = await (
+            await conn.execute(
+                "SELECT * FROM agent_sessions WHERE session_id = ?",
+                ("pre-009-session",),
+            )
+        ).fetchone()
+        assert row is not None
+        assert row["profile"] == "work"
+        assert row["cwd"] == "/repo/pre-009"
+        assert row["total_tool_calls"] == 7
+        for name in _PROVENANCE_COLUMNS:
+            assert row[name] is None, f"{name} expected NULL, got {row[name]!r}"
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_009_stem_is_recorded_and_skipped_on_rerun(
+    tmp_path, monkeypatch
+) -> None:
+    """init_db is idempotent: running it twice applies 009 once and records its
+    stem once, even though the raw SQL would (correctly) raise
+    'duplicate column name' on a second literal execution."""
+    import app.database as db_module
+    from app.config import settings
+    from app.database import init_db
+
+    monkeypatch.setattr(settings, "DATABASE_PATH", tmp_path / "idem.db")
+    db_module._db = None
+    try:
+        await init_db()
+        await init_db()
+
+        conn = db_module._db
+        assert conn is not None
+        rows = await (
+            await conn.execute(
+                "SELECT COUNT(*) AS cnt FROM schema_migrations WHERE version = ?",
+                (_M009,),
+            )
+        ).fetchone()
+        assert rows is not None
+        assert rows["cnt"] == 1
+
+        cur = await conn.execute("PRAGMA table_info(agent_sessions)")
+        col_names = {r["name"] for r in await cur.fetchall()}
+        missing = set(_PROVENANCE_COLUMNS) - col_names
+        assert not missing
+    finally:
+        if db_module._db is not None:
+            await db_module._db.close()
+        db_module._db = None

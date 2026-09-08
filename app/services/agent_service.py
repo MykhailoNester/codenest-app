@@ -209,6 +209,64 @@ async def _upsert_session_start(
         )
 
 
+def _provenance_value(payload: dict, key: str) -> str | None:
+    """Return `payload[key]` stored verbatim, or None when the hook proves nothing.
+
+    A non-`str` value (missing key, `None`, a number, a nested object — see the
+    UserPromptSubmit/PreToolUse/Stop payload shapes) and a string that is blank
+    after `.strip()` both normalise to `None`. This never returns the literal
+    `"unknown"`: unlike `profile`, which defaults to that string elsewhere in
+    this table, provenance must keep "we were not told" (`None`) distinguishable
+    from "the client said unknown" (a stored `"unknown"` string, which this
+    function passes through unchanged if that is genuinely what the hook sent).
+    """
+    value = payload.get(key)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+async def _record_provenance(
+    db: aiosqlite.Connection, session_id: str, payload: dict
+) -> None:
+    """Store last-known `permission_mode` / `effort` from a hook payload.
+
+    Called from `record_user_prompt`, `record_pre_tool` and `record_stop` —
+    the three hooks whose payloads the live-DB sample shows actually carrying
+    either field. Uses `COALESCE(?, column)` so a hook that omits a field
+    leaves the stored value alone (a later hook cannot erase what an earlier
+    one set), while a hook that carries a *different* value overwrites: both
+    permission mode and effort genuinely change mid-session (permission mode
+    has a live switch — see `frontend/src/lib/ipc.ts`), so last-known is the
+    useful reading for a live session, not first-write.
+
+    The `try`/`except` here — not left to the router's `_safe_handle` — is
+    deliberate: `_safe_handle` reaches its `{"continue": true}` response by
+    rolling back the *shared* connection, which would discard the whole
+    hook's uncommitted work (the `agent_events` row, the `current_tool`
+    transition, `last_event_at`). Guarding only this single UPDATE lets a
+    database that has not yet run `009_agent_sessions_provenance` still
+    commit everything else via the caller's own `db.commit()`. No commit
+    happens in here — this statement rides inside the caller's transaction.
+    """
+    permission_mode = _provenance_value(payload, "permission_mode")
+    effort = _provenance_value(payload, "effort")
+    if permission_mode is None and effort is None:
+        return
+    try:
+        await db.execute(
+            """UPDATE agent_sessions
+               SET permission_mode = COALESCE(?, permission_mode),
+                   effort          = COALESCE(?, effort)
+             WHERE session_id = ?""",
+            (permission_mode, effort, session_id),
+        )
+    except Exception:  # noqa: BLE001, S110
+        # Column not yet present (009_agent_sessions_provenance pending) — non-fatal.
+        pass
+
+
 async def _append_event(
     db: aiosqlite.Connection,
     session_id: str,
@@ -326,6 +384,7 @@ async def record_user_prompt(db: aiosqlite.Connection, payload: dict) -> None:
     await _upsert_session_start(
         db, session_id, payload.get("cwd"), payload.get("transcript_path")
     )
+    await _record_provenance(db, session_id, payload)
     prompt = (payload.get("prompt") or "").strip()
     summary = _truncate(prompt, 200)
     if prompt:
@@ -354,6 +413,7 @@ async def record_pre_tool(db: aiosqlite.Connection, payload: dict) -> None:
     await _upsert_session_start(
         db, session_id, payload.get("cwd"), payload.get("transcript_path")
     )
+    await _record_provenance(db, session_id, payload)
     tool_name = payload.get("tool_name")
     tool_use_id = payload.get("tool_use_id")
     tool_input = payload.get("tool_input")
@@ -450,6 +510,7 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
     await _upsert_session_start(
         db, session_id, payload.get("cwd"), payload.get("transcript_path")
     )
+    await _record_provenance(db, session_id, payload)
     now = _now()
     # Stop hook payload has no usage — read the last turn's usage from the transcript.
     usage, transcript_model = _read_last_turn_usage(payload.get("transcript_path"))
