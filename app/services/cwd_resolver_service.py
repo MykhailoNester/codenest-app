@@ -8,7 +8,9 @@ An agent pane's launch is the same question with the same input, so
 (read-only — see `resolve`); it used to carry its own matcher,
 `agent_runs_service.resolve_project_id_for_cwd`, which matched `projects.path`
 alone and never walked to a repo root, so a pane and its own session could
-land on two different projects.
+land on two different projects. `session_backfill_service` (#158) pushes the
+*historical* rows back through the same `resolve`, so four months of sessions
+recorded by the old matcher get this module's answer rather than a second one.
 
 It replaces `agent_service._match_project`, which was wrong in both
 directions:
@@ -169,14 +171,23 @@ def _normalize_cwd(cwd: str | None) -> str | None:
     `None` for a blank cwd, a non-absolute cwd (see the module docstring —
     resolving it against the sidecar's own working directory would silently
     attribute the session to the sidecar's repo), a path that resolves to the
-    filesystem root, or an `OSError` from `realpath` itself.
+    filesystem root, or a `realpath` this platform refuses to compute.
+
+    `ValueError` is caught alongside `OSError` because `realpath` raises it,
+    not `OSError`, for a path holding an embedded NUL byte (`ValueError:
+    embedded null character in path`). Nothing here may raise: this is the one
+    normalisation step every public entry point shares, and the callers that
+    guard only their *own* stat calls (`is_ephemeral_cwd`, `cwd_exists`) would
+    otherwise leak a `ValueError` out of a helper documented to answer
+    `False`. A cwd that cannot be spelled as a path is exactly the "proves
+    nothing" case, so it takes the same `None` road as a relative one.
     """
     candidate = (cwd or "").strip()
     if not candidate or not os.path.isabs(candidate):
         return None
     try:
         resolved = os.path.realpath(candidate).rstrip("/")
-    except OSError:
+    except (OSError, ValueError):
         return None
     return resolved or None
 
@@ -292,12 +303,43 @@ def is_ephemeral_cwd(cwd: str | None) -> bool:
     answers `True` through the `/private/tmp` symlink. `False` for anything
     it cannot resolve — a session with no usable cwd is an ordinary
     attribution miss, not a scratch run, and guessing the other way would
-    quietly forgive the misses this phase exists to count.
+    quietly forgive the misses this phase exists to count. "Cannot resolve"
+    includes a cwd `realpath` refuses outright (an embedded NUL): that is
+    absorbed by `_normalize_cwd`, so this never raises for a stored value no
+    matter how odd, which the backfill's unguarded call depends on.
     """
     resolved = _normalize_cwd(cwd)
     if resolved is None:
         return False
     return _is_ephemeral_path(resolved)
+
+
+def cwd_exists(cwd: str | None) -> bool:
+    """Whether `cwd` still names a directory on this filesystem.
+
+    A hook never needs this — the session it describes is running *in* that
+    directory, so it exists by construction. The backfill (#158) does: it
+    re-resolves cwds recorded months ago, and `match_project`'s prefix test
+    would happily attribute a deleted `/w/acme/api` to the project at
+    `/w/acme` on the strength of the string alone. That is exactly the guess
+    the backfill must not make, so it gates resolution on this instead.
+
+    Normalisation goes through `_normalize_cwd` rather than statting the raw
+    value, so a relative path is rejected instead of being resolved against
+    the *sidecar's* working directory (where it might well exist, and mean
+    something else entirely). `False` for anything unreadable — an
+    unstattable directory is one we cannot claim to have seen — and `False`,
+    not an exception, for a path no syscall will accept at all: both halves of
+    the answer are guarded, the normalisation inside `_normalize_cwd` and the
+    stat here.
+    """
+    resolved = _normalize_cwd(cwd)
+    if resolved is None:
+        return False
+    try:
+        return os.path.isdir(resolved)
+    except (OSError, ValueError):
+        return False
 
 
 def _git_present(path: str) -> bool:
@@ -635,3 +677,44 @@ async def resolve(
     except Exception:
         logger.warning("cwd resolver: failed to resolve %r", cwd, exc_info=True)
         return _UNRESOLVED
+
+
+async def would_discover(db: aiosqlite.Connection, cwd: str | None) -> bool:
+    """Whether `resolve(db, cwd)` would *create* a `status='discovered'` project.
+
+    Step 4 of the resolution, asked without performing it. It exists for the
+    backfill's `?dry_run=1` (#158), which has to report the same
+    `created_projects` a real run would and cannot get there by writing and
+    rolling back: the sidecar shares one SQLite connection across every
+    request, so an interleaved hook's `commit()` would land our speculative
+    inserts and our `ROLLBACK` would take that hook's own work with it. A
+    read-only probe is the only honest way to count a write that must not
+    happen.
+
+    Deliberately built out of this module's own steps — `_is_ephemeral_path`,
+    `find_repo_root`, `match_project`, `_enabled_root_for` — in the same
+    order and with the same gates as `_resolve_project`, so the answer cannot
+    drift from what `resolve` actually does. It is a probe, not a second
+    resolver: no caller may use it to decide a project id.
+
+    `False` whenever a real run would not create either — an unusable cwd, an
+    ephemeral one (which skips discovery outright), a directory with no repo
+    root above it (discovery is keyed on a repo, not on a bare directory), a
+    repo an existing project already claims, or a repo outside every enabled
+    `project_roots` row. Never raises, for the same reason `resolve` does not.
+    """
+    try:
+        cwd_path = _normalize_cwd(cwd)
+        if cwd_path is None or _is_ephemeral_path(cwd_path):
+            return False
+        repo_path = find_repo_root(cwd_path)
+        if repo_path is None:
+            return False
+        if await match_project(db, repo_path) is not None:
+            return False
+        return await _enabled_root_for(db, repo_path) is not None
+    except Exception:
+        logger.warning(
+            "cwd resolver: discovery probe failed for %r", cwd, exc_info=True
+        )
+        return False

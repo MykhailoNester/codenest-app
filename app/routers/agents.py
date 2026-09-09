@@ -22,6 +22,7 @@ from app.services import (
     agent_service,
     budget_service,
     cwd_resolver_service,
+    session_backfill_service,
     session_hud_service,
 )
 
@@ -257,6 +258,31 @@ async def api_cleanup_stale_sessions():
     """
     db = await get_db()
     result = await agent_service.cleanup_stale_sessions(db)
+    return JSONResponse(result)
+
+
+@router.post("/api/v1/agents/sessions/backfill-attribution")
+async def api_backfill_session_attribution(dry_run: bool = False, force: bool = False):
+    """Re-resolve every recorded session's project attribution (#158).
+
+    Attribution is computed once, at hook time, so the history recorded before
+    `cwd_resolver_service` shipped keeps whatever the old substring matcher
+    said — 70 of 128 live sessions with `project_id NULL`. This pushes every
+    row back through the same resolver the hooks use and returns
+    ``{scanned, attributed, ephemeral, still_unattributed, created_projects}``.
+
+    ``?dry_run=1`` returns the counts a real run would produce and writes
+    nothing. ``?force=1`` re-resolves rows that already have a `project_id`
+    and replaces it; without it those rows keep the project they have, which
+    is the default because a set value may have been set by hand.
+
+    curl is the interface for P0 — there is no UI trigger. Safe to re-run: a
+    second pass finds nothing to change and reports ``attributed=0``.
+    """
+    db = await get_db()
+    result = await session_backfill_service.backfill_session_attribution(
+        db, dry_run=dry_run, force=force
+    )
     return JSONResponse(result)
 
 
