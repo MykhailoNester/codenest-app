@@ -34,7 +34,7 @@ async def _schedule_tick_loop() -> None:
     import asyncio as _asyncio
 
     from .database import get_db
-    from .services import mcp_servers_service, schedule_service
+    from .services import event_retention_service, mcp_servers_service, schedule_service
 
     tick_count = 0
     while True:
@@ -63,6 +63,19 @@ async def _schedule_tick_loop() -> None:
                         logger.info("transcript prune: %s", result)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("transcript prune failed (continuing): %s", exc)
+                # Agent-event prune (#160). Same daily cadence and the same
+                # "log and carry on" isolation as the transcript prune: the
+                # tick must keep firing schedules even if retention fails.
+                # Rows only — sessions are never deleted, and the DB file
+                # does not shrink (no VACUUM).
+                try:
+                    events = (
+                        await event_retention_service.prune_agent_events_if_enabled(db)
+                    )
+                    if events and events["rows_deleted"]:
+                        logger.info("agent event prune: %s", events["classes"])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("agent event prune failed (continuing): %s", exc)
         except _asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
