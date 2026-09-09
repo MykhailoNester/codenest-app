@@ -369,6 +369,28 @@ async def test_unusable_cwd_resolves_to_nothing(
     assert result == cwd_resolver_service.CwdResolution()
 
 
+@pytest.mark.asyncio
+async def test_a_cwd_no_syscall_will_accept_answers_instead_of_raising(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """An embedded NUL makes `os.path.realpath` raise `ValueError`, not
+    `OSError` — the one thing a path can do that the normaliser's guard used
+    to miss. `resolve` would have swallowed it in its catch-all, but
+    `is_ephemeral_cwd` and `cwd_exists` guard only their own stat calls, and
+    the backfill (#158) calls both directly on whatever string a session row
+    happens to hold. All four must answer.
+    """
+    cwd = "/tmp/nul\x00byte"
+
+    assert cwd_resolver_service.is_ephemeral_cwd(cwd) is False
+    assert cwd_resolver_service.cwd_exists(cwd) is False
+    assert await cwd_resolver_service.would_discover(migrated_db, cwd) is False
+    assert (
+        await cwd_resolver_service.resolve(migrated_db, cwd)
+        == cwd_resolver_service.CwdResolution()
+    )
+
+
 # ─── git_branch, read straight out of .git/HEAD ──────────────────────────────
 
 
