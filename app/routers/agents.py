@@ -12,16 +12,18 @@ import logging
 import os
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.database import get_db
 from app.models.session_hud import PaneHud
+from app.routers._http import read_json_body
 from app.services import (
     agent_runs_service,
     agent_service,
     budget_service,
     cwd_resolver_service,
+    event_retention_service,
     session_backfill_service,
     session_hud_service,
 )
@@ -168,6 +170,61 @@ async def api_list_agents():
     db = await get_db()
     agents = await agent_service.list_with_stats(db, "30d")
     return JSONResponse(agents)
+
+
+# ─── Event retention (epic #153 / #160) ─────────────────────────────────────
+#
+# The `agent_events` counterpart to `GET/PUT /api/v1/schedules/retention`:
+# same `app_settings` storage, same 1–365 range, same 400 texts — one field
+# per class of record instead of one field total. `event_retention_service`
+# owns the class list, the default windows and the field names; these two
+# handlers only parse and validate.
+
+
+@router.get("/api/v1/agents/retention")
+async def api_get_agent_retention() -> JSONResponse:
+    """Return the effective agent-event retention window for every class."""
+    db = await get_db()
+    days = await event_retention_service.resolve_retention_days(db)
+    return JSONResponse(event_retention_service.retention_payload(days))
+
+
+@router.put("/api/v1/agents/retention")
+async def api_set_agent_retention(request: Request) -> JSONResponse:
+    """Set one or more agent-event retention windows (1–365 days each).
+
+    Partial writes are accepted — a body naming only `tool_retention_days`
+    leaves the other two classes on whatever they were resolving to. The
+    response is the full resolved payload either way, so a caller always
+    learns the effective policy and not just the part it sent.
+    """
+    body = await read_json_body(request, 512)
+
+    provided: dict[str, int] = {}
+    for cls in event_retention_service.RETENTION_CLASSES:
+        field = event_retention_service.field_name(cls.key)
+        raw = body.get(field)
+        if raw is None:
+            continue
+        try:
+            days = int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"'{field}' must be an integer")
+        if not (1 <= days <= 365):
+            raise HTTPException(status_code=400, detail=f"'{field}' must be 1–365")
+        provided[cls.key] = days
+
+    if not provided:
+        expected = ", ".join(
+            f"'{event_retention_service.field_name(c.key)}'"
+            for c in event_retention_service.RETENTION_CLASSES
+        )
+        raise HTTPException(status_code=400, detail=f"one of {expected} is required")
+
+    db = await get_db()
+    await event_retention_service.set_retention_days(db, provided)
+    effective = await event_retention_service.resolve_retention_days(db)
+    return JSONResponse(event_retention_service.retention_payload(effective))
 
 
 @router.get("/api/v1/agents/{name}/stats")
