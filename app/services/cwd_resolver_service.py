@@ -32,6 +32,13 @@ The resolution, in order:
      A non-absolute cwd is rejected outright — `realpath` would happily
      resolve it against the *sidecar's* working directory and attribute the
      session to whatever repo the sidecar happens to run from.
+  1a. Classify the *kind* of directory it is (#157). A cwd under a throwaway
+     root — the OS temp directory, or the `/ship` pipeline's worktree root —
+     is `ephemeral`: it keeps `project_id NULL` on purpose and skips steps 3
+     and 4 entirely, so nothing matches it to a project and nothing creates
+     one for it. Without that distinction `project_id NULL` means both "not
+     matched yet" and "will never be a project", and every unattributed
+     count is wrong by however many scratch runs are on the board.
   2. Walk **up** to the deepest ancestor holding a `.git` entry: that
      directory, not the cwd, is what a project claims. The walk is bounded
      (`_MAX_WALK_LEVELS`, the filesystem root, the user's home) and never
@@ -63,10 +70,13 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import aiosqlite
+
+from app.config import settings
 
 from . import project_service
 
@@ -84,6 +94,45 @@ _MAX_HEAD_BYTES = 4096
 
 _BRANCH_REF_PREFIX = "refs/heads/"
 
+# `agent_sessions.session_kind` (migration 011) vocabulary. It lives here
+# rather than in `agent_service` because this module is what decides the
+# value; `agent_service` only stores it and filters on it. The migration
+# carries no CHECK constraint — SQLite's `ALTER TABLE ADD COLUMN` CHECK
+# support is version-dependent — so this set is the enforcement point for
+# both the write and the read filter, exactly as 009's docstring says the
+# writer of a provenance column owns validating it.
+SESSION_KIND_PROJECT = "project"
+SESSION_KIND_EPHEMERAL = "ephemeral"
+SESSION_KINDS: frozenset[str] = frozenset(
+    {SESSION_KIND_PROJECT, SESSION_KIND_EPHEMERAL}
+)
+
+# Where the `/ship` pipeline puts per-task worktrees and their artifacts.
+# `.claude/commands/ship.md` computes the same thing —
+# `${CODENEST_WORKTREE_ROOT:-$(dirname "$REPO")/.codenest-worktrees}` — and
+# `.claude/pipeline.env.example` documents the override. Both sides must
+# agree or a pipeline run's sessions would be classified as project work.
+_WORKTREE_ROOT_ENV = "CODENEST_WORKTREE_ROOT"
+_WORKTREE_ROOT_DIRNAME = ".codenest-worktrees"
+
+# Temp roots named literally rather than derived. `/tmp` and `/private/tmp`
+# are the same directory on macOS (`/tmp` is a symlink) and `realpath`
+# collapses them to one entry; on Linux only `/tmp` exists and
+# `/private/tmp` resolves to a path nothing can ever sit under, which costs
+# one harmless never-matching prefix. They are listed anyway because
+# `tempfile.gettempdir()` answers with `$TMPDIR` when the environment sets
+# one, and a session started from a shell with no `TMPDIR` still lands in
+# `/tmp` — neither source subsumes the other.
+_LITERAL_TEMP_ROOTS = ("/tmp", "/private/tmp")
+
+# Environment variables that name a temp directory, in `tempfile`'s own
+# order of precedence. Read directly instead of relying on
+# `tempfile.gettempdir()` alone because that function caches its answer in
+# `tempfile.tempdir` on first use: a sidecar whose environment named a
+# different `TMPDIR` than the process that first called it would otherwise
+# classify that directory as project work forever.
+_TEMP_DIR_ENV_VARS = ("TMPDIR", "TEMP", "TMP")
+
 
 @dataclass(frozen=True)
 class CwdResolution:
@@ -95,11 +144,20 @@ class CwdResolution:
     project. `repo_path` is the directory the walk settled on (the git repo
     root, or `None` when no repo was found); callers do not need it, but it
     is what makes a wrong answer diagnosable.
+
+    `session_kind` is `None` — not `'project'` — when the cwd proved nothing
+    (blank, relative, or unreadable). The column is `NOT NULL DEFAULT
+    'project'`, so "we were not told" and "we looked and it is ordinary
+    project work" would be written identically; keeping them apart here lets
+    `agent_service._record_session_kind` decline to write at all on a hook
+    that carried no usable cwd, rather than flipping a session already known
+    to be ephemeral back to `project`.
     """
 
     project_id: int | None = None
     git_branch: str | None = None
     repo_path: str | None = None
+    session_kind: str | None = None
 
 
 _UNRESOLVED = CwdResolution()
@@ -148,6 +206,98 @@ def _match_key(path: str) -> str:
     """
     normalised = path.replace("\\", "/").rstrip("/")
     return normalised.casefold() if _paths_are_case_insensitive() else normalised
+
+
+def _has_prefix(path_key: str, root_key: str) -> bool:
+    """Whether `path_key` is `root_key` or sits underneath it.
+
+    The path-boundary test the whole module is built on, factored out because
+    three callers now need it: project matching, the enabled-root gate, and
+    ephemeral classification. `/tmpfoo` is not under `/tmp` — a bare
+    `startswith` would say it was, which is the exact bug (`if path in cwd`)
+    that `agent_service._match_project` was deleted for. Both sides must
+    already be `_match_key`-normalised; a root that is itself the path counts,
+    since a session sitting directly in `/private/tmp` is as throwaway as one
+    three levels down.
+    """
+    return bool(root_key) and (
+        path_key == root_key or path_key.startswith(root_key + "/")
+    )
+
+
+def _worktree_root() -> str:
+    """The `/ship` pipeline's worktree-and-artifacts root, as configured.
+
+    `CODENEST_WORKTREE_ROOT` when the environment sets it, else the repo's
+    sibling `.codenest-worktrees` — the same two-step `.claude/commands/ship.md`
+    does, so the two never disagree about where a pipeline run lives. In a
+    packaged build `PROJECT_ROOT` is inside the app bundle and this names a
+    directory that does not exist; that is harmless (a prefix nothing can be
+    under) and better than pretending a released app runs the pipeline.
+    """
+    override = (os.environ.get(_WORKTREE_ROOT_ENV) or "").strip()
+    if override:
+        return override
+    return str(settings.PROJECT_ROOT.parent / _WORKTREE_ROOT_DIRNAME)
+
+
+def _ephemeral_roots() -> tuple[str, ...]:
+    """Resolved, de-duplicated directories whose contents are throwaway.
+
+    Recomputed per call rather than cached in a module constant: the answer
+    depends on the environment (`$TMPDIR`, `CODENEST_WORKTREE_ROOT`) and on
+    what `realpath` says today, and a hook already pays a bounded directory
+    walk plus a `HEAD` read, so a handful of `realpath` calls is not the cost
+    worth freezing a wrong answer for. It also keeps the set patchable, which
+    is how the test suite stops pytest's own `$TMPDIR`-rooted `tmp_path` trees
+    from reading as scratch runs (`tests/sidecar/conftest.py`).
+
+    Every candidate goes through `_normalize_cwd`, so a relative or blank
+    value is dropped rather than resolved against the sidecar's own working
+    directory, and each root is stored `realpath`-resolved — that is what makes
+    `/tmp/x` on macOS match the `/private/tmp` a session actually reports.
+    """
+    candidates = list(_LITERAL_TEMP_ROOTS)
+    try:
+        candidates.append(tempfile.gettempdir())
+    except OSError:
+        # `gettempdir` searches for a writable directory and raises
+        # `FileNotFoundError` when it finds none. The literals and the env
+        # vars below still stand, and a missing temp root must not cost the
+        # caller its classification — nothing here may raise into a hook.
+        logger.debug("cwd resolver: no usable temp directory", exc_info=True)
+    candidates.extend(os.environ.get(var, "") for var in _TEMP_DIR_ENV_VARS)
+    candidates.append(_worktree_root())
+
+    roots: list[str] = []
+    for candidate in candidates:
+        resolved = _normalize_cwd(candidate)
+        if resolved is None or resolved in roots:
+            continue
+        roots.append(resolved)
+    return tuple(roots)
+
+
+def _is_ephemeral_path(path: str) -> bool:
+    """Ephemeral test for an already-`_normalize_cwd`-ed path."""
+    needle = _match_key(path)
+    return any(_has_prefix(needle, _match_key(root)) for root in _ephemeral_roots())
+
+
+def is_ephemeral_cwd(cwd: str | None) -> bool:
+    """Whether `cwd` names a directory no project can ever own.
+
+    The public form of the classification: it normalises its argument first,
+    so a caller may pass the raw hook value and a macOS `/tmp/cn-wire` still
+    answers `True` through the `/private/tmp` symlink. `False` for anything
+    it cannot resolve — a session with no usable cwd is an ordinary
+    attribution miss, not a scratch run, and guessing the other way would
+    quietly forgive the misses this phase exists to count.
+    """
+    resolved = _normalize_cwd(cwd)
+    if resolved is None:
+        return False
+    return _is_ephemeral_path(resolved)
 
 
 def _git_present(path: str) -> bool:
@@ -302,7 +452,7 @@ async def match_project(db: aiosqlite.Connection, path: str) -> int | None:
         stored = _match_key(str(row["stored"]))
         if not stored or stored == ".":
             continue
-        if needle == stored or needle.startswith(stored + "/"):
+        if _has_prefix(needle, stored):
             return int(row["id"])
     return None
 
@@ -329,8 +479,7 @@ async def _enabled_root_for(db: aiosqlite.Connection, path: str) -> str | None:
         rows = await cur.fetchall()
     for row in rows:
         stored = str(row["path"])
-        root = _match_key(stored)
-        if root and (needle == root or needle.startswith(root + "/")):
+        if _has_prefix(needle, _match_key(stored)):
             return stored.rstrip("/")
     return None
 
@@ -447,6 +596,13 @@ async def resolve(
     the project list" is a decision about *sessions* — a pane launched in an
     unknown repo reads as unattributed now and picks up the project id the
     session's own hooks create moments later.
+
+    An ephemeral cwd short-circuits the project question altogether (#157):
+    no match, no auto-create, `project_id` stays `None`, and the kind says
+    why. The branch is still read — a `/ship` worktree under the pipeline's
+    root has a real branch, and the HUD showing it is useful whether or not
+    the directory will ever be a project — because `git_branch` was never
+    the field that made these rows misleading.
     """
     try:
         cwd_path = _normalize_cwd(cwd)
@@ -454,6 +610,13 @@ async def resolve(
             return _UNRESOLVED
         repo_path = find_repo_root(cwd_path)
         branch = read_git_branch(repo_path) if repo_path is not None else None
+        if _is_ephemeral_path(cwd_path):
+            return CwdResolution(
+                project_id=None,
+                git_branch=branch,
+                repo_path=repo_path,
+                session_kind=SESSION_KIND_EPHEMERAL,
+            )
         try:
             project_id = await _resolve_project(
                 db, repo_path, cwd_path, allow_discovery
@@ -464,7 +627,10 @@ async def resolve(
             )
             project_id = None
         return CwdResolution(
-            project_id=project_id, git_branch=branch, repo_path=repo_path
+            project_id=project_id,
+            git_branch=branch,
+            repo_path=repo_path,
+            session_kind=SESSION_KIND_PROJECT,
         )
     except Exception:
         logger.warning("cwd resolver: failed to resolve %r", cwd, exc_info=True)

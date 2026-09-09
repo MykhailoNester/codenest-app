@@ -1,0 +1,39 @@
+-- agent_sessions.session_kind (epic #153 / #157): attribution needs two
+-- failure values, not one.
+--
+-- Before this column, `project_id IS NULL` meant both "this cwd belongs to a
+-- project we have not matched yet" (a real attribution miss, which this phase
+-- exists to drive to zero) and "this cwd is not a project at all, and never
+-- will be" — a harness or worktree scratch run under the OS temp directory.
+-- The live database carries a dozen of the latter (`/private/tmp/cn-*`), so
+-- every "unattributed sessions" figure was permanently wrong by a dozen with
+-- no way to tell which rows to forgive.
+--
+-- `session_kind` holds that difference. `project` is every session that runs
+-- somewhere a project could plausibly live; `ephemeral` is a session whose
+-- resolved cwd sits under a throwaway root, which keeps `project_id NULL`
+-- deliberately and must never auto-create a project. The classifier is
+-- `app/services/cwd_resolver_service.py` — the single cwd → project path —
+-- and `agent_service._record_session_kind` is the only writer.
+--
+-- No CHECK constraint, for the reason 009_agent_sessions_provenance and
+-- 010_project_roots both give: SQLite's `ALTER TABLE ADD COLUMN` CHECK
+-- support is version-dependent, and a CHECK would need a full table rebuild
+-- to widen when P1 adds a third kind (`cloud`, `subagent`, …). The allowed
+-- set `project` | `ephemeral` is enforced in the service layer instead —
+-- `cwd_resolver_service.SESSION_KINDS`, which gates both the write and the
+-- read filter.
+--
+-- `NOT NULL DEFAULT 'project'` rather than a nullable column: a session
+-- always has a kind, and "we have not classified this one" is not a state
+-- worth modelling — an unresolvable cwd is a `project`-kind session with a
+-- NULL `project_id`, which is exactly the attribution miss the phase counts.
+-- SQLite requires a non-NULL default to add a NOT NULL column without a
+-- rebuild, and that default is also the backfill this ticket wants: every
+-- row already recorded reads `project` from here on, including the dozen
+-- temp-dir sessions. Reclassifying those is #158's job, deliberately split
+-- out so this file stays a pure `ADD COLUMN` with no data motion and no
+-- inserted rows — the clean-slate invariant (a freshly migrated DB ships
+-- empty apart from reference data) holds.
+
+ALTER TABLE agent_sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'project';
