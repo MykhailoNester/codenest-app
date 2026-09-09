@@ -20,7 +20,7 @@ import aiosqlite
 import pytest
 
 from app.database import apply_migration_file
-from app.services import agent_service, project_roots_service
+from app.services import project_roots_service
 
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
 _M010 = "010_project_roots"
@@ -399,31 +399,3 @@ async def test_list_roots_is_ordered_by_path(migrated_db, tmp_path) -> None:
     assert paths == sorted(paths)
     assert all(r["enabled"] is True for r in roots)
     assert all(r["source"] == "manual" for r in roots)
-
-
-# ─── Regression: _match_project is untouched ────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_match_project_is_identical_before_and_after_the_migration(
-    tmp_path,
-) -> None:
-    conn = await _pre_010_db(tmp_path)
-    try:
-        await _insert_project(conn, "codenest", path="/Users/dev/Codenest")
-        await _insert_project(conn, "other", path="/Users/dev/other-repo")
-
-        cwds = [
-            "/Users/dev/other-repo/src/main.py",
-            "/Users/dev/unrelated/path",
-            "/Users/dev/Codenest/sub/dir",
-            None,
-        ]
-        before = [await agent_service._match_project(conn, cwd) for cwd in cwds]
-
-        await _apply_010(conn)
-
-        after = [await agent_service._match_project(conn, cwd) for cwd in cwds]
-        assert before == after
-    finally:
-        await conn.close()

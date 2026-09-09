@@ -18,7 +18,12 @@ from fastapi import HTTPException
 
 from app.models.session_end_reason import EndCategory, classify
 
-from . import attribution_service, budget_service, notification_service
+from . import (
+    attribution_service,
+    budget_service,
+    cwd_resolver_service,
+    notification_service,
+)
 
 # ─── Pub/sub ────────────────────────────────────────────────────────────────
 
@@ -89,29 +94,6 @@ async def _derive_profile(db: aiosqlite.Connection, transcript_path: str | None)
     return "unknown"
 
 
-async def _match_project(db: aiosqlite.Connection, cwd: str | None) -> int | None:
-    if not cwd:
-        return None
-    # ORDER BY LENGTH(path) DESC so first match is the most specific (longest) path
-    rows = await db.execute(
-        "SELECT id, path FROM projects WHERE path IS NOT NULL AND path != '' ORDER BY LENGTH(path) DESC"
-    )
-    projects = await rows.fetchall()
-    for proj in projects:
-        path = proj["path"].rstrip("/")
-        if not path or path == ".":
-            continue
-        if path in cwd:
-            return proj["id"]
-    # Fallback to Codenest root project if cwd is somewhere under it
-    if "/Codenest" in cwd:
-        row = await db.execute("SELECT id FROM projects WHERE name = 'Codenest'")
-        codenest = await row.fetchone()
-        if codenest:
-            return codenest["id"]
-    return None
-
-
 def _truncate(text: str | None, n: int = 140) -> str:
     if not text:
         return ""
@@ -169,7 +151,11 @@ async def _upsert_session_start(
     from . import provider_service  # local import to avoid circular dep
 
     profile = await _derive_profile(db, transcript_path)
-    project_id = await _match_project(db, cwd)
+    # One resolver for every hook: `cwd_resolver_service` owns the whole
+    # cwd → project question (and hands back the branch it already had in
+    # hand while walking to the repo root). It never raises.
+    resolution = await cwd_resolver_service.resolve(db, cwd)
+    project_id = resolution.project_id
     provider_id = await provider_service.resolve_profile_to_provider(db, profile)
     now = _now()
     existing = await _get_session(db, session_id)
@@ -207,6 +193,35 @@ async def _upsert_session_start(
                 provider_id,
             ),
         )
+    await _record_git_branch(db, session_id, resolution.git_branch)
+
+
+async def _record_git_branch(
+    db: aiosqlite.Connection, session_id: str, git_branch: str | None
+) -> None:
+    """Store the branch `cwd_resolver_service` read out of `<repo>/.git/HEAD`.
+
+    Last-known-wins, and never written as NULL: a branch genuinely changes
+    mid-session, so a later hook that read a different one should overwrite,
+    while a hook that read none (detached HEAD, unreadable file) returns
+    early and leaves what an earlier hook knew alone.
+
+    Its own guarded statement rather than a column in the upsert above, for
+    the same reason as `_record_provenance`: a database that has not yet run
+    `009_agent_sessions_provenance` has no `git_branch` column, and the
+    session row itself must still be written. Nothing is committed here — the
+    statement rides inside the caller's transaction.
+    """
+    if git_branch is None:
+        return
+    try:
+        await db.execute(
+            "UPDATE agent_sessions SET git_branch = ? WHERE session_id = ?",
+            (git_branch, session_id),
+        )
+    except Exception:  # noqa: BLE001, S110
+        # Column not yet present (009_agent_sessions_provenance pending) — non-fatal.
+        pass
 
 
 def _provenance_value(payload: dict, key: str) -> str | None:

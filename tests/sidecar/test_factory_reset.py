@@ -77,6 +77,12 @@ async def _seed_demo_data(db) -> None:
         """INSERT INTO tasks (title, status, project_id)
            VALUES ('Ship v1', 'todo', 2)"""
     )
+    # A user-added project root (migration 010) — the cwd resolver reads these,
+    # so a reset that left them behind would keep discovering projects.
+    await db.execute(
+        """INSERT INTO project_roots (path, label, source, enabled)
+           VALUES ('/Users/demo/Projects', NULL, 'manual', 1)"""
+    )
     await db.commit()
 
 
@@ -125,6 +131,7 @@ async def test_factory_reset_wipes_user_data_and_restores_seed(
         assert await _count(migrated_db, "workflow_items") == 2
         assert await _count(migrated_db, "tasks") == 1
         assert await _count(migrated_db, "members") == 1
+        assert await _count(migrated_db, "project_roots") == 1
         # projects: Unassigned (from migration) + 2 demo projects
         assert await _count(migrated_db, "projects") == 3
 
@@ -175,6 +182,7 @@ async def test_factory_reset_wipes_user_data_and_restores_seed(
             "taxonomies",
             "integration_catalog",
             "profiles",
+            "project_roots",
             "projects",
             "app_settings",
             "workspace_state",
@@ -220,6 +228,9 @@ async def test_factory_reset_wipes_user_data_and_restores_seed(
         assert await _count(migrated_db, "tasks") == 0
         assert await _count(migrated_db, "members") == 0
         assert await _count(migrated_db, "agent_sessions") == 0
+        # project_roots is user-owned state the resolver reads; a reset that
+        # left roots behind would keep auto-creating discovered projects.
+        assert await _count(migrated_db, "project_roots") == 0
 
         # projects: exactly Unassigned + Command Center
         cur = await migrated_db.execute(
