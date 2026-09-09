@@ -1,8 +1,15 @@
-"""The single cwd → project / git-branch resolver for hook ingest (epic #153).
+"""The single cwd → project / git-branch resolver (epic #153).
 
 Every hook payload carries a `cwd` and nothing else about where the session
 lives: no project id, no branch. This module is the only code that turns that
 string into an `agent_sessions.project_id` and an `agent_sessions.git_branch`.
+An agent pane's launch is the same question with the same input, so
+`POST /agents/events/launch` resolves `agent_runs.project_id` through here too
+(read-only — see `resolve`); it used to carry its own matcher,
+`agent_runs_service.resolve_project_id_for_cwd`, which matched `projects.path`
+alone and never walked to a repo root, so a pane and its own session could
+land on two different projects.
+
 It replaces `agent_service._match_project`, which was wrong in both
 directions:
 
@@ -57,8 +64,11 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import aiosqlite
+
+from . import project_service
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +121,33 @@ def _normalize_cwd(cwd: str | None) -> str | None:
     except OSError:
         return None
     return resolved or None
+
+
+def _paths_are_case_insensitive() -> bool:
+    """Whether this platform compares paths case-insensitively.
+
+    A function rather than a module constant so a test can exercise the
+    Windows branch without running on Windows — the whole point of the
+    normalisation below is behaviour this platform cannot demonstrate.
+    """
+    return os.name == "nt"
+
+
+def _match_key(path: str) -> str:
+    """Normalise a path for prefix comparison.
+
+    Separators are folded to ``/`` because the two sides come from different
+    places: a project path is whatever was stored at import time, while a cwd
+    comes from a hook payload or a pane. On Windows those legitimately differ
+    in separator — a stored ``C:/w/acme`` against a ``C:\\w\\acme`` cwd — and
+    a literal compare would simply never match.
+
+    Case is folded only where the filesystem does, so ``/w/App`` and
+    ``/w/app`` stay distinct projects on Linux (where they can genuinely
+    coexist) and are the same one on Windows.
+    """
+    normalised = path.replace("\\", "/").rstrip("/")
+    return normalised.casefold() if _paths_are_case_insensitive() else normalised
 
 
 def _git_present(path: str) -> bool:
@@ -239,12 +276,20 @@ async def match_project(db: aiosqlite.Connection, path: str) -> int | None:
     strictly shorter than `path` itself. `== root or startswith(root + "/")`
     is the boundary-safe form — `/a/b` never matches `/a/bc`.
 
+    Both sides go through `_match_key` first, so a Windows `C:\\w\\acme` cwd
+    still matches a project stored as `C:/w/acme` and the comparison respects
+    the platform's own case rules. That normalisation came from
+    `agent_runs_service.resolve_project_id_for_cwd`, the second cwd→project
+    matcher this function replaced; it is the only Windows behaviour either
+    matcher had, so it moved here rather than being dropped.
+
     The synthetic workspace project is *not* excluded (unlike
     `attribution_service.resolve_path_to_project`, whose `None` deliberately
     rolls unmatched file touches up to the workspace): a session genuinely
     running inside the workspace directory belongs to the workspace project,
     and that was the pre-existing behaviour of `_match_project`.
     """
+    needle = _match_key(path)
     async with db.execute(
         "SELECT id, COALESCE(NULLIF(root_path, ''), NULLIF(path, '')) AS stored "
         "FROM projects "
@@ -254,10 +299,10 @@ async def match_project(db: aiosqlite.Connection, path: str) -> int | None:
     ) as cur:
         rows = await cur.fetchall()
     for row in rows:
-        stored = str(row["stored"]).rstrip("/")
+        stored = _match_key(str(row["stored"]))
         if not stored or stored == ".":
             continue
-        if path == stored or path.startswith(stored + "/"):
+        if needle == stored or needle.startswith(stored + "/"):
             return int(row["id"])
     return None
 
@@ -270,17 +315,39 @@ async def _enabled_root_for(db: aiosqlite.Connection, path: str) -> str | None:
     so this is a plain string comparison — boundary-safe, and with the same
     "a root may itself be the repo" allowance (`path == root`) that keeps a
     root directory which happens to be a git repo from being unresolvable.
+    Both sides still go through `_match_key`, so the auto-create gate reads
+    paths exactly as `match_project` does rather than diverging on Windows.
+
+    Returns the root as stored, not as a match key: the caller only uses it
+    as a yes/no gate, and a case-folded value would be a lie about the row.
     """
+    needle = _match_key(path)
     async with db.execute(
         "SELECT path FROM project_roots WHERE enabled = 1 "
         "ORDER BY LENGTH(path) DESC, id ASC"
     ) as cur:
         rows = await cur.fetchall()
     for row in rows:
-        root = str(row["path"]).rstrip("/")
-        if root and (path == root or path.startswith(root + "/")):
-            return root
+        stored = str(row["path"])
+        root = _match_key(stored)
+        if root and (needle == root or needle.startswith(root + "/")):
+            return stored.rstrip("/")
     return None
+
+
+async def _default_profile_id(db: aiosqlite.Connection) -> int | None:
+    """The workspace default profile, or `None` if it cannot be read.
+
+    Delegates to `project_service.resolve_default_profile_id` so a discovered
+    project gets the same profile every other creation path assigns, but
+    swallows the lookup's failures: a database old enough to lack
+    `app_settings` must still get its project row, just without a profile.
+    """
+    try:
+        return await project_service.resolve_default_profile_id(db)
+    except Exception:
+        logger.debug("cwd resolver: default profile lookup failed", exc_info=True)
+        return None
 
 
 async def _create_discovered_project(
@@ -296,6 +363,14 @@ async def _create_discovered_project(
     other (the old matcher's `WHERE name = 'Codenest'` is exactly the bug
     this avoids).
 
+    The row shape matches `project_import_service.import_project`'s, because
+    `project_service.get_all_projects` is an unfiltered `SELECT *` and a
+    discovered project therefore appears in the same lists a manually
+    imported one does: it gets the workspace's `default_profile_id` (so it
+    does not read as profile-less) and an `imported_at` stamp (so it is not
+    the one project row with a NULL creation time). Only `status` sets it
+    apart, which is the whole point of `'discovered'`.
+
     Idempotence rests on `uq_projects_root_path`: the losing side of a race
     catches the `IntegrityError` and re-selects the winner's row. SQLite
     rolls back the failed *statement*, not the transaction, so the caller's
@@ -304,12 +379,15 @@ async def _create_discovered_project(
     does.
     """
     name = os.path.basename(repo_path) or repo_path
+    profile_id = await _default_profile_id(db)
+    now_iso = datetime.now(UTC).isoformat()
     try:
         cur = await db.execute(
             """INSERT INTO projects
-                   (name, status, path, root_path, is_workspace, is_active)
-                   VALUES (?, 'discovered', ?, ?, 0, 1)""",
-            (name, repo_path, repo_path),
+                   (name, status, path, root_path, is_workspace, is_active,
+                    imported_at, profile_id)
+                   VALUES (?, 'discovered', ?, ?, 0, 1, ?, ?)""",
+            (name, repo_path, repo_path, now_iso, profile_id),
         )
     except aiosqlite.IntegrityError:
         async with db.execute(
@@ -321,7 +399,10 @@ async def _create_discovered_project(
 
 
 async def _resolve_project(
-    db: aiosqlite.Connection, repo_path: str | None, cwd_path: str | None
+    db: aiosqlite.Connection,
+    repo_path: str | None,
+    cwd_path: str | None,
+    allow_discovery: bool,
 ) -> int | None:
     """Match, then auto-create under an enabled root, then give up.
 
@@ -331,7 +412,8 @@ async def _resolve_project(
     imports manifest-only directories too) still attributes correctly — but
     auto-creation stays gated on a real repo, since "one project per git
     repo under a root" is the whole meaning of a root, and a bare directory
-    has no repo identity to key a row on.
+    has no repo identity to key a row on — and on `allow_discovery`, which a
+    read-only caller clears.
     """
     target = repo_path or cwd_path
     if target is None:
@@ -339,7 +421,7 @@ async def _resolve_project(
     matched = await match_project(db, target)
     if matched is not None:
         return matched
-    if repo_path is None:
+    if repo_path is None or not allow_discovery:
         return None
     root = await _enabled_root_for(db, repo_path)
     if root is None:
@@ -347,15 +429,24 @@ async def _resolve_project(
     return await _create_discovered_project(db, repo_path)
 
 
-async def resolve(db: aiosqlite.Connection, cwd: str | None) -> CwdResolution:
-    """Resolve a hook's `cwd` into a project id and a git branch.
+async def resolve(
+    db: aiosqlite.Connection, cwd: str | None, *, allow_discovery: bool = True
+) -> CwdResolution:
+    """Resolve a `cwd` into a project id and a git branch.
 
-    The one entry point every hook goes through (via
-    `agent_service._upsert_session_start`). Never raises: the inner guard
-    keeps a database failure — a pre-`010_project_roots` schema, a locked
-    file, a mid-migration table — from also costing the session its branch,
-    and the outer guard is the promise that nothing at all propagates into
-    hook ingest.
+    The one entry point for the whole question: every hook goes through it
+    (via `agent_service._upsert_session_start`) and so does an agent pane's
+    launch (via `POST /agents/events/launch`, which has a cwd and no project
+    id). Never raises: the inner guard keeps a database failure — a
+    pre-`010_project_roots` schema, a locked file, a mid-migration table —
+    from also costing the session its branch, and the outer guard is the
+    promise that nothing at all propagates into hook ingest.
+
+    `allow_discovery=False` makes the call read-only: it matches but never
+    creates. The launch route passes it, because "which directories may grow
+    the project list" is a decision about *sessions* — a pane launched in an
+    unknown repo reads as unattributed now and picks up the project id the
+    session's own hooks create moments later.
     """
     try:
         cwd_path = _normalize_cwd(cwd)
@@ -364,7 +455,9 @@ async def resolve(db: aiosqlite.Connection, cwd: str | None) -> CwdResolution:
         repo_path = find_repo_root(cwd_path)
         branch = read_git_branch(repo_path) if repo_path is not None else None
         try:
-            project_id = await _resolve_project(db, repo_path, cwd_path)
+            project_id = await _resolve_project(
+                db, repo_path, cwd_path, allow_discovery
+            )
         except Exception:
             logger.warning(
                 "cwd resolver: project lookup failed for %s", cwd_path, exc_info=True

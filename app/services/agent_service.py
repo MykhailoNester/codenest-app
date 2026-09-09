@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +25,8 @@ from . import (
     cwd_resolver_service,
     notification_service,
 )
+
+logger = logging.getLogger(__name__)
 
 # ─── Pub/sub ────────────────────────────────────────────────────────────────
 
@@ -219,9 +222,16 @@ async def _record_git_branch(
             "UPDATE agent_sessions SET git_branch = ? WHERE session_id = ?",
             (git_branch, session_id),
         )
-    except Exception:  # noqa: BLE001, S110
-        # Column not yet present (009_agent_sessions_provenance pending) — non-fatal.
-        pass
+    except Exception:
+        # Column not yet present (009_agent_sessions_provenance pending) —
+        # non-fatal, and the expected case, so this is `debug` rather than
+        # `warning`: a pre-009 database would otherwise log on every hook.
+        # It is logged at all because a *genuine* write failure looks
+        # identical from here, and `cwd_resolver_service`'s own contract for
+        # this path is "NULL, and a line explaining why".
+        logger.debug(
+            "could not store git_branch for session %s", session_id, exc_info=True
+        )
 
 
 def _provenance_value(payload: dict, key: str) -> str | None:

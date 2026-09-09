@@ -60,8 +60,14 @@ async def get_project(db: aiosqlite.Connection, project_id: int):
     return await row.fetchone()
 
 
-async def _resolve_default_profile_id(db: aiosqlite.Connection) -> int | None:
-    """Return the stored default_profile_id from app_settings, or None."""
+async def resolve_default_profile_id(db: aiosqlite.Connection) -> int | None:
+    """Return the stored default_profile_id from app_settings, or None.
+
+    Public because every path that creates a project row needs it:
+    ``create_project`` here, ``project_import_service.import_project`` and
+    ``cwd_resolver_service``'s auto-discovery. A project that skips it is a
+    project the workspace default profile silently does not apply to.
+    """
     row = await (
         await db.execute(
             "SELECT value_json FROM app_settings WHERE key = 'default_profile_id'"
@@ -78,7 +84,7 @@ async def _resolve_default_profile_id(db: aiosqlite.Connection) -> int | None:
 async def create_project(db: aiosqlite.Connection, data: dict) -> int:
     profile_id = data.get("profile_id")
     if profile_id is None:
-        profile_id = await _resolve_default_profile_id(db)
+        profile_id = await resolve_default_profile_id(db)
     cursor = await db.execute(
         "INSERT INTO projects (name, description, tech_stack, status, path, profile_id) VALUES (?, ?, ?, ?, ?, ?)",
         (

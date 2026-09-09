@@ -555,3 +555,154 @@ async def test_session_start_hook_leaves_an_unmatched_cwd_null(
     assert row is not None
     assert row["project_id"] is None
     assert row["git_branch"] == "main"
+
+
+# ─── A discovered row looks like every other project row ─────────────────────
+
+
+async def _insert_default_profile(db: aiosqlite.Connection) -> int:
+    """Seed a profile and point `default_profile_id` at it, as bootstrap does."""
+    cur = await db.execute("INSERT INTO profiles (name) VALUES ('work')")
+    assert cur.lastrowid is not None
+    profile_id = int(cur.lastrowid)
+    await db.execute(
+        "INSERT INTO app_settings (key, value_json) VALUES ('default_profile_id', ?)",
+        (str(profile_id),),
+    )
+    await db.commit()
+    return profile_id
+
+
+@pytest.mark.asyncio
+async def test_discovered_project_gets_the_workspace_default_profile(
+    migrated_db: aiosqlite.Connection, tmp_path: pathlib.Path
+) -> None:
+    """`get_all_projects` is an unfiltered `SELECT *`, so a discovered row shows
+    up beside imported ones and must not be the one project without a profile
+    or a creation stamp."""
+    profile_id = await _insert_default_profile(migrated_db)
+    root = tmp_path / "Projects"
+    repo = _mk_repo(root / "fresh-repo")
+    await _add_root(migrated_db, _real(root))
+
+    result = await cwd_resolver_service.resolve(migrated_db, str(repo))
+
+    assert result.project_id is not None
+    async with migrated_db.execute(
+        "SELECT profile_id, imported_at FROM projects WHERE id = ?",
+        (result.project_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row["profile_id"] == profile_id
+    assert row["imported_at"]
+
+
+@pytest.mark.asyncio
+async def test_discovered_project_is_created_without_a_default_profile(
+    migrated_db: aiosqlite.Connection, tmp_path: pathlib.Path
+) -> None:
+    """No `default_profile_id` setting yet → the row still gets written."""
+    root = tmp_path / "Projects"
+    repo = _mk_repo(root / "fresh-repo")
+    await _add_root(migrated_db, _real(root))
+
+    result = await cwd_resolver_service.resolve(migrated_db, str(repo))
+
+    assert result.project_id is not None
+    async with migrated_db.execute(
+        "SELECT profile_id FROM projects WHERE id = ?", (result.project_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row["profile_id"] is None
+
+
+# ─── allow_discovery=False — the read-only caller (an agent pane's launch) ───
+
+
+@pytest.mark.asyncio
+async def test_read_only_resolve_still_matches_an_existing_project(
+    migrated_db: aiosqlite.Connection, tmp_path: pathlib.Path
+) -> None:
+    repo = _mk_repo(tmp_path / "api")
+    pid = await _insert_project(migrated_db, "api", root_path=_real(repo))
+
+    result = await cwd_resolver_service.resolve(
+        migrated_db, str(repo / "src"), allow_discovery=False
+    )
+
+    assert result.project_id == pid
+    assert result.git_branch == "main"
+
+
+@pytest.mark.asyncio
+async def test_read_only_resolve_creates_nothing_under_a_root(
+    migrated_db: aiosqlite.Connection, tmp_path: pathlib.Path
+) -> None:
+    root = tmp_path / "Projects"
+    repo = _mk_repo(root / "fresh-repo")
+    await _add_root(migrated_db, _real(root))
+    before = await _project_rows(migrated_db)
+
+    result = await cwd_resolver_service.resolve(
+        migrated_db, str(repo), allow_discovery=False
+    )
+
+    assert result.project_id is None
+    assert await _project_rows(migrated_db) == before
+
+
+# ─── Path matching — the two sides come from different places ────────────────
+#
+# Moved here with the `_match_key` normalisation itself, from
+# `agent_runs_service.resolve_project_id_for_cwd` (the second cwd→project
+# matcher this module replaced). These go at `match_project`, which is pure
+# string-and-SQL work: a Windows path cannot be handed to `resolve`, whose
+# `os.path.isabs` guard is the platform's own.
+
+
+@pytest.mark.asyncio
+async def test_match_project_matches_across_separator_styles(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A Windows cwd arrives with backslashes; the stored path may not have them.
+
+    A literal compare simply never matched, so every run on Windows would read
+    as project "unknown".
+    """
+    pid = await _insert_project(migrated_db, "acme", root_path="C:/w/acme")
+
+    assert (
+        await cwd_resolver_service.match_project(migrated_db, "C:\\w\\acme\\frontend")
+        == pid
+    )
+    assert await cwd_resolver_service.match_project(migrated_db, "C:/w/acme") == pid
+
+
+@pytest.mark.asyncio
+async def test_match_project_is_case_sensitive_where_the_filesystem_is(
+    migrated_db: aiosqlite.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`/w/App` and `/w/app` are two projects on Linux and one on Windows."""
+    pid = await _insert_project(migrated_db, "acme", root_path="/w/App")
+
+    assert await cwd_resolver_service.match_project(migrated_db, "/w/app/src") is None
+
+    monkeypatch.setattr(
+        cwd_resolver_service, "_paths_are_case_insensitive", lambda: True
+    )
+    assert await cwd_resolver_service.match_project(migrated_db, "/w/app/src") == pid
+
+
+@pytest.mark.asyncio
+async def test_match_project_still_rejects_a_sibling_prefix_on_windows(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Normalisation must not weaken the separator boundary."""
+    await _insert_project(migrated_db, "app", root_path="C:/w/app")
+
+    assert (
+        await cwd_resolver_service.match_project(migrated_db, "C:\\w\\app-legacy\\src")
+        is None
+    )

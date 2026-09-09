@@ -7,24 +7,13 @@ from datetime import datetime, timezone
 
 import aiosqlite
 
-from app.services import command_center_service, project_scanner_service
+from app.services import (
+    command_center_service,
+    project_scanner_service,
+    project_service,
+)
 
 logger = logging.getLogger(__name__)
-
-
-async def _resolve_default_profile_id(db: aiosqlite.Connection) -> int | None:
-    """Return the stored default_profile_id from app_settings, or None."""
-    row = await (
-        await db.execute(
-            "SELECT value_json FROM app_settings WHERE key = 'default_profile_id'"
-        )
-    ).fetchone()
-    if not row:
-        return None
-    try:
-        return int(row[0])
-    except (TypeError, ValueError):
-        return None
 
 
 async def import_project(
@@ -58,7 +47,7 @@ async def import_project(
         raise ValueError(f"project already imported at {scan.root_path}")
 
     if profile_id is None:
-        profile_id = await _resolve_default_profile_id(db)
+        profile_id = await project_service.resolve_default_profile_id(db)
 
     now_iso = datetime.now(timezone.utc).isoformat()
     cur = await db.execute(
