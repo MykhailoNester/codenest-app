@@ -19,9 +19,11 @@ operations and get a total order, without re-resolving anything itself.
 so this module validates it against `_VALID_SOURCES` before it ever reaches
 SQL.
 
-This module is **not** wired into session attribution. `agent_service.
-_match_project` and `attribution_service.resolve_path_to_project` are
-unchanged by this change and keep resolving projects exactly as before.
+The consumer of these rows is `cwd_resolver_service`: a session whose git
+repo sits under an enabled root but matches no project gets a
+`status='discovered'` project created for that repo.
+`attribution_service.resolve_path_to_project` (per-event attribution) does
+not read roots and is unaffected.
 """
 
 from __future__ import annotations

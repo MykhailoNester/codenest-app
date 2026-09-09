@@ -21,6 +21,7 @@ from app.services import (
     agent_runs_service,
     agent_service,
     budget_service,
+    cwd_resolver_service,
     session_hud_service,
 )
 
@@ -385,14 +386,21 @@ async def api_record_launch_event(request: Request):
     # An agent pane sends `cwd` instead of a project id (it has no project
     # lookup of its own), so resolve one here rather than letting the row read
     # as project "unknown". An explicit project_id always wins.
+    #
+    # Through `cwd_resolver_service` — the one cwd→project code path — so a
+    # pane and the session it starts agree on the answer, including the walk
+    # up to the git repo root that a pane opened in a monorepo subdirectory
+    # needs. `allow_discovery=False`: launching a pane must never grow the
+    # project list, that stays a decision the session's own hooks make.
     if project_id is None:
         raw_cwd = payload.get("cwd")
         if isinstance(raw_cwd, str) and raw_cwd:
             try:
                 db = await get_db()
-                project_id = await agent_runs_service.resolve_project_id_for_cwd(
-                    db, raw_cwd
+                resolution = await cwd_resolver_service.resolve(
+                    db, raw_cwd, allow_discovery=False
                 )
+                project_id = resolution.project_id
             except Exception:
                 log.exception("project resolution from cwd failed (non-fatal)")
 

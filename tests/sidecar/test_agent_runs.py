@@ -13,8 +13,9 @@ Coverage:
 
 from __future__ import annotations
 
+import os
+import pathlib
 import uuid
-from unittest import mock
 
 import aiosqlite
 import pytest
@@ -784,7 +785,11 @@ async def test_list_runs_observe_rows_have_null_target(
 
 
 # ---------------------------------------------------------------------------
-# resolve_project_id_for_cwd — agent panes report a cwd, not a project id
+# POST /agents/events/launch — agent panes report a cwd, not a project id
+#
+# The cwd→project matching itself lives in `cwd_resolver_service` and is
+# tested in `test_cwd_resolver.py`; what these exercise is the launch route's
+# use of it.
 # ---------------------------------------------------------------------------
 
 
@@ -796,88 +801,6 @@ async def _insert_project(db: aiosqlite.Connection, name: str, path: str) -> int
     await db.commit()
     assert cur.lastrowid is not None
     return cur.lastrowid
-
-
-@pytest.mark.asyncio
-async def test_resolve_project_id_for_cwd_matches_exact_and_subdirectory(
-    migrated_db: aiosqlite.Connection,
-):
-    pid = await _insert_project(migrated_db, "acme", "/w/acme")
-
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "/w/acme")
-        == pid
-    )
-    # A pane opened deeper in the tree still belongs to the project.
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(
-            migrated_db, "/w/acme/frontend/src"
-        )
-        == pid
-    )
-
-
-@pytest.mark.asyncio
-async def test_resolve_project_id_for_cwd_prefers_the_longest_path(
-    migrated_db: aiosqlite.Connection,
-):
-    """An umbrella repo's path is a prefix of every repo nested inside it.
-
-    The nested project is the right answer for a pane opened inside it — which
-    is only true if the longest match wins rather than the first one found.
-    """
-    await _insert_project(migrated_db, "umbrella", "/w/umbrella")
-    inner = await _insert_project(migrated_db, "inner", "/w/umbrella/inner")
-
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(
-            migrated_db, "/w/umbrella/inner/app"
-        )
-        == inner
-    )
-
-
-@pytest.mark.asyncio
-async def test_resolve_project_id_for_cwd_does_not_match_a_sibling_prefix(
-    migrated_db: aiosqlite.Connection,
-):
-    """`/w/app` must not claim a pane in `/w/app-legacy` — match on separators."""
-    await _insert_project(migrated_db, "app", "/w/app")
-
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(
-            migrated_db, "/w/app-legacy"
-        )
-        is None
-    )
-
-
-@pytest.mark.asyncio
-async def test_resolve_project_id_for_cwd_handles_no_match_and_no_cwd(
-    migrated_db: aiosqlite.Connection,
-):
-    await _insert_project(migrated_db, "acme", "/w/acme")
-
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "/elsewhere")
-        is None
-    )
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, None) is None
-    )
-    assert await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "") is None
-
-
-@pytest.mark.asyncio
-async def test_resolve_project_id_for_cwd_ignores_a_trailing_separator(
-    migrated_db: aiosqlite.Connection,
-):
-    pid = await _insert_project(migrated_db, "acme", "/w/acme/")
-
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "/w/acme/src")
-        == pid
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -965,6 +888,51 @@ async def test_launch_without_cwd_or_project_still_records_the_run(
     run = await agent_runs_service.get_run_by_pane(db, "leaf-3")
     assert run is not None
     assert run["project_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_launch_never_auto_creates_a_discovered_project(
+    launch_client: tuple[TestClient, aiosqlite.Connection],
+    tmp_path: pathlib.Path,
+):
+    """A launch resolves through `cwd_resolver_service` read-only.
+
+    The resolver auto-creates a `status='discovered'` project for a git repo
+    under an enabled root — but growing the project list is a decision the
+    session's own hooks make, not something opening a pane may do behind the
+    user's back. The run reads as unattributed and picks the id up from the
+    session moments later.
+    """
+    client, db = launch_client
+    root = tmp_path / "Projects"
+    repo = root / "fresh-repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    await db.execute(
+        "INSERT INTO project_roots (path, label, source, enabled) "
+        "VALUES (?, NULL, 'manual', 1)",
+        (os.path.realpath(str(root)),),
+    )
+    await db.commit()
+    before = await _count_projects(db)
+
+    resp = client.post(
+        "/api/v1/agents/events/launch",
+        json={"pane_id": "leaf-4", "cwd": str(repo)},
+    )
+    assert resp.status_code == 200
+
+    run = await agent_runs_service.get_run_by_pane(db, "leaf-4")
+    assert run is not None
+    assert run["project_id"] is None
+    assert await _count_projects(db) == before
+
+
+async def _count_projects(db: aiosqlite.Connection) -> int:
+    cur = await db.execute("SELECT COUNT(*) AS n FROM projects")
+    row = await cur.fetchone()
+    assert row is not None
+    return int(row["n"])
 
 
 # ---------------------------------------------------------------------------
@@ -1215,69 +1183,3 @@ async def test_reconcile_endpoint_ends_stale_runs(
     )
     assert resp.status_code == 200
     assert resp.json()["ended"] == 1
-
-
-# ---------------------------------------------------------------------------
-# Path matching — the two sides come from different places (B2)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_resolve_project_id_matches_across_separator_styles(
-    migrated_db: aiosqlite.Connection,
-):
-    """A Windows cwd arrives with backslashes; the stored path may not have them.
-
-    A literal compare simply never matched, so every run on Windows would read
-    as project "unknown".
-    """
-    pid = await _insert_project(migrated_db, "acme", "C:/w/acme")
-
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(
-            migrated_db, "C:\\w\\acme\\frontend"
-        )
-        == pid
-    )
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "C:/w/acme")
-        == pid
-    )
-
-
-@pytest.mark.asyncio
-async def test_resolve_project_id_is_case_sensitive_where_the_filesystem_is(
-    migrated_db: aiosqlite.Connection,
-):
-    """`/w/App` and `/w/app` are two projects on Linux and one on Windows."""
-    pid = await _insert_project(migrated_db, "acme", "/w/App")
-
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(migrated_db, "/w/app/src")
-        is None
-    )
-
-    with mock.patch.object(
-        agent_runs_service, "_paths_are_case_insensitive", return_value=True
-    ):
-        assert (
-            await agent_runs_service.resolve_project_id_for_cwd(
-                migrated_db, "/w/app/src"
-            )
-            == pid
-        )
-
-
-@pytest.mark.asyncio
-async def test_resolve_project_id_still_rejects_a_sibling_prefix_on_windows(
-    migrated_db: aiosqlite.Connection,
-):
-    """Normalisation must not weaken the separator boundary."""
-    await _insert_project(migrated_db, "app", "C:/w/app")
-
-    assert (
-        await agent_runs_service.resolve_project_id_for_cwd(
-            migrated_db, "C:\\w\\app-legacy\\src"
-        )
-        is None
-    )

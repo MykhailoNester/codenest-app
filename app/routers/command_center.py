@@ -500,6 +500,11 @@ async def factory_reset() -> dict:
         "taxonomies",
         "integration_catalog",
         "profiles",
+        # project_roots is user-owned state (which directories parent one
+        # project per git repo), so a factory reset must clear it too —
+        # otherwise the cwd resolver keeps auto-creating "discovered"
+        # projects under roots the user believes they wiped.
+        "project_roots",
         "projects",
         "app_settings",
         "workspace_state",

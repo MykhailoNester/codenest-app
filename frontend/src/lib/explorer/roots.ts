@@ -87,10 +87,9 @@ export function resolveRoots(
  * The longest (most specific) root that `cwd` is under, or `null` when it
  * isn't under any of them — the caller then treats `cwd` itself as an
  * ad-hoc root. Longest-prefix-wins on a `/`-terminated comparison, mirroring
- * `agent_service._match_project`'s `ORDER BY LENGTH(path) DESC`
- * (`app/services/agent_service.py:92-105`) but without its substring-`in`
- * looseness — a project at `/home/x/app` must not match a cwd of
- * `/home/x/app-other`.
+ * the sidecar's `cwd_resolver_service.match_project`
+ * (`app/services/cwd_resolver_service.py`) — a project at `/home/x/app` must
+ * not match a cwd of `/home/x/app-other`.
  */
 export function rootForCwd(
   roots: RootDescriptor[],
