@@ -265,6 +265,8 @@ async def _record_provenance(
     except Exception:  # noqa: BLE001, S110
         # Column not yet present (009_agent_sessions_provenance pending) — non-fatal.
         pass
+
+
 # ─── Payload trim ───────────────────────────────────────────────────────────
 #
 # `agent_events.payload_json` used to store the hook payload verbatim, which
