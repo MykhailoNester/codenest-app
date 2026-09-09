@@ -80,6 +80,7 @@ polls for pending runs and spawns headless `claude` processes. The Command Cente
 | `CODENEST_SIDECAR_PORT` | Sidecar port for standalone runs (the shell pins 8002) | `8002` |
 | `CODENEST_APP_DATA_DIR` | App-data root; injected by the shell | platformdirs fallback |
 | `CODENEST_BUNDLE_RESOURCES` | Bundled org-agents dir; injected by the shell | `src-tauri/resources/org-agents` |
+| `CODENEST_WORKTREE_ROOT` | Where the `/ship` pipeline keeps per-task worktrees and artifacts; sessions under it are classified `session_kind='ephemeral'` | `<parent of repo>/.codenest-worktrees` |
 | `CODENEST_DISABLE_SCHEDULE_TICK` | `1` disables background tick loops (tests) | off |
 | `VITE_SIDECAR_URL` | Frontend override for the sidecar base URL | `http://127.0.0.1:8002` |
 

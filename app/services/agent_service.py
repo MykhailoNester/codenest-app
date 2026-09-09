@@ -197,6 +197,7 @@ async def _upsert_session_start(
             ),
         )
     await _record_git_branch(db, session_id, resolution.git_branch)
+    await _record_session_kind(db, session_id, resolution.session_kind)
 
 
 async def _record_git_branch(
@@ -232,6 +233,76 @@ async def _record_git_branch(
         logger.debug(
             "could not store git_branch for session %s", session_id, exc_info=True
         )
+
+
+async def _record_session_kind(
+    db: aiosqlite.Connection, session_id: str, session_kind: str | None
+) -> None:
+    """Store the kind `cwd_resolver_service` classified this hook's cwd as.
+
+    The allowed set lives in `cwd_resolver_service.SESSION_KINDS` because
+    migration 011 deliberately carries no CHECK constraint (SQLite's
+    `ALTER TABLE ADD COLUMN` CHECK support is version-dependent), and this
+    membership test is that enforcement on the write path: `None` — the
+    resolver's "this cwd proved nothing" — and any value a future resolver
+    might invent both return without touching the row, which leaves the
+    column at its `'project'` default or at whatever an earlier hook proved.
+    That matters because a hook with no usable cwd would otherwise flip a
+    session already known to be ephemeral back to `project`.
+
+    Within the known set the write is last-known-wins, not first-write: a
+    session's cwd genuinely changes (the upsert above `COALESCE`s a new one
+    in), and if it moves from a temp directory into a repo the kind should
+    follow it. That is the opposite of `project_id`, which is
+    `COALESCE(project_id, ?)` — a first-write there is a *matched* project
+    and never becomes wrong, while a kind is a statement about the current
+    directory only.
+
+    Its own guarded statement rather than a column in the upsert, for the
+    same reason as `_record_git_branch`: a database that has not yet run
+    `011_agent_sessions_kind` has no `session_kind` column, and folding it
+    into the INSERT would cost such a database the session row itself.
+    Nothing is committed here — the statement rides inside the caller's
+    transaction.
+    """
+    if session_kind not in cwd_resolver_service.SESSION_KINDS:
+        return
+    try:
+        await db.execute(
+            "UPDATE agent_sessions SET session_kind = ? WHERE session_id = ?",
+            (session_kind, session_id),
+        )
+    except Exception:
+        # Column not yet present (011_agent_sessions_kind pending) —
+        # non-fatal and the expected case on an old database, so `debug`
+        # rather than `warning`; logged at all because a genuine write
+        # failure is indistinguishable from here.
+        logger.debug(
+            "could not store session_kind for session %s", session_id, exc_info=True
+        )
+
+
+def _session_kind_filter(session_kind: str | None) -> str | None:
+    """Validate an optional `session_kind` read filter, or `None` for "all".
+
+    `None` and a blank string both mean "do not filter", so a router may pass
+    an empty query param straight through the way it does for `profile` and
+    `status`. Anything else must be a member of
+    `cwd_resolver_service.SESSION_KINDS`: with no CHECK constraint in the
+    schema, a typo would otherwise reach SQLite as a literal that matches no
+    row, and a caller counting `ephemeral` sessions would read a confident
+    zero instead of an error. Unlike the write path — which swallows an
+    unknown kind to protect hook ingest — a read is a caller's own mistake
+    and is worth raising on.
+    """
+    if session_kind is None:
+        return None
+    value = session_kind.strip()
+    if not value:
+        return None
+    if value not in cwd_resolver_service.SESSION_KINDS:
+        raise ValueError(f"unknown session_kind {session_kind!r}")
+    return value
 
 
 def _provenance_value(payload: dict, key: str) -> str | None:
@@ -869,6 +940,7 @@ async def list_sessions(
     offset: int = 0,
     include_ended: bool = False,
     provider_id: int | None = None,
+    session_kind: str | None = None,
 ):
     """Return sessions ordered active → idle → stopped → ended.
 
@@ -877,7 +949,15 @@ async def list_sessions(
     ``include_ended=True`` to fetch them explicitly. The paginated
     ``/sessions/ended`` endpoint uses ``count_sessions`` + this helper with
     ``include_ended=True``.
+
+    ``session_kind`` (#157) is unfiltered by default, so every existing
+    caller keeps the rows it always got — the classification is there to make
+    a scratch run *identifiable*, not to hide it from the live list. The
+    column itself arrives through ``s.*``: it is ``NOT NULL DEFAULT
+    'project'``, so it reads as ``'project'`` even for rows written before
+    migration 011 ran and no caller has to cope with a NULL.
     """
+    kind = _session_kind_filter(session_kind)
     query = (
         "SELECT s.*, p.name as project_name "
         "FROM agent_sessions s "
@@ -898,6 +978,9 @@ async def list_sessions(
     if provider_id is not None:
         conditions.append("s.provider_id = ?")
         params.append(provider_id)
+    if kind is not None:
+        conditions.append("s.session_kind = ?")
+        params.append(kind)
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
     # Active first, then idle, stopped, ended — within each bucket, most
@@ -921,8 +1004,17 @@ async def count_sessions(
     db: aiosqlite.Connection,
     profile: str | None = None,
     status: str | None = None,
+    session_kind: str | None = None,
 ) -> int:
-    """Return the total row count matching the given filters."""
+    """Return the total row count matching the given filters.
+
+    ``session_kind`` (#157) defaults to counting every kind, so the
+    ``/sessions/ended`` total stays the number it always was. Passing
+    ``'project'`` is how a caller asks for the count that "unattributed
+    sessions" should have been measured against all along — the temp-dir
+    scratch runs excluded rather than silently inflating the miss rate.
+    """
+    kind = _session_kind_filter(session_kind)
     query = "SELECT COUNT(*) FROM agent_sessions s"
     conditions = []
     params: list[Any] = []
@@ -932,6 +1024,9 @@ async def count_sessions(
     if status:
         conditions.append("s.status = ?")
         params.append(status)
+    if kind is not None:
+        conditions.append("s.session_kind = ?")
+        params.append(kind)
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
     row = await db.execute(query, params)

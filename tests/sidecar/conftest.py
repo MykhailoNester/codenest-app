@@ -7,6 +7,7 @@ foreign keys enabled, and all migrations applied.
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 import aiosqlite
@@ -14,9 +15,37 @@ import pytest
 import pytest_asyncio
 
 from app.database import apply_migration_file
-from app.services import project_scanner_service
+from app.services import cwd_resolver_service, project_scanner_service
 
 MIGRATIONS_DIR = pathlib.Path(__file__).parents[2] / "migrations"
+
+
+@pytest.fixture(autouse=True)
+def _pytest_tmp_is_not_ephemeral(tmp_path_factory, monkeypatch):
+    """Keep pytest's own temp tree out of `cwd_resolver_service`'s ephemeral
+    roots (#157).
+
+    Ephemeral classification is "resolved path under the OS temp directory",
+    and pytest hands every test a `tmp_path` under exactly that
+    (`$TMPDIR/pytest-of-<user>/...`). Left alone, every fixture repo built
+    under `tmp_path` would resolve as a throwaway scratch run and no test
+    could exercise project matching or discovery at all — the same collision
+    `_allow_temp_scan_roots` below solves for the scan allowlist.
+
+    The narrowing is surgical rather than a blanket disable: the real root set
+    is computed and only the entries that *contain pytest's basetemp* are
+    dropped, so `/private/tmp` and the worktree root stay live and a test
+    asserting on them is still testing the real thing.
+    `tests/sidecar/test_session_kind.py` restores the genuine function where
+    it needs the temp tree to read as temp.
+    """
+    base = os.path.realpath(str(tmp_path_factory.getbasetemp())).rstrip("/")
+    kept = tuple(
+        root
+        for root in cwd_resolver_service._ephemeral_roots()
+        if not (base == root or base.startswith(root + "/"))
+    )
+    monkeypatch.setattr(cwd_resolver_service, "_ephemeral_roots", lambda: kept)
 
 
 @pytest.fixture(autouse=True)
