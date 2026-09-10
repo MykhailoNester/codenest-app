@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.2.0"
 description = "Codenest — desktop command center for AI agent teams"
 authors = ["Mykhailo Nester"]
 license = "LicenseRef-FSL-1.1-ALv2"
