@@ -505,6 +505,11 @@ async def factory_reset() -> dict:
         # otherwise the cwd resolver keeps auto-creating "discovered"
         # projects under roots the user believes they wiped.
         "project_roots",
+        # session_field_provenance has no FK to agent_sessions (a hook must
+        # never be blocked by an FK check), so it cannot be cleared by a
+        # cascade and has to be named here or a reset would leave claim rows
+        # pointing at sessions that no longer exist.
+        "session_field_provenance",
         "projects",
         "app_settings",
         "workspace_state",

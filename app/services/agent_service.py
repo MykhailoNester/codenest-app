@@ -23,6 +23,7 @@ from . import (
     attribution_service,
     budget_service,
     cwd_resolver_service,
+    lane_reconciler_service,
     notification_service,
 )
 
@@ -218,6 +219,14 @@ async def _record_git_branch(
     """
     if git_branch is None:
         return
+    claim = await lane_reconciler_service.apply(
+        db, session_id, lane_reconciler_service.LANE_HOOK, "git_branch", git_branch
+    )
+    if not claim.applied:
+        # Lane C (the transcript scan) outranks the hook on `git_branch`: it
+        # reads the branch the run actually started on, while a hook only ever
+        # sees the branch as of the moment it fired. Nothing to do.
+        return
     try:
         await db.execute(
             "UPDATE agent_sessions SET git_branch = ? WHERE session_id = ?",
@@ -348,6 +357,29 @@ async def _record_provenance(
     """
     permission_mode = _provenance_value(payload, "permission_mode")
     effort = _provenance_value(payload, "effort")
+    if permission_mode is None and effort is None:
+        return
+    # Lane A outranks Lane C on both of these (see `FIELD_LANES`): both change
+    # mid-session — permission mode has a live switch in
+    # `frontend/src/lib/ipc.ts` — so a hook that just observed the switch beats
+    # a transcript read from minutes ago. The claims are still recorded, so the
+    # Session Inspector can say which lane the displayed value came from.
+    if permission_mode is not None:
+        mode_claim = await lane_reconciler_service.apply(
+            db,
+            session_id,
+            lane_reconciler_service.LANE_HOOK,
+            "permission_mode",
+            permission_mode,
+        )
+        if not mode_claim.applied:
+            permission_mode = None
+    if effort is not None:
+        effort_claim = await lane_reconciler_service.apply(
+            db, session_id, lane_reconciler_service.LANE_HOOK, "effort", effort
+        )
+        if not effort_claim.applied:
+            effort = None
     if permission_mode is None and effort is None:
         return
     try:
@@ -753,6 +785,32 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
         params.append(model)
     if provider_id:
         params.append(provider_id)
+    # Money and tokens are the fields Lane B (OTLP, P3) supersedes outright:
+    # the `cost_delta` above prices every model at Sonnet rates regardless of
+    # which one actually ran. Claim them through the reconciler so that when
+    # Lane B arrives it wins without this statement needing to change, and so
+    # the Session Inspector can label the figure an estimate while Lane A owns
+    # it. `accumulate` rather than `apply` for the three additive columns —
+    # the caller's SQL below is `col = col + ?`.
+    for _field, _delta in (
+        ("tokens_in", tokens_in),
+        ("tokens_out", tokens_out),
+        ("cost_usd", cost_delta),
+    ):
+        await lane_reconciler_service.accumulate(
+            db, session_id, lane_reconciler_service.LANE_HOOK, _field, _delta
+        )
+    await lane_reconciler_service.apply(
+        db,
+        session_id,
+        lane_reconciler_service.LANE_HOOK,
+        "context_tokens",
+        context_tokens,
+    )
+    if model:
+        await lane_reconciler_service.apply(
+            db, session_id, lane_reconciler_service.LANE_HOOK, "model", model
+        )
     params += [tokens_in, tokens_out, cost_delta, context_tokens, now, session_id]
     await db.execute(
         f"""UPDATE agent_sessions
