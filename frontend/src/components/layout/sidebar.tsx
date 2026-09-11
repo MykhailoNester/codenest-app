@@ -12,6 +12,7 @@ import { formatCount } from "../../lib/format-helpers";
 import { NAV_ITEMS, NAV_GROUPS, FEATURES } from "../../lib/nav-items";
 import { useNavGroups } from "../../stores/nav-group-store";
 import { Icon } from "../icon";
+import { NavCountBadge } from "./nav-count-badge";
 
 // v1 integrates the Anthropic / Claude family end-to-end (matches onboarding).
 // Other seeded providers (OpenAI, Google, Local) are shown as "coming soon"
@@ -29,6 +30,10 @@ function SidebarInner({
   budgetTotal = 40,
 }: SidebarProps): ReactElement {
   void _activeSessionCount;
+  // Per-slug rail counts. Empty until #162 supplies the Needs You count —
+  // declared here so that ticket adds a hook and one entry rather than a
+  // render path. `NavCountBadge` renders nothing for a missing slug.
+  const navCounts: Partial<Record<string, number>> = {};
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { data: spend } = useDailySpend();
@@ -295,6 +300,11 @@ function SidebarInner({
                     >
                       <Icon name={it.icon} size={14} />
                       <span>{it.label}</span>
+                      {/* No count source exists yet — #162 supplies the Needs
+                          You count. `NavCountBadge` renders nothing for a null
+                          or zero count, so this is inert until then rather
+                          than a placeholder that has to be found and removed. */}
+                      <NavCountBadge count={navCounts[it.slug]} />
                     </button>
                   );
                 })}

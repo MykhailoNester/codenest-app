@@ -88,7 +88,13 @@ describe("OMNI_COMMANDS order (D5a)", () => {
   });
 
   it("nav-derived entries start right after the actions", () => {
-    expect(OMNI_COMMANDS[3]?.id).toBe("nav:command");
+    // `nav:mission` and not `nav:command`: after the #165 restructure the rail
+    // leads with the Attention group, so Mission Control is the first
+    // nav-derived entry and therefore the first nav row in the bare-`/` window.
+    // This is the assertion that catches an accidental reordering of
+    // NAV_ITEMS, so it is pinned to the exact slug rather than to
+    // `startsWith("nav:")`.
+    expect(OMNI_COMMANDS[3]?.id).toBe("nav:mission");
   });
 
   it("the last four ids are all extras", () => {

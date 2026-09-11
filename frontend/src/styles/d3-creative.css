@@ -219,6 +219,32 @@
   background: rgba(255, 255, 255, 0.03);
   color: var(--fg-0);
 }
+/* Rail count badge (#165). Sits on the right edge of a nav row so the window
+   edge answers "anything waiting?" without a click. `is-hot` is the only tone
+   that uses a solid fill — an amber or neutral pill next to a red one stops
+   reading as urgent, which is the whole point of the red one. */
+.d3-nav__count {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--fg-3);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.d3-nav__count.is-warn {
+  background: var(--warn-soft);
+  color: #fcd34d;
+}
+.d3-nav__count.is-hot {
+  background: var(--err);
+  color: #fff;
+}
+
 .d3-nav.is-active {
   background: linear-gradient(
     90deg,

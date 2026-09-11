@@ -50,8 +50,15 @@ export const FEATURE_CACHE_EVENT = "codenest:enabled-features";
 // FEATURES — global hard gate.
 // Maps a feature slug (matches KNOWN_FEATURES in settings_service.py) to the
 // set of nav slugs it controls.  Nav slugs NOT listed here belong to no gated
-// feature and are NEVER disableable (command, settings, dashboard, projects,
+// feature and are NEVER disableable (command, settings, mission, projects,
 // team, docs).
+//
+// `mission` is on that never-disableable list for the same reason `dashboard`
+// (the slug it replaces) was: it owns `/`, so gating it would let the Features
+// tab produce an app whose landing route bounces off `FeatureRoute`. It is
+// therefore deliberately absent from FEATURE_DEFAULTS, from this map and from
+// KNOWN_FEATURES_ORDERED, and `settings_service.py` needs no mirror entry for
+// it. Do not "fix" that by adding one.
 //
 // The Terminal page's own two surfaces — the native agent pane + composer and
 // the workspace navigator beside it — used to live here as the `composer` and
@@ -113,8 +120,17 @@ export const KNOWN_FEATURES_ORDERED: readonly string[] = [
  */
 export const TERMINAL_ROUTE = "/terminal";
 
+// Attention first, then the record, then the places you act (#165, epic #153).
+//
+// `workspace` is gone as a group id. It was the catch-all that made Command the
+// first thing in the rail and Overview a secondary page; the pivot inverts
+// that. Nothing needs to migrate: `nav-group-store` keys its persisted
+// open/closed overrides by group id and falls back to `defaultOpen` for any id
+// it does not recognise, so a user's stored `{"workspace": false}` is simply
+// ignored from here on.
 export const NAV_GROUPS = [
-  { id: "workspace", label: "Workspace", defaultOpen: true },
+  { id: "attention", label: "Attention", defaultOpen: true },
+  { id: "record", label: "Record", defaultOpen: true },
   { id: "agents", label: "Agents", defaultOpen: false },
   { id: "knowledge", label: "Knowledge", defaultOpen: false },
   { id: "tools", label: "Tools", defaultOpen: false },
@@ -124,46 +140,64 @@ export const NAV_GROUPS = [
 export type NavGroup = (typeof NAV_GROUPS)[number]["id"];
 
 export const NAV_ITEMS = [
-  // Workspace — the daily work surface
+  // Attention — things that want a human
   {
-    slug: "command",
-    label: "Command",
-    icon: "command",
-    path: "/command",
-    group: "workspace",
-  },
-  {
-    slug: "dashboard",
-    label: "Overview",
+    // Replaces the `dashboard` slug, which owned `/` and was labelled
+    // "Overview". The route is unchanged; the page behind it is rebuilt by
+    // #166. Icon key stays `dashboard` because that key exists in `icon.tsx`
+    // and `Icon` renders `null` for an unknown name rather than throwing, so a
+    // freshly invented key would silently render nothing.
+    slug: "mission",
+    label: "Mission Control",
     icon: "dashboard",
     path: "/",
-    group: "workspace",
-  },
-  {
-    slug: "projects",
-    label: "Projects",
-    icon: "projects",
-    path: "/projects",
-    group: "workspace",
+    group: "attention",
   },
   {
     slug: "tasks",
     label: "Work Board",
     icon: "tasks",
     path: "/tasks",
-    group: "workspace",
+    group: "attention",
   },
   // `inbox` is intentionally absent from NAV_ITEMS — the router redirects
   // /inbox → /tasks. A future workflow_items/tasks table merge will clean up
   // the DB rows.
+  //
+  // `attention` (the Needs You page) is added to this group by #162, which
+  // also owns wiring its rail count into the badge this ticket builds.
+
+  // Record — what already happened
+  {
+    slug: "projects",
+    label: "Projects",
+    icon: "projects",
+    path: "/projects",
+    group: "record",
+  },
   {
     slug: "notifications",
     label: "Notifications",
     icon: "bell",
     path: "/notifications",
-    group: "workspace",
+    group: "record",
   },
-  // Agents — the agent execution surface
+  // The design's After rail also shows "Sessions Log" here. It is deliberately
+  // absent: the Session Inspector it would open is P4, and a nav entry with no
+  // page behind it is worse than no entry.
+
+  // Agents — the places you act
+  {
+    // Command keeps its place in the rail. The design's After sketch omits it,
+    // but removing a working page from the nav is not the "reordering, which
+    // costs nothing" that section describes — so it moves into the group that
+    // matches what it is (the agent command surface) rather than disappearing.
+    slug: "command",
+    label: "Command",
+    icon: "command",
+    path: "/command",
+    group: "agents",
+  },
   {
     slug: "team",
     label: "Agents",
@@ -189,8 +223,13 @@ export const NAV_ITEMS = [
     // persisted in settings and referenced by KNOWN_NAV_SLUGS, and the path is
     // baked into deep links, the popout window's hash route and localStorage
     // keys. Renaming those would be a migration; renaming the label is not.
+    // Relabelled again by #165: "Run a session" is a verb, because after the
+    // pivot this page is what you come here to *do* rather than where you
+    // live. Owner decision (a): it keeps its route, its slug and its page, and
+    // stays in the nav enabled by default — it simply stops being the landing
+    // page.
     slug: "terminal",
-    label: "Sessions",
+    label: "Run a session",
     icon: "terminal",
     path: TERMINAL_ROUTE,
     group: "agents",
