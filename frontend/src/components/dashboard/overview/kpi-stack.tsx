@@ -5,14 +5,14 @@
  * - Live agents: live count from SSE sessions
  * - Attention queue: blocked_count + inbox_count from useDashboard()
  * - Budget burn: from useBudgetBurn() — first daily workspace budget found
+ *
+ * The tile box is `../kpi-tile`, not this file's stylesheet: #166 needed the
+ * same box on Mission Control's record row and the design's numbers for it
+ * (r12, 96px floor, corner glow) may exist in exactly one place. This component
+ * kept every figure it had; only the box around each one changed hands.
  */
 
-import {
-  useCallback,
-  useState,
-  type ReactElement,
-  type CSSProperties,
-} from "react";
+import { useCallback, useState, type ReactElement } from "react";
 import {
   useDashboard,
   useDashboardTrends,
@@ -21,6 +21,7 @@ import {
   type AgentSession,
 } from "../../../lib/api";
 import { formatUSD } from "../../../lib/format-helpers";
+import { KpiTile, KPI_UNAVAILABLE } from "../kpi-tile";
 import styles from "./kpi-stack.module.css";
 
 // ─── Live sessions hook (reuses the same SSE pattern as LiveAgentsWidget) ─────
@@ -95,39 +96,41 @@ export function KpiStack(): ReactElement {
   return (
     <div className={styles.grid}>
       {/* Tile 1: Active tasks */}
-      <div
-        className={styles.tile}
-        style={{ "--kpi-glow": "rgba(34,197,94,0.12)" } as CSSProperties}
-      >
-        <div className={styles.label}>Active tasks</div>
-        <div className={styles.value}>{inProgress + todo}</div>
-        <div className={styles.foot}>
-          <strong>{inProgress}</strong> in progress · <strong>{todo}</strong>{" "}
-          ready
-        </div>
-      </div>
+      <KpiTile
+        label="Active tasks"
+        glow="rgba(34,197,94,0.12)"
+        value={inProgress + todo}
+        foot={
+          <>
+            <strong>{inProgress}</strong> in progress · <strong>{todo}</strong>{" "}
+            ready
+          </>
+        }
+      />
 
       {/* Tile 2: Live agents */}
-      <div
-        className={styles.tile}
-        style={{ "--kpi-glow": "rgba(168,85,247,0.14)" } as CSSProperties}
-      >
-        <div className={styles.label}>Live agents</div>
-        <div className={styles.value}>
-          {activeSessions.length}
-          <span className={styles.unit}>running</span>
-        </div>
-        <div className={styles.foot}>
-          <strong>{sessionsToday}</strong> sessions today
-        </div>
-      </div>
+      <KpiTile
+        label="Live agents"
+        glow="rgba(168,85,247,0.14)"
+        value={activeSessions.length}
+        unit="running"
+        foot={
+          <>
+            <strong>{sessionsToday}</strong> sessions today
+          </>
+        }
+      />
 
       {/* Tile 3: Attention queue */}
-      <div
-        className={styles.tile}
-        style={{ "--kpi-glow": "rgba(239,68,68,0.14)" } as CSSProperties}
+      <KpiTile
+        label="Attention queue"
+        glow="rgba(239,68,68,0.14)"
+        foot={
+          attentionTotal > 0
+            ? `${attentionTotal} item${attentionTotal !== 1 ? "s" : ""} need a decision today`
+            : "Nothing needs attention"
+        }
       >
-        <div className={styles.label}>Attention queue</div>
         <div className={styles.chips}>
           {blockedCount > 0 && (
             <span className={`${styles.chip} ${styles.err}`}>
@@ -143,47 +146,40 @@ export function KpiStack(): ReactElement {
             <span className={`${styles.chip} ${styles.ok}`}>✓ all clear</span>
           )}
         </div>
-        <div className={styles.foot}>
-          {attentionTotal > 0
-            ? `${attentionTotal} item${attentionTotal !== 1 ? "s" : ""} need a decision today`
-            : "Nothing needs attention"}
-        </div>
-      </div>
+      </KpiTile>
 
       {/* Tile 4: Budget burn */}
-      <div
-        className={styles.tile}
-        style={{ "--kpi-glow": "rgba(59,130,246,0.14)" } as CSSProperties}
-      >
-        <div className={styles.label}>Budget burn</div>
-        {dailyBurn ? (
-          <>
-            <div className={styles.value}>
-              {budgetPct.toFixed(0)}%
-              <span className={styles.unit}>
-                of {formatUSD(dailyBurn.limit_usd)} daily
-              </span>
-            </div>
-            <div className={styles.budgetBar}>
-              <div
-                className={styles.budgetFill}
-                style={{ width: `${budgetPct}%` }}
-              />
-            </div>
-            <div className={styles.foot}>
+      {dailyBurn ? (
+        <KpiTile
+          label="Budget burn"
+          glow="rgba(59,130,246,0.14)"
+          value={`${budgetPct.toFixed(0)}%`}
+          unit={`of ${formatUSD(dailyBurn.limit_usd)} daily`}
+          foot={
+            <>
               {formatUSD(dailyBurn.spent_usd)} spent ·{" "}
               <strong>
                 {formatUSD(dailyBurn.limit_usd - dailyBurn.spent_usd)} left
               </strong>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className={styles.value}>—</div>
-            <div className={styles.noBudget}>No budget configured</div>
-          </>
-        )}
-      </div>
+            </>
+          }
+        >
+          <div className={styles.budgetBar}>
+            <div
+              className={styles.budgetFill}
+              style={{ width: `${budgetPct}%` }}
+            />
+          </div>
+        </KpiTile>
+      ) : (
+        <KpiTile
+          label="Budget burn"
+          glow="rgba(59,130,246,0.14)"
+          value={KPI_UNAVAILABLE}
+        >
+          <div className={styles.noBudget}>No budget configured</div>
+        </KpiTile>
+      )}
     </div>
   );
 }

@@ -1,9 +1,17 @@
+/* `backdrop-filter: blur(20px)` was removed from this panel in #166. The four
+ * panels in this directory all mount on Mission Control, the app's landing
+ * page, directly above the background orbs — the precise arrangement
+ * d3-creative.css records as having driven the WebKit Graphics and Media
+ * subprocess to ~5 cores, because WebKit re-samples and re-blurs a panel's
+ * entire footprint whenever anything behind it repaints. The opaque-ish rgba
+ * background is the substitute and is visually indistinguishable. §2 of the v2
+ * design keeps the property on the 96px KPI tiles only.
+ */
 .panel {
   background: rgba(11, 14, 24, 0.55);
   border: 1px solid var(--line-1);
   border-radius: 16px;
   padding: 16px 18px;
-  backdrop-filter: blur(20px);
   position: relative;
   overflow: hidden;
 }
