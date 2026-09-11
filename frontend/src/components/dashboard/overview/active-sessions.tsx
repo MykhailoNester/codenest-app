@@ -10,6 +10,7 @@ import { useCallback, useState, type ReactElement } from "react";
 import { useSidecarSSE, type AgentSession } from "../../../lib/api";
 import {
   formatUSD,
+  formatCount,
   formatDuration,
   secondsSince,
 } from "../../../lib/format-helpers";
@@ -170,8 +171,51 @@ export function ActiveSessions(): ReactElement {
                   </div>
                   <div className={styles.sub}>
                     {s.project_name && <span>{s.project_name}</span>}
+                    {/* Which client started this session (#153 P1, Lane C).
+                        Renders the raw `entrypoint` string — three values exist
+                        on this machine (claude-desktop, cli, sdk-cli) and the
+                        set is open, so a fixed per-client colour would
+                        mis-render the first value nobody has seen yet. Absent
+                        (a pre-009 sidecar) and null (scanner has not reached
+                        this session) both render the same dashed "unknown",
+                        because the app genuinely does not know either way. */}
+                    <span
+                      className={`${styles.subSep} ${styles.source}${
+                        s.source_app ? "" : ` ${styles.sourceUnknown}`
+                      }`}
+                      title={
+                        s.source_app
+                          ? `Started by ${s.source_app}${
+                              s.cli_version ? ` · CLI ${s.cli_version}` : ""
+                            }`
+                          : "No transcript has been read for this session yet"
+                      }
+                    >
+                      {s.source_app ?? "unknown"}
+                    </span>
                     {s.current_tool && (
                       <span className={styles.subSep}>{s.current_tool}</span>
+                    )}
+                    {/* Compaction marker. The design calls this "the one
+                        element worth arguing for": context exhaustion is the
+                        commonest silent failure in a long agent session and no
+                        client shows it as history — you only ever see the
+                        current number, after the fact. `> 0` rather than
+                        `!= null` so a scanned session that was never compacted
+                        stays quiet instead of displaying a zero badge. */}
+                    {(s.compaction_count ?? 0) > 0 && (
+                      <span
+                        className={`${styles.subSep} ${styles.compacted}`}
+                        title={
+                          s.context_peak_tokens
+                            ? `Peak context ${formatCount(
+                                s.context_peak_tokens,
+                              )} tokens before compaction`
+                            : "This session was compacted"
+                        }
+                      >
+                        compacted ×{s.compaction_count}
+                      </span>
                     )}
                     <span className={styles.subSep}>
                       {formatDuration(runtimeSec)}

@@ -1,0 +1,214 @@
+/* Mission Control — surface S1 (epic #153 / #166).
+ *
+ * Three zones, top to bottom: what wants a human, what is running without one,
+ * what already happened. The page owns only the zone geometry and the Needs You
+ * panel; every other box on it is a component that carries its own CSS.
+ *
+ * The measurements are the app's real ones, which §2 of the design doc records
+ * — page padding 20px 28px 28px, hero split 1.55fr 1fr, gap 16, panel
+ * rgba(11,14,24,.55) at radius 16. (§2 prints the page padding as "20/24/24"
+ * and the topbar as "18/24/10"; both are 28px horizontally in the code, and the
+ * code is what ships. The topbar's own rule lives in `d3-creative.css`.)
+ *
+ * No `backdrop-filter` anywhere in this file. It is banned on full-size panels
+ * — d3-creative.css records it driving the WebKit Graphics process to ~5 cores
+ * by re-blurring each panel's whole footprint on every repaint behind it — and
+ * this page mounts more large panels above the background orbs than any other.
+ * It survives only on the 96px KPI tile, in `kpi-tile.module.css`.
+ */
+
+.page {
+  position: relative;
+  z-index: 1;
+  padding: 20px 28px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hero,
+.live,
+.record {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* The right-hand column of a zone, when it stacks more than one box. */
+.aside {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+/* ─── Needs You panel ─────────────────────────────────────────────────────── */
+
+.panel {
+  background: rgba(11, 14, 24, 0.55);
+  border: 1px solid var(--line-1);
+  border-radius: 16px;
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.sectionLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--fg-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionLabel::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.headMeta {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.row:last-of-type {
+  border-bottom: none;
+}
+
+/* Severity is the one thing on this page allowed to carry colour, and it is
+   carried by a dot rather than by the row, so the list stays readable. */
+.sevDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--fg-4);
+}
+
+.sevBlocking {
+  background: var(--err);
+  box-shadow: 0 0 8px var(--err);
+}
+
+.sevStalled {
+  background: var(--warn);
+}
+
+.sevQueued {
+  background: var(--info);
+}
+
+.rowBody {
+  min-width: 0;
+}
+
+.rowTitle {
+  font-size: 12.5px;
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--line-1);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+.action:hover {
+  color: var(--fg-0);
+  border-color: var(--line-3);
+}
+
+.foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-1);
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+
+.footNote {
+  font-family: var(--font-mono);
+}
+
+.empty {
+  padding: 18px 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.emptyTitle {
+  font-size: 13.5px;
+  color: var(--fg-1);
+  font-weight: 500;
+}
+
+.emptyLine {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  line-height: 1.45;
+}
+
+@media (max-width: 1180px) {
+  .hero,
+  .live,
+  .record {
+    grid-template-columns: 1fr;
+  }
+
+  .tiles {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

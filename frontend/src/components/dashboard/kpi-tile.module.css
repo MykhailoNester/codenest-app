@@ -1,0 +1,109 @@
+/* KpiTile — the ONE definition of the KPI tile box (epic #153 / #166).
+ *
+ * §2 of the v2 design records the tile as `rgba(11,14,24,.65)` · r12 ·
+ * min-h 96 · 24px/600 mono value with a corner glow. Those values used to live
+ * in `kpi-stack.module.css`, and Mission Control needs the same box for its
+ * record-zone row; copying the block would have made the design's numbers two
+ * facts that can disagree. `mission-control.test.tsx` greps
+ * `frontend/src` for the tile's 96px height rule and requires exactly one hit,
+ * so this file is the only place it may be written.
+ *
+ * `backdrop-filter` is deliberate here and nowhere else. The ban d3-creative.css
+ * records is on *full-size* panels, whose footprint WebKit re-blurs whenever
+ * anything behind them repaints; a 96px tile is small enough that the same
+ * convolution is not what pegged the Graphics subprocess. §2 says it in as many
+ * words: "It is kept on the small KPI tiles only."
+ */
+
+.tile {
+  background: rgba(11, 14, 24, 0.65);
+  border: 1px solid var(--line-1);
+  border-radius: 12px;
+  padding: 14px 16px;
+  backdrop-filter: blur(12px);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 96px;
+}
+
+/* Per-tile corner radial glow — colour set via the inline `--kpi-glow` var so
+   the severity meaning stays with the caller that knows it. */
+.tile::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 60%;
+  height: 100%;
+  background: radial-gradient(
+    ellipse 120px 80px at 100% 0%,
+    var(--kpi-glow, rgba(59, 130, 246, 0.1)),
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+.label {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--fg-0);
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* A value that is only an em dash is not a reading — it is the absence of one,
+   and it should not shout in the same weight as a number that is real. */
+.dash {
+  color: var(--fg-4);
+}
+
+.unit {
+  font-size: 13px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+/* The honesty chips §2 requires: `est` on an estimated figure, `P2` / `P3` on a
+   tile whose lane is not built. Both are muted on purpose — they qualify the
+   number, they do not compete with it. */
+.tag {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-2);
+  color: var(--fg-3);
+}
+
+.foot {
+  font-size: 11px;
+  color: var(--fg-3);
+  margin-top: auto;
+}
+
+.foot strong {
+  color: var(--fg-1);
+  font-weight: 500;
+}

@@ -1,0 +1,134 @@
+/* PlanHeadroom (epic #153 / #166).
+ *
+ * A full-size panel, so it carries the §2 panel box — rgba(11,14,24,.55) · r16 ·
+ * pad 16/18 — and deliberately NO `backdrop-filter`. d3-creative.css records
+ * what that property did to the WebKit Graphics process across the four large
+ * Command Center panels; this panel sits above the same background orbs on the
+ * app's landing page, which is the worst possible place to reintroduce it.
+ */
+
+.panel {
+  background: rgba(11, 14, 24, 0.55);
+  border: 1px solid var(--line-1);
+  border-radius: 16px;
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.sectionLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--fg-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionLabel::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.sampled {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rowHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.rowLabel {
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+
+/* The key as it appears in the file, not a friendlier name we invented — the
+   panel's whole claim is that it is showing you raw counters. */
+.rowKey {
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  margin-right: 6px;
+}
+
+.rowValue {
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--fg-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.track {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+/* One neutral fill. §2 reserves colour for severity, and "high compared with
+   the last few days" is not a severity — nothing here is known to be a limit. */
+.fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--violet));
+  border-radius: inherit;
+  max-width: 100%;
+}
+
+.observed {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+.caveat {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--fg-3);
+  border-top: 1px solid var(--line-1);
+  padding-top: 10px;
+}
+
+.notice {
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+
+.gap {
+  font-size: 10.5px;
+  color: var(--warn);
+  font-family: var(--font-mono);
+}

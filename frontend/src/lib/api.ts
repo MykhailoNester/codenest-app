@@ -26,6 +26,7 @@ import {
   FEATURE_CACHE_KEY,
   FEATURE_CACHE_EVENT,
 } from "./nav-items";
+import type { PlanUsagePayload } from "./plan-usage";
 import {
   AGENT_CATALOG_RESET_EVENT,
   AGENT_CATALOG_STORAGE_KEY,
@@ -190,6 +191,30 @@ export interface AgentSession {
   started_at: string;
   ended_at: string | null;
   last_event_at: string | null;
+
+  // Lane C provenance and rollups (#153 P1). The sidecar selects `s.*`, so
+  // these arrive as soon as their migrations have been applied — but they are
+  // OPTIONAL rather than nullable on purpose, and the difference matters.
+  //
+  // A sidecar process applies migrations once, at startup. One that was
+  // launched before 009/014 landed keeps serving until it is restarted, and its
+  // rows simply do not carry these keys — not `null`, absent. Typing them as
+  // `x: string | null` would be a lie the compiler happily accepts and the UI
+  // then renders as a blank where it meant to render "unknown". `?` forces the
+  // caller to treat absent and null alike, which is what the design's dashed
+  // "unknown" state exists for.
+  /** `entrypoint` from the transcript: 'claude-desktop' | 'cli' | 'sdk-cli' | … */
+  source_app?: string | null;
+  /** Which Claude config dir the transcript was read from. */
+  source_detail?: string | null;
+  /** CLI version that ran the session, e.g. '2.1.251'. */
+  cli_version?: string | null;
+  /** Branch parsed from `<repo>/.git/HEAD` — no subprocess. */
+  git_branch?: string | null;
+  /** Highest main-thread context occupancy seen, sidechain turns excluded. */
+  context_peak_tokens?: number | null;
+  /** How many times this session was compacted. */
+  compaction_count?: number | null;
 }
 
 export function useAgentSessions(
@@ -3265,6 +3290,31 @@ export function useAgentInvocations(
     placeholderData: keepPreviousData,
     staleTime: 30_000,
     enabled: Boolean(name),
+  });
+}
+
+// ─── Plan usage (epic #153 / #164) ────────────────────────────────
+
+/**
+ * Claude desktop's plan-usage history, as the sidecar parsed it.
+ *
+ * The payload type and every display rule attached to it live in
+ * `lib/plan-usage.ts` — this is only the fetch. It is separated that way
+ * because the honesty rules around these counters (no unit, no ceiling, no
+ * percentage) are the interesting part and they are worth testing without a
+ * query client.
+ *
+ * Always 200, including on a machine with no Claude desktop install, so there
+ * is no `retry` tuning to do and an error here means the sidecar itself is
+ * unreachable. The file is rewritten roughly every 15 minutes, so a 5-minute
+ * `staleTime` with no polling is as fresh as the source can be — the panel
+ * renders how old the newest sample is rather than implying it is live.
+ */
+export function usePlanUsage(): UseQueryResult<PlanUsagePayload, SidecarError> {
+  return useQuery<PlanUsagePayload, SidecarError>({
+    queryKey: ["agents", "plan-usage"],
+    queryFn: () => fetchSidecar<PlanUsagePayload>("/api/v1/agents/plan-usage"),
+    staleTime: 300_000,
   });
 }
 
