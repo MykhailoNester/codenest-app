@@ -24,6 +24,7 @@ from app.services import (
     budget_service,
     cwd_resolver_service,
     event_retention_service,
+    plan_usage_service,
     session_backfill_service,
     session_hud_service,
     transcript_scanner_service,
@@ -226,6 +227,29 @@ async def api_set_agent_retention(request: Request) -> JSONResponse:
     await event_retention_service.set_retention_days(db, provided)
     effective = await event_retention_service.resolve_retention_days(db)
     return JSONResponse(event_retention_service.retention_payload(effective))
+
+
+# ─── Plan usage (epic #153 / #164) ──────────────────────────────────────────
+
+
+@router.get("/api/v1/agents/plan-usage")
+async def api_plan_usage() -> JSONResponse:
+    """Return Claude desktop's plan-usage history, parsed but never interpreted.
+
+    Always 200. A machine with no Claude desktop install is the ordinary case,
+    not an error condition, so absence comes back as `available: false` with a
+    `reason` the panel can render — an error status here would light up the
+    console and the error boundary over a file this app neither owns nor needs.
+
+    The route sits above `/{name}/stats` for the same reason the retention pair
+    does: a literal segment must be registered before the parameterised siblings
+    it could otherwise be swallowed by.
+
+    `plan_usage_service` owns the whole contract, including the rule that no
+    unit, limit or percentage ever appears in what it returns; this handler adds
+    nothing to the payload.
+    """
+    return JSONResponse(plan_usage_service.read_plan_usage())
 
 
 @router.get("/api/v1/agents/{name}/stats")
