@@ -1,0 +1,216 @@
+/* Needs You (surface S2, epic #153 / #162).
+ *
+ * One list, severity-grouped, oldest first, actions inline. The page is
+ * designed around being *empty* — that is the good outcome and the state a
+ * user will see most often — so the empty block gets as much care as the row.
+ */
+
+.page {
+  padding: 20px 28px 28px;
+  color: var(--fg-1);
+}
+
+/* ─── State tabs (Open / Resolved / Muted) ─────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 18px;
+}
+
+.tab {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--line-1);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--fg-1);
+  border-color: var(--line-3);
+}
+
+.tabOn {
+  color: var(--fg-0);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+/* ─── Summary tiles ───────────────────────────────────────────────────────── */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+/* Deliberately no `min-height` here. #166 extracts one shared `KpiTile` and
+ * asserts that the 96px tile height has exactly one definition in the whole
+ * frontend; a second copy on this page would break that the moment it lands.
+ * The tiles take their height from their content until that component exists
+ * to be reused. */
+.tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+}
+
+.tileLabel {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+.tileValue {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--fg-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.tileSub {
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+
+/* ─── Severity groups ─────────────────────────────────────────────────────── */
+
+.groupHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 18px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.groupNote {
+  font-size: 11.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg-4);
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 13px 16px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--bg-2);
+  margin-bottom: 8px;
+}
+
+.rowBody {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rowTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-0);
+  margin-bottom: 3px;
+}
+
+.rowMeta {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  overflow-wrap: anywhere;
+}
+
+.rowActions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.action {
+  font: inherit;
+  font-size: 11.5px;
+  padding: 5px 10px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.action:hover {
+  color: var(--fg-0);
+  border-color: var(--line-3);
+  background: var(--bg-4);
+}
+
+.sevDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+}
+
+.sevBlocking {
+  background: var(--err);
+}
+
+.sevStalled {
+  background: var(--warn);
+}
+
+.sevQueued {
+  background: var(--fg-4);
+}
+
+/* ─── Empty state ─────────────────────────────────────────────────────────── */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 56px 24px;
+  text-align: center;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-4);
+  background: var(--bg-2);
+}
+
+.emptyMark {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.emptyTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.emptyLine {
+  font-size: 12.5px;
+  color: var(--fg-3);
+}

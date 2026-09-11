@@ -265,6 +265,7 @@ def create_app() -> FastAPI:
         agent_overrides,
         agents,
         attachments,
+        attention,
         budgets,
         command_center,
         dashboard,
@@ -304,6 +305,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(command_center.router)
+    app.include_router(attention.router)
     app.include_router(dashboard.router)
     app.include_router(dashboard_trends.router)
     app.include_router(tasks.router)

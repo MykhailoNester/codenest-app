@@ -1,6 +1,7 @@
 import { memo, useEffect, type ReactElement } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
+  useAttention,
   useDailySpend,
   useLookups,
   useProviderStats,
@@ -30,10 +31,19 @@ function SidebarInner({
   budgetTotal = 40,
 }: SidebarProps): ReactElement {
   void _activeSessionCount;
-  // Per-slug rail counts. Empty until #162 supplies the Needs You count —
-  // declared here so that ticket adds a hook and one entry rather than a
-  // render path. `NavCountBadge` renders nothing for a missing slug.
-  const navCounts: Partial<Record<string, number>> = {};
+  // Per-slug rail counts (#162 supplies the first one). The same 30-second
+  // poll as the Needs You page itself, and react-query dedupes the two
+  // subscribers onto one request, so having the rail read the queue costs no
+  // extra fetch while the page is open.
+  //
+  // Only OPEN items are counted. Muted ones are excluded by definition and
+  // resolved ones are history; and because `NavCountBadge` renders nothing for
+  // a zero, the rail is silent exactly when the queue is empty, which is what
+  // makes a badge that *is* showing worth walking over to.
+  const { data: attention } = useAttention("open");
+  const navCounts: Partial<Record<string, number>> = {
+    attention: attention?.counts.open,
+  };
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { data: spend } = useDailySpend();
@@ -300,11 +310,19 @@ function SidebarInner({
                     >
                       <Icon name={it.icon} size={14} />
                       <span>{it.label}</span>
-                      {/* No count source exists yet — #162 supplies the Needs
-                          You count. `NavCountBadge` renders nothing for a null
-                          or zero count, so this is inert until then rather
-                          than a placeholder that has to be found and removed. */}
-                      <NavCountBadge count={navCounts[it.slug]} />
+                      {/* `NavCountBadge` renders nothing for a null or zero
+                          count, so a slug with no count source stays inert. */}
+                      <NavCountBadge
+                        count={navCounts[it.slug]}
+                        tone={it.slug === "attention" ? "warn" : "neutral"}
+                        label={
+                          it.slug === "attention" && navCounts.attention
+                            ? `${navCounts.attention} item${
+                                navCounts.attention === 1 ? "" : "s"
+                              } need you`
+                            : undefined
+                        }
+                      />
                     </button>
                   );
                 })}

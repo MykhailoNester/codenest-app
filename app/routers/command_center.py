@@ -519,6 +519,13 @@ async def factory_reset() -> dict:
         # already been read, and the wiped database would never refill.
         "transcript_scan_state",
         "agent_session_compactions",
+        # The attention queue (#162). Derived, and carrying no FK to any of its
+        # subjects, so nothing above cascades into it. It would rebuild itself
+        # on the next refresh anyway — but not before the wiped app showed a
+        # queue of items about sessions and tasks that no longer exist, and any
+        # item whose subject is gone for good would never be re-produced and so
+        # would never be swept either.
+        "attention_items",
         "projects",
         "app_settings",
         "workspace_state",
