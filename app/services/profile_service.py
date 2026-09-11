@@ -3,8 +3,9 @@
 CRUD over the `profiles` table. A profile represents a named Claude
 session context (work, personal, client-X, …) — it carries a color,
 icon, optional cwd hint, an env-var blob for future terminal spawning,
-and a `claude_config_dir` substring that `agent_service._derive_profile`
-uses to map a `transcript_path` to a profile name.
+and a `claude_config_dir` that `agent_service._derive_profile` uses to map a
+`transcript_path` to a profile name — matched on a path boundary, so
+`~/.claude` no longer claims the sessions of `~/.claude-work`.
 """
 
 from __future__ import annotations
