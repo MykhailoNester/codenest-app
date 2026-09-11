@@ -13,6 +13,7 @@
  * so the sidebar never renders in an "all features visible" state.
  */
 export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
+  attention: true,
   work: true,
   notifications: true,
   parallel: true,
@@ -75,6 +76,7 @@ export const FEATURE_CACHE_EVENT = "codenest:enabled-features";
 // TODO: when the workflow_items and tasks tables are merged into one,
 // remove `inbox` from the `work` slug set and drop it from KNOWN_NAV_SLUGS.
 export const FEATURES: Readonly<Record<string, readonly string[]>> = {
+  attention: ["attention"],
   work: ["tasks", "inbox"],
   notifications: ["notifications"],
   schedules: ["schedules"],
@@ -96,6 +98,7 @@ export const FEATURES: Readonly<Record<string, readonly string[]>> = {
  * deterministic order without needing to sort at runtime.
  */
 export const KNOWN_FEATURES_ORDERED: readonly string[] = [
+  "attention",
   "work",
   "notifications",
   "schedules",
@@ -154,6 +157,22 @@ export const NAV_ITEMS = [
     group: "attention",
   },
   {
+    // The Needs You page (#162). Second in the rail, directly under Mission
+    // Control, because the design's whole argument is that the first two
+    // things in the window answer "is anything waiting on me?" — and this is
+    // the one that answers it with a list you can act on. Its rail count is
+    // the queue's open count, wired in `sidebar.tsx`.
+    //
+    // Icon `review` rather than `bell`: `bell` already belongs to
+    // Notifications, and two rail rows wearing the same glyph is exactly the
+    // confusion this page exists to remove.
+    slug: "attention",
+    label: "Needs You",
+    icon: "review",
+    path: "/attention",
+    group: "attention",
+  },
+  {
     slug: "tasks",
     label: "Work Board",
     icon: "tasks",
@@ -163,9 +182,6 @@ export const NAV_ITEMS = [
   // `inbox` is intentionally absent from NAV_ITEMS — the router redirects
   // /inbox → /tasks. A future workflow_items/tasks table merge will clean up
   // the DB rows.
-  //
-  // `attention` (the Needs You page) is added to this group by #162, which
-  // also owns wiring its rail count into the badge this ticket builds.
 
   // Record — what already happened
   {

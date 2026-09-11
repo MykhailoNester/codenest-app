@@ -56,8 +56,11 @@ const EXTRA_PATHS = [
 ];
 
 describe("OMNI_COMMANDS shape", () => {
-  it("has exactly 26 entries", () => {
-    expect(OMNI_COMMANDS.length).toBe(26);
+  // 26 → 27 with #162's `attention` slug. The registry derives its
+  // nav-entries from NAV_ITEMS, so this number is the guard that a new nav row
+  // was a decision rather than an accident.
+  it("has exactly 27 entries", () => {
+    expect(OMNI_COMMANDS.length).toBe(27);
   });
 
   it("has unique ids", () => {
@@ -169,7 +172,7 @@ describe("buildCommandRows — gating", () => {
   });
 
   it("an unknown feature map hides nothing", () => {
-    expect(buildCommandRows("", {}, 100).length).toBe(26);
+    expect(buildCommandRows("", {}, 100).length).toBe(27);
   });
 
   // Property pinned: a disabled feature can never yield a command that

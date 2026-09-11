@@ -50,13 +50,37 @@ export function parseUtcMs(iso: string): number {
 }
 
 /**
+ * Millis for a timestamp that may or may not carry a timezone.
+ *
+ * The sidecar emits naive UTC — `2026-09-11T14:10:14`, no suffix — and
+ * `new Date()` reads a naive ISO string as *local* time, so every age computed
+ * from one was wrong by the machine's UTC offset (three hours on a EEST
+ * machine: a freshly created row read as three hours old). That was live in
+ * `relativeTime` for every caller that did not hand-wrap its argument, which
+ * was most of them.
+ *
+ * Unlike `parseUtcMs`, which appends `"Z"` unconditionally, this appends one
+ * only when the string carries no timezone designator at all — so a stamp that
+ * already ends in `Z` or carries a `+03:00` / `-0500` offset is passed through
+ * as written instead of being corrupted into an unparseable hybrid. See
+ * `lib/task-runs.ts`, which grew its own parser to dodge exactly that.
+ */
+function relativeTimeMs(iso: string): number {
+  // A designator is `Z`, or a ±HH:MM / ±HHMM offset, and can only appear after
+  // the time part — `2026-09-11` alone is a date, not an offset-bearing stamp.
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso) && iso.includes("T");
+  return Date.parse(hasZone ? iso : `${iso}Z`);
+}
+
+/**
  * Relative-time formatter: "Xs ago" / "Xm ago" / "Xh ago" / "Xd ago".
  * Handles both past and future timestamps.
  * Accepts null/undefined for convenience at call sites that may have optional dates.
+ * Naive (suffix-less) timestamps are read as UTC — see `relativeTimeMs`.
  */
 export function relativeTime(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const ms = Date.now() - new Date(iso).getTime();
+  const ms = Date.now() - relativeTimeMs(iso);
   const future = ms < 0;
   const s = Math.floor(Math.abs(ms) / 1000);
   const phrase = (value: string): string =>

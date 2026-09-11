@@ -36,6 +36,7 @@ class SettingPut(BaseModel):
 # stay in sync with ``_FEATURES_DEFAULT`` below).
 KNOWN_FEATURES: frozenset[str] = frozenset(
     {
+        "attention",  # Needs You — the attention queue (slug: attention)
         "work",  # Work board — tasks kanban with triage (slug: tasks)
         "notifications",  # Notifications page — existing event feed (slug: notifications)
         "schedules",  # Agent schedules (slug: schedules)
@@ -67,6 +68,10 @@ _RETIRED_FEATURES: frozenset[str] = frozenset({"composer", "explorer"})
 # the left nav) until the user enables them in Settings → Features. Keep in
 # sync with the baseline seed.
 _FEATURES_DEFAULT: dict[str, bool] = {
+    # ON by default: after the #153 pivot the attention queue is the point of
+    # the app, and a landing surface nobody can find because it ships off is
+    # not shipped.
+    "attention": True,
     "work": True,
     "notifications": True,
     "parallel": True,

@@ -43,6 +43,7 @@ import { StartupSplash } from "./components/startup-splash";
 import { ToastHost } from "./components/toast-host";
 import { CommandCenterPage } from "./pages/command-center";
 import { DashboardPage } from "./pages/dashboard";
+import { AttentionPage } from "./pages/attention";
 import { TasksPage } from "./pages/tasks";
 import { TaskDetailPage } from "./pages/task-detail";
 import { InProgressPage } from "./pages/in-progress";
@@ -388,6 +389,14 @@ function AppInner(): ReactElement {
         <Route path="/command" element={<CommandCenterPage />} />
         <Route path="/" element={<DashboardPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
+        <Route
+          path="/attention"
+          element={
+            <FeatureRoute navSlug="attention">
+              <AttentionPage />
+            </FeatureRoute>
+          }
+        />
         <Route
           path="/tasks"
           element={

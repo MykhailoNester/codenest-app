@@ -3363,6 +3363,78 @@ export function useActivityMetrics(
   });
 }
 
+// ─── Attention queue (Needs You) ───────────────────────────────────
+
+/** One row of the attention queue. Mirrors `attention_items` + the joins
+ *  `attention_service.list_items` adds (pane, project name). */
+export interface AttentionItem {
+  id: number;
+  kind: string;
+  severity: string;
+  state: string;
+  dedup_key: string;
+  seen_count: number;
+  title: string;
+  detail: string | null;
+  session_id: string | null;
+  project_id: number | null;
+  task_id: number | null;
+  schedule_id: number | null;
+  payload_json: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+  resolution: string | null;
+  muted_until: string | null;
+  /** Joined live from `agent_sessions` — the target of "Jump to pane". */
+  pane_id: string | null;
+  session_status: string | null;
+  project_name: string | null;
+}
+
+export interface AttentionCounts {
+  blocking: number;
+  stalled: number;
+  queued: number;
+  /** Sum of the three severities. What the nav rail badge renders. */
+  open: number;
+  muted: number;
+  resolved_today: number;
+  /** Mean time-to-resolution for today's resolved items; null when none. */
+  resolved_today_avg_seconds: number | null;
+  auto_resolved?: number;
+}
+
+export interface AttentionQueue {
+  items: AttentionItem[];
+  counts: AttentionCounts;
+}
+
+/**
+ * The Needs You queue.
+ *
+ * The 30-second poll is not a default anyone picked for tidiness — it is the
+ * page's stated promise ("re-checked every 30 seconds", which the empty state
+ * says out loud), and it is the whole of P1's freshness guarantee: there is no
+ * tray, no push and no SSE channel behind this queue, so the poll interval
+ * *is* how quickly a stalled session reaches a human. Changing it means
+ * changing that copy too.
+ *
+ * `staleTime` is deliberately below the interval so a remount (tabbing back to
+ * the page) re-asks rather than rendering a queue computed minutes ago.
+ */
+export function useAttention(
+  state: "open" | "resolved" | "muted" = "open",
+): UseQueryResult<AttentionQueue, SidecarError> {
+  return useQuery<AttentionQueue, SidecarError>({
+    queryKey: ["attention", state],
+    queryFn: () =>
+      fetchSidecar<AttentionQueue>(`/api/v1/attention?state=${state}`),
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  });
+}
+
 // ─── Notifications ─────────────────────────────────────────────────
 
 export interface Notification {
