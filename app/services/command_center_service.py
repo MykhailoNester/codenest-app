@@ -502,8 +502,8 @@ async def _reconcile_provider_profiles(db: aiosqlite.Connection) -> int:
     For each enabled provider whose ``default_env_json`` contains a
     ``CLAUDE_CONFIG_DIR`` and that has no matching profile row (matched by
     ``provider_id`` or by ``name``), we insert a profile row so that:
-    - ``agent_service._derive_profile`` can match new hook sessions by their
-      ``transcript_path`` substring.
+    - ``agent_service._derive_profile`` can match new hook sessions by the
+      config directory their ``transcript_path`` sits under.
     - ``provider_service.resolve_profile_to_provider`` returns the right
       ``provider_id`` at session-start time instead of NULL.
 

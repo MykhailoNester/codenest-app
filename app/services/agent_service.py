@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -74,6 +75,34 @@ def invalidate_profile_cache() -> None:
     _profile_cache.clear()
 
 
+def _config_dir_matches(config_dir: str | None, transcript_path: str) -> bool:
+    """Does `transcript_path` sit inside `config_dir`?
+
+    Boundary-anchored rather than a bare substring test. `~/.claude` *is* a
+    substring of `~/.claude-work/projects/p/s.jsonl`, and profiles are scanned
+    in creation order, so the unanchored test attributed every session under
+    the second directory to whichever of the pair was created first — the
+    exact `~/.claude` + `~/.claude-work` pair this machine runs. A match must
+    therefore end where a path component ends: at a separator, or at the end
+    of the path. Same boundary rule #156 gave the cwd matcher.
+
+    The needle is still allowed to be a trailing *fragment* of a directory
+    rather than its full absolute path, which is how some stored profiles
+    spell it; only the right-hand edge is anchored, because that is the edge
+    the `.claude` / `.claude-work` collision happens on.
+    """
+    needle = (config_dir or "").rstrip(os.sep)
+    if not needle:
+        return False
+    start = transcript_path.find(needle)
+    while start != -1:
+        end = start + len(needle)
+        if end == len(transcript_path) or transcript_path[end] == os.sep:
+            return True
+        start = transcript_path.find(needle, start + 1)
+    return False
+
+
 async def _derive_profile(db: aiosqlite.Connection, transcript_path: str | None) -> str:
     if not transcript_path:
         return "unknown"
@@ -91,7 +120,7 @@ async def _derive_profile(db: aiosqlite.Connection, transcript_path: str | None)
         # DB unavailable (e.g. mid-migration) — never block hook ingest.
         return "unknown"
     for profile in profiles:
-        if profile["claude_config_dir"] in transcript_path:
+        if _config_dir_matches(profile["claude_config_dir"], transcript_path):
             _profile_cache[transcript_path] = profile["name"]
             return profile["name"]
     _profile_cache[transcript_path] = "unknown"

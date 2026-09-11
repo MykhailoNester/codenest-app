@@ -510,6 +510,15 @@ async def factory_reset() -> dict:
         # cascade and has to be named here or a reset would leave claim rows
         # pointing at sessions that no longer exist.
         "session_field_provenance",
+        # The Lane C transcript scan's two side tables (#163), named here for
+        # the same reason: neither carries an FK to `agent_sessions`
+        # (`transcript_scan_state` deliberately records session ids that have
+        # no session row at all), so neither is reachable by a cascade. Leaving
+        # `transcript_scan_state` behind would be worse than leaving orphan
+        # rows: its byte offsets would tell the next pass every transcript had
+        # already been read, and the wiped database would never refill.
+        "transcript_scan_state",
+        "agent_session_compactions",
         "projects",
         "app_settings",
         "workspace_state",

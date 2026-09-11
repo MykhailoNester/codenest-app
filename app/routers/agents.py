@@ -26,6 +26,7 @@ from app.services import (
     event_retention_service,
     session_backfill_service,
     session_hud_service,
+    transcript_scanner_service,
 )
 
 router = APIRouter()
@@ -340,6 +341,40 @@ async def api_backfill_session_attribution(dry_run: bool = False, force: bool = 
     result = await session_backfill_service.backfill_session_attribution(
         db, dry_run=dry_run, force=force
     )
+    return JSONResponse(result)
+
+
+@router.post("/api/v1/agents/sessions/scan-transcripts")
+async def api_scan_transcripts():
+    """Read new transcript bytes and fill what no hook payload carries (#163).
+
+    Walks `<config_dir>/projects/**/*.jsonl` for every
+    `profiles.claude_config_dir` plus `$CLAUDE_CONFIG_DIR` — the owner-approved
+    deviation from the epic's decision 4, which named `~/.claude` alone and
+    joins 0 of the 130 recorded sessions on this machine. Fills `source_app`,
+    `source_detail`, `cli_version`, `title`, `title_source`, `git_branch` and
+    the two live switches through the Lane C reconciler, and the three
+    uncontested rollups (`context_peak_tokens`, `compaction_count`,
+    `transcript_last_row_at`) directly.
+
+    One call is one bounded pass — at most
+    `transcript_scanner_service.SCAN_MAX_FILES_PER_PASS` files and
+    `SCAN_MAX_BYTES_PER_PASS` bytes — and it records where each file was left,
+    so draining a large backlog means calling it repeatedly rather than waiting
+    on one long request. Safe to re-run: a pass with no new bytes reads nothing
+    and writes nothing.
+
+    There is deliberately no `?dry_run=1` — see
+    `transcript_scanner_service.scan_transcripts` for why a speculative write on
+    the sidecar's shared connection is unsafe in both directions.
+
+    Coverage this can reach is bounded by what is still on disk: >45% of all
+    sessions, >95% of sessions whose transcript still exists. 68 of 130 stored
+    `transcript_path` values no longer exist, which is why the epic's ">90%
+    known source app" is not the target here.
+    """
+    db = await get_db()
+    result = await transcript_scanner_service.scan_transcripts(db)
     return JSONResponse(result)
 
 
