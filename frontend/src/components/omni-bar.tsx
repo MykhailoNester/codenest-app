@@ -39,6 +39,7 @@ import {
   GROUP_LABELS,
   GROUP_ORDER,
   projectRoute,
+  resultMeta,
   routeForResult,
   typeColor,
   typeIcon,
@@ -160,7 +161,7 @@ function rowMetaText(row: OmniRow): string {
     case "mention":
       return row.row.meta;
     case "result":
-      return row.result.type;
+      return resultMeta(row.result);
   }
 }
 

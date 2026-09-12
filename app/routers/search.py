@@ -6,8 +6,8 @@ from app.services import search_service
 
 router = APIRouter(prefix="/api/v1", tags=["search"])
 
-_VALID_TYPES = {"task", "project", "doc", "inbox", "event"}
-_DEFAULT_TYPES = "task,project,doc,inbox,event"
+_VALID_TYPES = search_service.VALID_TYPES
+_DEFAULT_TYPES = "task,project,doc,inbox,event,session,attention"
 
 
 @router.get("/search")
