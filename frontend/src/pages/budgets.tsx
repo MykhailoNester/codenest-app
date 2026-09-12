@@ -14,6 +14,7 @@ import {
 } from "../lib/api";
 import { Shell } from "../components/layout/shell";
 import { budgetBarColor, budgetBarPct } from "../lib/budget-format";
+import { UsageLimits } from "../components/budgets/usage-limits";
 
 const SCOPES: readonly BudgetScope[] = ["workspace", "project", "agent"];
 const PERIODS: readonly BudgetPeriod[] = ["daily", "weekly", "monthly"];
@@ -432,6 +433,8 @@ export function BudgetsPage(): ReactElement {
           color: "var(--fg-1)",
         }}
       >
+        <UsageLimits />
+
         <QuerySourceSplit />
 
         <CreateForm

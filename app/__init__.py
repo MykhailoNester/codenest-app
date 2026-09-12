@@ -431,6 +431,7 @@ def create_app() -> FastAPI:
         taxonomies,
         team,
         traces,
+        usage,
         workspace,
     )
 
@@ -476,6 +477,7 @@ def create_app() -> FastAPI:
     app.include_router(sync.router)
     app.include_router(workspace.router)
     app.include_router(traces.router)
+    app.include_router(usage.router)
     # Lane B ingest (#175). Mounted last and, unlike every other router here,
     # outside `/api/v1` — the OTLP/HTTP spec fixes the path an exporter posts
     # to, so `/v1/metrics` is not ours to rename. See app/routers/otlp.py.

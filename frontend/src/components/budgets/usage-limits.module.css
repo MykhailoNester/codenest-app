@@ -1,0 +1,131 @@
+/* Usage & limits (#182). Tokens only, no backdrop-filter. */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin: 0;
+}
+
+.windows {
+  display: flex;
+  gap: 4px;
+}
+
+.window {
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--fg-3);
+  border-radius: var(--r-1);
+  padding: 2px 10px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.windowOn {
+  color: var(--fg-0);
+  border-color: var(--accent);
+}
+
+.note {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  margin: 0;
+  max-width: 80ch;
+  line-height: 1.55;
+}
+
+.cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.card {
+  flex: 1 1 280px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--bg-2);
+  padding: 12px 14px;
+}
+
+.quiet {
+  border-style: dashed;
+  background: transparent;
+}
+
+.label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  font-weight: 600;
+}
+
+.value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--fg-0);
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+}
+
+.caveat {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.rows {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+}
+
+.unknown {
+  color: var(--fg-3);
+  font-style: italic;
+}
+
+.coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  font-size: 12px;
+  color: var(--fg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--bg-2);
+  padding: 10px 14px;
+}
+
+.coverage strong {
+  color: var(--fg-0);
+  font-weight: 600;
+}
