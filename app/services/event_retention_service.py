@@ -1,4 +1,4 @@
-"""Per-source retention for `agent_events` (epic #153 / #160).
+"""Per-source retention for telemetry rows (epic #153 / #160, extended by #175).
 
 Retention in this app started as exactly one policy: `schedule_service`'s
 `prune_transcript_blobs` reads the single `schedule_transcript_retention_days`
@@ -27,14 +27,30 @@ classes have wildly different value-per-byte:
     `UserPromptSubmit`, `Stop`, `SessionEnd`, and the session-grain events
     #168 added). Few rows, and each one anchors a session's shape: when it
     started, what was asked, how it ended. Longest window (90 days).
+  * **otlp** — Lane B's `otlp_metric_series` rows (#175). Not an
+    `agent_events` class at all: the receiver stores one row per metric
+    *series* per session, so the table grows with distinct counters rather
+    than with exports, and the window is there to retire a session's series
+    once the session itself is long past. Same window as `session` (90 days),
+    for the same reason — these rows are the only record of what a session
+    actually cost, and they are few.
 
-The three classes are **mutually exclusive and exhaustive** — every row lands
-in exactly one, with `ephemeral` taking precedence over the event-type split.
-That precedence is the point of having the class at all: a scratch run's tool
-events must age out on the 7-day clock, not the 30-day one, and its
-`SessionStart` must not sit around for 90 days because it happened to not be
-a tool event. Exclusivity also makes the reported counts exact rather than
-double-counted, and makes the prune's total equal the rows actually removed.
+Those first three classes are **mutually exclusive and exhaustive over
+`agent_events`** — every row of that table lands in exactly one, with
+`ephemeral` taking precedence over the event-type split. That precedence is
+the point of having the class at all: a scratch run's tool events must age out
+on the 7-day clock, not the 30-day one, and its `SessionStart` must not sit
+around for 90 days because it happened to not be a tool event. Exclusivity
+also makes the reported counts exact rather than double-counted, and makes the
+prune's total equal the rows actually removed.
+
+Exclusivity is a **per-table** property, which is what makes #175's class fit
+here instead of needing a second mechanism. A `RetentionClass` names its table
+and its timestamp column; the `where_sql` fragments must stay disjoint among
+the classes that share a table, and say nothing about the classes that do not.
+`prune_agent_events` keeps its name — it is called from the schedule tick and
+from `app/routers/agents.py`, and renaming it would be churn — but it now
+prunes every registered class, on whichever table each one names.
 
 Two invariants this module will not break:
 
@@ -135,16 +151,26 @@ class RetentionClass:
     `key` is the public name of the class — it names the field in the API
     payload (`<key>_retention_days`) and the per-class entry in the prune
     summary, so it is part of the contract and should not be renamed lightly.
-    `where_sql` is a fragment appended to the prune's `WHERE`, referencing
-    `agent_events` by name so it can carry correlated subqueries; the
-    fragments below must stay mutually exclusive, or a row would be counted
+    `where_sql` is a fragment appended to the prune's `WHERE`, referencing its
+    table by name so it can carry correlated subqueries; fragments belonging to
+    the *same* table must stay mutually exclusive, or a row would be counted
     twice and the shortest window would stop being the one that wins.
+
+    `table` and `timestamp_column` default to the pair every class had before
+    #175, so the three original classes read exactly as they did. They are
+    fields rather than hardcoded strings because Lane B's rows do not live in
+    `agent_events` and do not age on `created_at` — a series row is written
+    once and touched on every export, so the only honest clock for it is
+    `last_seen_at`. Both are interpolated into SQL, never bound, so both must
+    stay literals written in this file and must never come from input.
     """
 
     key: str
     setting_key: str
     default_days: int
     where_sql: str
+    table: str = "agent_events"
+    timestamp_column: str = "created_at"
 
 
 # The one and only definition of the default windows. Nothing else in the
@@ -181,6 +207,34 @@ RETENTION_CLASSES: tuple[RetentionClass, ...] = (
         setting_key="agent_event_session_retention_days",
         default_days=90,
         where_sql=f"event_type NOT IN ({_TOOL_TYPE_LIST}) AND NOT {_EPHEMERAL_SESSION}",
+    ),
+    # 90 days — Lane B's per-series rows (#175), on their own table.
+    #
+    # `where_sql` is the whole table because there is nothing to split: the
+    # receiver stores one row per (session, metric key, series), the vocabulary
+    # of metric keys is closed, and every row is the same kind of record. A
+    # class whose only job is a window still belongs here rather than as a
+    # fourth prune somewhere else — the point of this module is that retention
+    # is one mechanism with one settings shape and one summary.
+    #
+    # The clock is `last_seen_at`, not `created_at`. A long-lived session's
+    # series row is created once and updated on every export for hours; aged on
+    # creation time it could be deleted out from under a session that is still
+    # spending money.
+    #
+    # Ephemeral sessions get no shorter window here, deliberately. It would be
+    # easy to correlate on `session_kind` the way the `ephemeral` class above
+    # does, but these rows *are* the money record, a scratch `/ship` run costs
+    # exactly as much real money as any other, and the whole table is bounded
+    # by construction — so there is nothing to buy with a second window except
+    # a way to lose cost history nobody can recompute.
+    RetentionClass(
+        key="otlp",
+        setting_key="otlp_series_retention_days",
+        default_days=90,
+        where_sql="1",
+        table="otlp_metric_series",
+        timestamp_column="last_seen_at",
     ),
 )
 
@@ -304,9 +358,9 @@ def _cutoff(days: int) -> str:
 async def _prune_class(
     db: aiosqlite.Connection, cls: RetentionClass, retention_days: int
 ) -> dict[str, int]:
-    """Delete one class's expired events in bounded batches.
+    """Delete one class's expired rows, from its own table, in bounded batches.
 
-    The `replace(created_at, 'T', ' ')` is not decoration. `agent_events` has
+    The `replace(<timestamp>, 'T', ' ')` is not decoration. `agent_events` has
     two timestamp spellings in the wild: `agent_service._now()` writes
     `2026-09-09T14:30:00` on every hook, while the column's
     `DEFAULT CURRENT_TIMESTAMP` writes `2026-09-09 14:30:00`. A raw string
@@ -320,12 +374,17 @@ async def _prune_class(
     and we stop on the first statement that deletes nothing; a short batch
     means the set is exhausted. Each batch commits on its own so the write
     lock is never held across the whole prune.
+
+    Every table a class can name must therefore have an integer `id` and a
+    text timestamp column — which is why `otlp_metric_series` carries an `id`
+    it otherwise has no use for (migration 017 says so in its header). That is
+    the price of one batching implementation instead of two.
     """
     sql = f"""
-        DELETE FROM agent_events
+        DELETE FROM {cls.table}
         WHERE id IN (
-            SELECT id FROM agent_events
-            WHERE replace(created_at, 'T', ' ') < ?
+            SELECT id FROM {cls.table}
+            WHERE replace({cls.timestamp_column}, 'T', ' ') < ?
               AND ({cls.where_sql})
             LIMIT {_BATCH_ROWS}
         )
@@ -373,7 +432,11 @@ async def prune_agent_events(
     *,
     retention_days: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Delete `agent_events` rows past their class's retention window.
+    """Delete rows past their class's retention window, class by class.
+
+    Named for `agent_events` because that is the table it was written for and
+    still the table three of its four classes cover; since #175 it also prunes
+    `otlp_metric_series`, on the same settings shape and in the same summary.
 
     Idempotent: a second call with the same clock deletes nothing, because the
     first call already removed everything on the far side of every cutoff.
