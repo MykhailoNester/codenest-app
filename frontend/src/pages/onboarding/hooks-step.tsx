@@ -42,25 +42,32 @@ import styles from "./onboarding-page.module.css";
 // sidecar here rather than merely look plausible — a user who pastes this while
 // the sidecar is still starting would otherwise get an install in which their
 // standing permission rules silently never apply.
+//
+// The `X-Codenest-Hook` header is inert on the wire and is how the installer
+// (`hooks_service.hook_authorship`) recognises a command as its own before
+// rewriting it. A paste that omits it is adopted only by exact string match
+// against a frozen list of past command shapes — which this text is not one
+// of, so a drifted copy here becomes a hook the app can neither repair nor
+// safely replace. That is why it is copied rather than approximated.
 const FALLBACK_SNIPPET = `{
   "hooks": {
     "SessionStart": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/session-start >/dev/null 2>&1 || true", "timeout": 6 }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' -H 'X-Codenest-Hook: 1' --data-binary @- http://localhost:8002/api/v1/hooks/session-start >/dev/null 2>&1 || true", "timeout": 6 }] }
     ],
     "UserPromptSubmit": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/user-prompt >/dev/null 2>&1 || true", "timeout": 6 }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' -H 'X-Codenest-Hook: 1' --data-binary @- http://localhost:8002/api/v1/hooks/user-prompt >/dev/null 2>&1 || true", "timeout": 6 }] }
     ],
     "PreToolUse": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --fail --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/pre-tool 2>/dev/null || true", "timeout": 6 }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --fail --max-time 5 -X POST -H 'Content-Type: application/json' -H 'X-Codenest-Hook: 1' --data-binary @- http://localhost:8002/api/v1/hooks/pre-tool 2>/dev/null || true", "timeout": 6 }] }
     ],
     "PostToolUse": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/post-tool >/dev/null 2>&1 || true", "timeout": 6 }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' -H 'X-Codenest-Hook: 1' --data-binary @- http://localhost:8002/api/v1/hooks/post-tool >/dev/null 2>&1 || true", "timeout": 6 }] }
     ],
     "Stop": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/stop >/dev/null 2>&1 || true", "timeout": 6 }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' -H 'X-Codenest-Hook: 1' --data-binary @- http://localhost:8002/api/v1/hooks/stop >/dev/null 2>&1 || true", "timeout": 6 }] }
     ],
     "SessionEnd": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/session-end >/dev/null 2>&1 || true", "timeout": 6 }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' -H 'X-Codenest-Hook: 1' --data-binary @- http://localhost:8002/api/v1/hooks/session-end >/dev/null 2>&1 || true", "timeout": 6 }] }
     ]
   }
 }`;

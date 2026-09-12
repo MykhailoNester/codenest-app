@@ -367,6 +367,22 @@ def authored_commands(base_url: str) -> frozenset[str]:
     Built across every loopback spelling of the base URL, so a hook wired at
     ``127.0.0.1`` is recognised as ours exactly like one wired at
     ``localhost``.
+
+    Earlier generations count too. ``hooks_service._LEGACY_COMMAND_FORMS``
+    holds the command shapes this app used to emit, and an install made before
+    the current shape is still an install this app authored — the user has not
+    done anything, and the hook still posts to our own endpoint. Without them
+    every hook a pre-marker install owns would be reported as a stranger's and
+    reduced to the bare name ``curl`` on the page whose entire job is to say
+    what is on each event and who put it there. That is a wrong answer, not a
+    cautious one.
+
+    Widening the set does not weaken it. Every entry stays an exact,
+    fully-specified string with only the endpoint URL varying, and the test
+    against it stays membership rather than a scan, so a command matches only
+    by being byte-identical to one this app itself has emitted at some point.
+    A stranger's command that merely mentions one of our URLs still fails —
+    which is the hole that made this predicate unsafe before #169 repaired it.
     """
     commands: set[str] = set()
     for base in hooks_service._equivalent_base_urls(base_url):
@@ -377,6 +393,10 @@ def authored_commands(base_url: str) -> frozenset[str]:
                     command = hook.get("command")
                     if isinstance(command, str) and command.strip():
                         commands.add(command.strip())
+        for spec in hooks_service.HOOK_EVENTS:
+            url = f"{base}{spec.path}"
+            for form in hooks_service._LEGACY_COMMAND_FORMS:
+                commands.add(form.format(url=url).strip())
     return frozenset(commands)
 
 

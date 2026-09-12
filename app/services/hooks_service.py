@@ -1,9 +1,12 @@
-"""Claude Code hook-setup guidance + inbound-ping verification.
+"""Claude Code hook-setup guidance, inbound-ping verification, and install.
 
-Onboarding shows the user the exact ``hooks`` block to paste into their Claude
-Code ``settings.json`` (guided copy-paste — the app never auto-writes it) so the
-command center receives session telemetry. ``hooks_status`` reports whether any
-inbound hook has been received yet, which the UI uses to confirm the wiring.
+Onboarding shows the user the exact ``hooks`` block for their Claude Code
+``settings.json`` so the command center receives session telemetry.
+``hooks_status`` reports whether any inbound hook has been received yet, which
+the UI uses to confirm the wiring. Since #170 the block can also be *written*
+— see "Write-through install" below and the long comment above
+``hook_authorship``; before it, guided copy-paste was the only path and this
+module opened a user's file for reading only.
 
 The hook type is ``"command"`` — a ``curl`` POST of the hook payload (piped in
 on stdin via ``--data-binary @-``) to the sidecar endpoint, ending in
@@ -13,7 +16,9 @@ the ``|| true`` makes curl always exit 0 so the hook silently no-ops instead.
 ``--max-time`` is one second under the hook ``timeout`` so curl aborts cleanly
 before the harness kills it — the sidecar is never on the critical path. Each
 event carries a ``"matcher": "*"`` so every session is captured regardless of
-cwd.
+cwd. Every command also carries the marker header ``X-Codenest-Hook``, which is
+inert on the wire and exists so the installer can tell its own work from
+somebody else's.
 
 The event registry
 ------------------
@@ -78,9 +83,9 @@ Code session, which onboarding has no way to produce. This module also
 supports verifying the wiring without one:
 
 * ``verify_settings_files`` reads each configured ``settings.json`` off the
-  event loop (``asyncio.to_thread``, read-only — this module never writes a
-  user's file) and diffs its ``hooks`` block against what
-  ``build_hook_settings`` would emit, per event. It never returns file
+  event loop (``asyncio.to_thread``; read-only, and it stays read-only now
+  that the install path below exists) and diffs its ``hooks`` block against
+  what ``build_hook_settings`` would emit, per event. It never returns file
   contents, only the structural verdict.
 * ``mint_self_test`` / ``record_self_test`` / ``read_self_test`` back a true
   end-to-end check: the frontend hands the minted URL to the Rust shell,
@@ -88,24 +93,53 @@ supports verifying the wiring without one:
   actually observed. Token state is an in-process ``OrderedDict`` (this is a
   single uvicorn process, no ``--workers``) keyed on ``time.monotonic()`` — no
   ``datetime`` is involved and no schema change is needed.
+
+Write-through install (#170)
+----------------------------
+``install_settings_files`` merges this module's block into a real
+``settings.json``: it adds the events that are missing, rewrites the hooks this
+app itself wrote in an older shape, and leaves everything else in the file
+exactly where it was. ``plan_settings_files`` is the same computation with the
+write removed, so the UI can show what would change before anything does.
+
+The whole of the design is in one constraint: a ``settings.json`` is the user's
+property and holds hooks from other tools and from their own hand, so
+clobbering one of those is a worse outcome than never installing at all. Three
+rules follow, and each is enforced rather than intended:
+
+* authorship is decided before anything is touched, by a marker header *and* a
+  host/path check that must agree — see the comment above ``hook_authorship``;
+* the write is atomic (temp file in the same directory, ``os.replace`` over the
+  target) and is preceded by a timestamped backup, so no failure anywhere in
+  this module can leave a user with a truncated settings.json and no copy of
+  what it used to say;
+* anything this module cannot merge into with certainty — invalid JSON, an
+  oversized file, a directory, a symlink resolving outside the allowed roots,
+  an unwritable path, a ``hooks`` block of an unexpected shape — is refused
+  whole, per file, with the reason reported. There is no partial write.
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 import re
 import secrets
+import stat
+import tempfile
 import time
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import aiosqlite
+
+from app.services import project_scanner_service
 
 # Default base URL for hook endpoints. Uses ``localhost`` (not 127.0.0.1)
 # because that matches what users' existing ``settings.json`` files typically
@@ -214,6 +248,24 @@ _CURL_MAX_TIME = 5
 # force-kills it.
 _HOOK_TIMEOUT = 6
 
+# The install marker (#170). Every command this module mints carries this
+# header, and it is the first half of the test that decides whether the
+# installer may rewrite a hook (the second half is the host/path check — see
+# the comment above ``hook_authorship``).
+#
+# It is a request header rather than a comment or a wrapper because a hook
+# command has nowhere else to put one: the settings.json format is JSON with no
+# comment syntax, the hook object's keys are a fixed schema Claude Code
+# validates, and anything bolted onto the shell string itself would change what
+# the command *does*. A header changes nothing — the sidecar never reads it,
+# curl sends one more line, and every failure mode of the command is the one it
+# had before. The value is a format version, not a secret: it identifies which
+# generation of this app minted the command, so a future change of shape can be
+# recognised without guessing.
+_MARKER_HEADER = "X-Codenest-Hook"
+_MARKER_VERSION = "1"
+_MARKER_ARG = f"-H '{_MARKER_HEADER}: {_MARKER_VERSION}'"
+
 
 def sidecar_base_url() -> str:
     return os.environ.get("CODENEST_SIDECAR_URL", _DEFAULT_BASE_URL).rstrip("/")
@@ -250,16 +302,23 @@ def _curl_command_for_url(url: str, discard_stdout: bool = True) -> str:
 
     A connection refused, a timeout and a 500 all therefore produce the same
     thing: no output, exit 0, session unaffected.
+
+    Both forms carry ``_MARKER_ARG`` (#170), and it sits *before* the URL on
+    purpose. ``_verdict_for_hook`` grades an installed command by asking
+    whether ``f"{base}{target_path}"`` appears in it, so anything inserted
+    between ``curl`` and the URL leaves every existing verdict exactly as it
+    was; anything inserted between the base and the path would flip every
+    install in the world to "mismatch" at once.
     """
     if discard_stdout:
         return (
             f"curl -s --max-time {_CURL_MAX_TIME} -X POST "
-            "-H 'Content-Type: application/json' --data-binary @- "
+            f"-H 'Content-Type: application/json' {_MARKER_ARG} --data-binary @- "
             f"{url} >/dev/null 2>&1 || true"
         )
     return (
         f"curl -s --fail --max-time {_CURL_MAX_TIME} -X POST "
-        "-H 'Content-Type: application/json' --data-binary @- "
+        f"-H 'Content-Type: application/json' {_MARKER_ARG} --data-binary @- "
         f"{url} 2>/dev/null || true"
     )
 
@@ -300,7 +359,7 @@ def build_hook_settings(base_url: str | None = None) -> dict:
             "hooks": [
               {
                 "type": "command",
-                "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/session-start >/dev/null 2>&1 || true",
+                "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' -H 'X-Codenest-Hook: 1' --data-binary @- http://localhost:8002/api/v1/hooks/session-start >/dev/null 2>&1 || true",
                 "timeout": 6
               }
             ]
@@ -563,9 +622,11 @@ def classify_settings_hooks(
 
 def _read_settings(path: Path) -> tuple[str, object | None, str | None]:
     """(status, parsed, detail) — status in
-    'ok' | 'missing_file' | 'invalid_json' | 'unreadable'. Blocking; called only
-    from the to_thread hop below. Only ever opens *path* for reading — there is
-    no write path anywhere in this module.
+    'ok' | 'missing_file' | 'invalid_json' | 'unreadable'. Blocking; called
+    only from a to_thread hop. Only ever opens *path* for reading: this is the
+    read half of the module and it stays read-only even now that a write half
+    exists below it, which is why the installer calls this for the file's
+    current content rather than opening it a second way.
     """
     if not path.is_absolute():
         return "unreadable", None, f"resolved path is not absolute: {path}"
@@ -692,6 +753,558 @@ async def verify_settings_files(
     """
     return await asyncio.to_thread(
         _verify_sync, list(config_homes), (base_url or sidecar_base_url()).rstrip("/")
+    )
+
+
+# ─── write-through install, part 1: whose hook is this? ──────────────────────
+#
+# Everything from here to the end of the install section is the write path this
+# module spent two releases not having, and the reason it exists is a class of
+# install the read path structurally cannot fix: a hook *this app itself wrote*
+# in an older shape, which still grades "ok" and quietly does the wrong thing.
+#
+# #172's `PreToolUse` is the motivating case and worth stating exactly. Before
+# it, all 22 commands ended in `>/dev/null 2>&1`. After it, `PreToolUse`'s
+# stdout is the channel a pre-authorisation decision comes back on. A user who
+# installed before #172 still has the redirecting command, `_verdict_for_hook`
+# grades by containment so their file still verifies green, and every standing
+# rule they write from now on is computed by the sidecar, printed by curl, and
+# discarded into /dev/null with no signal at any layer. Only a writer can
+# repair that, and only a writer that can tell its own work from a stranger's
+# may be trusted to try.
+#
+# Authorship is therefore decided before anything is touched, by two
+# independent facts that must agree:
+#
+# * the marker header — every command minted from #170 onward carries
+#   `-H 'X-Codenest-Hook: 1'`. A command carrying it came out of a generator,
+#   not out of somebody's hand.
+# * the host and path — the command must actually target this app's ingest
+#   endpoint *for the very event it is filed under*, at one of the loopback
+#   spellings of the sidecar's own base URL.
+#
+# Neither half is sufficient, and each covers the other's blind spot. The
+# marker alone would adopt any command someone pasted one of ours into and then
+# built on — the marker is a plain string in a file anyone may copy. The
+# host/path alone would adopt a stranger's curl that happens to POST to our
+# endpoint, which is precisely the shape #169 already refuses to even print
+# back, because a hand-written call to a local HTTP API is the one most likely
+# to be carrying a credential in the same argv. Both together is the owner's
+# rule. A hook failing either is somebody else's: it is never rewritten, never
+# removed, never reordered, and nothing about it beyond this verdict is read.
+
+# Authorship verdicts. `FOREIGN` is the safe default and every uncertain case
+# resolves to it, because the cost of misfiling somebody else's hook as ours is
+# a destroyed hook and the cost of misfiling ours as theirs is a duplicate.
+AUTHORSHIP_CURRENT = "current"  # ours, and exactly what we would emit today
+AUTHORSHIP_STALE = "stale"  # ours, in a shape we no longer emit
+AUTHORSHIP_FOREIGN = "foreign"  # not ours; do not touch
+
+# The command shapes earlier releases minted, frozen as literals with a `{url}`
+# hole. They are deliberately NOT rebuilt from `_CURL_MAX_TIME` or from
+# `_curl_command_for_url`: what a past release wrote into a user's file is a
+# historical fact, and deriving it from today's constants would silently
+# rewrite that history the first time one of them changed — at which moment
+# every install of that era would stop being recognisable as ours and become
+# permanently un-repairable. New entries are appended here, never edited.
+#
+# This list is also the only way a pre-#170 install is recognisable at all:
+# those commands predate the marker, so the marker rule cannot reach them.
+# Exact string equality is what makes that safe. It is not a weaker test than
+# the marker — it is a stricter one, admitting only a command that is
+# character-for-character something this app generated, which is the same
+# standard `effective_hooks_service.authored_commands` already holds its own
+# output to.
+_LEGACY_COMMAND_FORMS: tuple[str, ...] = (
+    # Generation 1 (up to #172) — one form for all 22 events, stdout always
+    # discarded. A `PreToolUse` hook in this shape is the repair case above.
+    (
+        "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' "
+        "--data-binary @- {url} >/dev/null 2>&1 || true"
+    ),
+    # Generation 2 (#172, before this ticket) — the builder split in two and
+    # the undiscarded `PreToolUse` form gained `--fail`. Still no marker.
+    (
+        "curl -s --fail --max-time 5 -X POST -H 'Content-Type: application/json' "
+        "--data-binary @- {url} 2>/dev/null || true"
+    ),
+)
+
+
+def _targets_pattern(base: str, target_path: str) -> re.Pattern[str]:
+    """Regex matching this app's endpoint at *base*, with the same trailing
+    boundary `_endpoint_pattern` uses so `/stop` cannot match `/stop-foo`."""
+    return re.compile(re.escape(f"{base}{target_path}") + r"(?![\w-])")
+
+
+def hook_authorship(
+    hook: Mapping[str, Any], event: str, base_url: str | None = None
+) -> str:
+    """Whether *hook*, filed under *event*, is ours — and if so, still current.
+
+    The one gate in front of every rewrite. See the comment above for why it
+    takes two agreeing facts and why it fails closed; the short version is that
+    a wrong `FOREIGN` costs a duplicate hook and a wrong `CURRENT`/`STALE`
+    costs somebody else's work.
+
+    A command wired at a different loopback spelling of our own base URL
+    (`127.0.0.1` where the sidecar says `localhost`) is `CURRENT`, not `STALE`
+    — it works, and `_verdict_for_hook` already treats the two as equivalent,
+    so calling it stale here would make every such install repair itself
+    forever and never reach a fixed point.
+    """
+    spec = _EVENTS_BY_NAME.get(event)
+    if spec is None:
+        return AUTHORSHIP_FOREIGN
+
+    base = (base_url or sidecar_base_url()).rstrip("/")
+    equivalents = _equivalent_base_urls(base)
+
+    command = hook.get("command")
+    if isinstance(command, str):
+        stripped = command.strip()
+        if not any(
+            _targets_pattern(alias, spec.path).search(stripped) for alias in equivalents
+        ):
+            return AUTHORSHIP_FOREIGN
+        current = {_curl_command(alias, spec).strip() for alias in equivalents}
+        if _MARKER_HEADER in stripped:
+            return AUTHORSHIP_CURRENT if stripped in current else AUTHORSHIP_STALE
+        legacy = {
+            form.format(url=f"{alias}{spec.path}")
+            for alias in equivalents
+            for form in _LEGACY_COMMAND_FORMS
+        }
+        return AUTHORSHIP_STALE if stripped in legacy else AUTHORSHIP_FOREIGN
+
+    # The legacy `"http"` hook type, which has no command to carry a marker and
+    # no argv to hide anything in. Exact equality against the endpoint URL is
+    # the whole test: this shape is either the URL we would have written or it
+    # is not ours. It is always stale — the app stopped emitting it precisely
+    # because it raises ECONNREFUSED in every session when the app is offline.
+    url = hook.get("url")
+    if isinstance(url, str) and url.strip() in {
+        f"{alias}{spec.path}" for alias in equivalents
+    }:
+        return AUTHORSHIP_STALE
+    return AUTHORSHIP_FOREIGN
+
+
+# ─── write-through install, part 2: planning the merge ───────────────────────
+
+# Per-event outcomes. Reported for all 22 whether or not anything changed, so
+# the dry run is a complete account of the file rather than a diff the reader
+# has to invert.
+ACTION_OK = "ok"  # already present and current; nothing to do
+ACTION_REPAIR = "repair"  # an ours-hook rewritten in place
+ACTION_ADD = "add"  # no ours-hook under a "*" matcher; one appended
+ACTION_CONFLICT = "conflict"  # a shape we will not merge into; refuses the file
+
+
+def _desired_entry(block: dict, event: str) -> dict:
+    """The `{matcher, hooks[]}` entry `build_hook_settings` mints for *event*.
+
+    Taken from that builder's own output rather than assembled here: it is the
+    single source of the 22 commands, and a second place that knows what a
+    correct entry looks like is a second place to forget to update.
+    """
+    return copy.deepcopy(block["hooks"][event][0])
+
+
+def _plan_event(
+    entries: list[Any], spec: HookEvent, desired: dict, base: str
+) -> dict[str, Any]:
+    """Merge our hook for *spec* into *entries*, mutating it in place.
+
+    *entries* is the list a settings.json has under one event name. Third-party
+    hooks in it are counted and then left exactly where they are — same object,
+    same index, same enclosing entry — because the list is rewritten by
+    `json.dumps` of this very structure and anything not reassigned survives
+    byte for byte.
+    """
+    desired_hook = desired["hooks"][0]
+    repaired = 0
+    left_narrow = 0
+    left_foreign = 0
+    left_malformed = 0
+    covered = False
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        wrapped = entry.get("hooks")
+        if not isinstance(wrapped, list):
+            # Either a `{matcher}` object with no hooks list, or a bare hook
+            # dict sitting flat in the event array — the shape
+            # `classify_settings_hooks` calls "malformed". If it is ours we say
+            # so and still do not touch it: deleting is the one operation that
+            # cannot be undone by running the installer again.
+            if hook_authorship(entry, spec.event, base) != AUTHORSHIP_FOREIGN:
+                left_malformed += 1
+            continue
+        matcher = entry.get("matcher")
+        for index, hook in enumerate(wrapped):
+            if not isinstance(hook, dict):
+                continue
+            verdict = hook_authorship(hook, spec.event, base)
+            if verdict == AUTHORSHIP_FOREIGN:
+                left_foreign += 1
+                continue
+            if matcher != "*":
+                # Ours by authorship, but the matcher is an edit we never make.
+                # It is also a property of the *entry*, shared with any sibling
+                # hook in it, so narrowing or widening it here could change the
+                # behaviour of a third-party hook standing beside ours. Left
+                # alone, and it does not count as coverage — the `*` entry
+                # appended below is what makes the event verify.
+                left_narrow += 1
+                continue
+            covered = True
+            if verdict == AUTHORSHIP_STALE:
+                wrapped[index] = copy.deepcopy(desired_hook)
+                repaired += 1
+
+    if not covered:
+        entries.append(copy.deepcopy(desired))
+
+    if repaired:
+        action = ACTION_REPAIR
+    elif not covered:
+        action = ACTION_ADD
+    else:
+        action = ACTION_OK
+    return {
+        "event": spec.event,
+        "action": action,
+        "repaired": repaired,
+        "left_narrow": left_narrow,
+        "left_foreign": left_foreign,
+        "left_malformed": left_malformed,
+        "detail": None,
+    }
+
+
+def _conflict(event: str, detail: str) -> dict[str, Any]:
+    return {
+        "event": event,
+        "action": ACTION_CONFLICT,
+        "repaired": 0,
+        "left_narrow": 0,
+        "left_foreign": 0,
+        "left_malformed": 0,
+        "detail": detail,
+    }
+
+
+def _plan_settings_body(parsed: object, base: str) -> tuple[object, list[dict], str]:
+    """(new body, per-event plan, refusal) for an already-parsed settings body.
+
+    Pure: no filesystem, no clock, same testability contract as
+    `classify_settings_hooks` above it. A non-empty refusal means nothing may
+    be written and the returned body must be discarded.
+
+    Refuses rather than reshapes. A `hooks` value that is not an object, or an
+    event whose value is not an array, is a structure somebody built on purpose
+    or a file that is not a settings.json at all; either way replacing it is a
+    guess, and the one thing this module may never do with a user's file is
+    guess. A file whose whole body is a JSON `null`, a list or a string is the
+    same refusal for the same reason — the caller passes `{}` for a file that
+    does not exist yet, which is the only case where starting from nothing is
+    starting from something the user did not write.
+    """
+    if not isinstance(parsed, dict):
+        return None, [], "settings.json does not contain a JSON object"
+
+    body = copy.deepcopy(parsed)
+    hooks_block = body.get("hooks")
+    if hooks_block is None:
+        hooks_block = {}
+        body["hooks"] = hooks_block
+    elif not isinstance(hooks_block, dict):
+        return None, [], 'the top-level "hooks" key must be an object'
+
+    offered = build_hook_settings(base)
+    plan: list[dict[str, Any]] = []
+    conflicts: list[str] = []
+    for spec in HOOK_EVENTS:
+        entries = hooks_block.get(spec.event)
+        if entries is None:
+            entries = []
+            hooks_block[spec.event] = entries
+        elif not isinstance(entries, list):
+            conflicts.append(spec.event)
+            plan.append(_conflict(spec.event, f'"{spec.event}" is not an array'))
+            continue
+        plan.append(
+            _plan_event(entries, spec, _desired_entry(offered, spec.event), base)
+        )
+
+    if conflicts:
+        return (
+            None,
+            plan,
+            "refusing to merge: "
+            + ", ".join(f'"{name}" is not an array' for name in conflicts),
+        )
+    return body, plan, ""
+
+
+def _plan_changes_file(plan: Sequence[Mapping[str, Any]]) -> bool:
+    return any(entry["action"] in (ACTION_ADD, ACTION_REPAIR) for entry in plan)
+
+
+# ─── write-through install, part 3: touching the disk ────────────────────────
+
+# Suffix for the pre-write copy. Timestamped rather than fixed so a second
+# repair can never overwrite the evidence the first one preserved, and left
+# beside the target rather than in app-data so it is where a user looking for
+# it would look.
+_BACKUP_SUFFIX = ".codenest-backup"
+
+
+def _resolve_write_target(config_home: str) -> tuple[Path | None, str | None]:
+    """(path to write, refusal). Exactly one of the two is None.
+
+    Applies the same containment policy as every other path-taking endpoint in
+    the sidecar (`project_scanner_service._require_scan_scope`, reached here
+    the way `effective_hooks_service._in_scan_scope` reaches it): these routes
+    are unauthenticated localhost routes, so a caller-supplied path has to stay
+    inside the home tree and out of the directories that hold credentials. That
+    mattered for a reader; for a writer it is the difference between a scan and
+    an overwrite.
+
+    A symlinked settings.json is resolved and the check applied to the *real*
+    path, which is then what gets written — so a config file a user keeps in a
+    dotfiles repo and links into place survives the install as a link, and one
+    linked somewhere the policy does not allow is refused instead of followed.
+    """
+    raw = Path(settings_json_path(config_home))
+    if not raw.is_absolute():
+        return None, f"resolved path is not absolute: {raw}"
+    try:
+        target = raw.resolve(strict=False)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return None, f"cannot resolve {raw}: {exc}"
+
+    try:
+        project_scanner_service._require_scan_scope(target.parent)
+    except (ValueError, OSError, RuntimeError) as exc:
+        return None, str(exc)
+
+    if target.is_dir():
+        return None, f"{target} is a directory, not a file"
+
+    parent = target.parent
+    if not parent.is_dir():
+        # Deliberately not created. The directory name came from the caller,
+        # and a config home that does not exist is far more likely to be a
+        # typo or an unconfigured provider than a place the user wants this
+        # app to start making directories.
+        return None, f"{parent} does not exist; create the config home first"
+    if not os.access(parent, os.W_OK | os.X_OK):
+        return None, f"{parent} is not writable"
+    if target.exists() and not os.access(target, os.W_OK):
+        return None, f"{target} is not writable"
+    return target, None
+
+
+def _atomic_write(target: Path, data: bytes, mode: int | None) -> None:
+    """Write *data* to *target* so that no failure can truncate it.
+
+    A settings.json holds every hook every tool the user has ever installed
+    ever wrote. A plain `open(..., "w")` empties it before the first byte goes
+    in, so a crash, a full disk or a kill between those two moments loses all
+    of it. This writes a temp file in the *same directory* — same filesystem,
+    which is what makes the following step a rename and not a copy — fsyncs it,
+    then `os.replace`s it over the target. A reader at any instant sees either
+    the whole old file or the whole new one.
+
+    The target's permission bits are carried over when it already exists; a new
+    file keeps `mkstemp`'s 0600, which is the right default for a file that
+    routinely holds an API key.
+    """
+    handle, temp_name = tempfile.mkstemp(
+        dir=str(target.parent), prefix=f".{target.name}.", suffix=".codenest-tmp"
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(handle, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if mode is not None:
+            os.chmod(temp_path, mode)
+        os.replace(temp_path, target)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+    # The rename itself is only durable once the directory entry is. Best
+    # effort: a filesystem that will not give us a directory handle has still
+    # had the atomic replace, which is the property that matters here.
+    try:
+        dir_handle = os.open(str(target.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_handle)
+        finally:
+            os.close(dir_handle)
+    except OSError:
+        pass
+
+
+def _write_backup(target: Path, previous: bytes, mode: int | None) -> Path:
+    """Copy the pre-write content beside *target* and return where it went.
+
+    Written through `_atomic_write` as well: a half-written backup is worse
+    than none, because it looks like a restore point and is not one.
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    candidate = target.with_name(f"{target.name}{_BACKUP_SUFFIX}-{stamp}")
+    suffix = 1
+    while candidate.exists():
+        candidate = target.with_name(f"{target.name}{_BACKUP_SUFFIX}-{stamp}-{suffix}")
+        suffix += 1
+    _atomic_write(candidate, previous, mode)
+    return candidate
+
+
+def _install_one(config_home: str, base: str, apply: bool) -> dict[str, Any]:
+    """Plan (and optionally perform) the merge for one config home.
+
+    Never raises on the state of a user's files, for the same reason
+    `verify_settings_files` does not: a missing, unreadable, oversized or
+    unparseable settings.json is a real situation the UI has to explain, not a
+    request the client got wrong. Each becomes `status: "refused"` with the
+    reason attached.
+    """
+    result: dict[str, Any] = {
+        "config_home": config_home,
+        "settings_path": settings_json_path(config_home),
+        "status": "refused",
+        "refusal": None,
+        "changed": False,
+        "created_file": False,
+        "backup_path": None,
+        "events": [],
+    }
+
+    target, refusal = _resolve_write_target(config_home)
+    if target is None:
+        result["refusal"] = refusal
+        return result
+    result["settings_path"] = str(target)
+
+    # The same reader the verify path uses, so the size ceiling, the UTF-8
+    # rule and the JSON rule are one implementation and cannot diverge between
+    # what the app is willing to read and what it is willing to rewrite.
+    read_status, parsed, detail = _read_settings(target)
+    if read_status not in ("ok", "missing_file"):
+        result["refusal"] = detail or f"settings.json is {read_status}"
+        return result
+    created = read_status == "missing_file"
+
+    body, plan, plan_refusal = _plan_settings_body({} if created else parsed, base)
+    result["events"] = plan
+    if plan_refusal:
+        result["refusal"] = plan_refusal
+        return result
+
+    changed = _plan_changes_file(plan)
+    result["changed"] = changed
+    result["created_file"] = created
+
+    if not apply:
+        result["status"] = "planned" if changed else "unchanged"
+        return result
+    if not changed:
+        result["status"] = "unchanged"
+        return result
+
+    try:
+        if created:
+            mode: int | None = None
+            previous: bytes | None = None
+        else:
+            mode = stat.S_IMODE(target.stat().st_mode)
+            previous = target.read_bytes()
+        rendered = (json.dumps(body, indent=2, ensure_ascii=False) + "\n").encode(
+            "utf-8"
+        )
+        if previous is not None:
+            result["backup_path"] = str(_write_backup(target, previous, mode))
+        _atomic_write(target, rendered, mode)
+    except (OSError, ValueError) as exc:
+        # The backup, if one was taken, is already on disk and named in the
+        # result: a failure here leaves the target either untouched (the write
+        # never began) or whole (the rename never half-happened).
+        result["status"] = "refused"
+        result["refusal"] = f"write failed: {exc}"
+        return result
+
+    result["status"] = "applied"
+    return result
+
+
+def _install_sync(
+    config_homes: Sequence[str], base: str, apply: bool
+) -> dict[str, Any]:
+    results = [_install_one(config_home, base, apply) for config_home in config_homes]
+    if not results:
+        overall = "unchanged"
+    elif any(r["status"] == "refused" for r in results):
+        overall = "refused"
+    elif any(r["status"] == "applied" for r in results):
+        overall = "applied"
+    elif any(r["status"] == "planned" for r in results):
+        overall = "planned"
+    else:
+        overall = "unchanged"
+    return {
+        "base_url": base,
+        "dry_run": not apply,
+        "overall": overall,
+        "results": results,
+    }
+
+
+async def plan_settings_files(
+    config_homes: Sequence[str], base_url: str | None = None
+) -> dict[str, Any]:
+    """What `install_settings_files` would change, with the write removed.
+
+    A separate entry point rather than a flag on the writer, and the route
+    layer keeps them separate too: "this call cannot write" is worth making
+    true by construction rather than by the value of an argument that a caller,
+    a default, or a serialisation bug could get wrong.
+    """
+    return await asyncio.to_thread(
+        _install_sync,
+        list(config_homes),
+        (base_url or sidecar_base_url()).rstrip("/"),
+        False,
+    )
+
+
+async def install_settings_files(
+    config_homes: Sequence[str], base_url: str | None = None
+) -> dict[str, Any]:
+    """Merge this module's hook block into each config home's settings.json.
+
+    Off the event loop for the same reason the verify path is (one
+    `asyncio.to_thread` hop for the whole request): these are blocking reads
+    and writes of files that may be large, and the sidecar is one process
+    serving every other hook arriving at the same moment.
+
+    Idempotent by construction, not by convention: a second call finds every
+    event covered by a `"*"` entry whose command is exactly what
+    `build_hook_settings` emits, plans no change, and so never reaches the
+    write at all — which is also why it takes no second backup.
+    """
+    return await asyncio.to_thread(
+        _install_sync,
+        list(config_homes),
+        (base_url or sidecar_base_url()).rstrip("/"),
+        True,
     )
 
 
