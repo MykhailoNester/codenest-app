@@ -44,6 +44,7 @@ import {
 import { ProvidersTab } from "../components/settings/providers-tab";
 import { WorkflowLabelsTab } from "../components/settings/workflow-labels-tab";
 import { FeaturesTab } from "../components/settings/features-tab";
+import { TelemetryTab } from "../components/settings/telemetry-tab";
 
 // Stable empty sentinels. `lookups?.foo ?? []` produces a fresh array
 // reference on every render before lookups resolves, which would make
@@ -207,6 +208,7 @@ const VALID_SECTIONS = new Set<SettingsSectionId>([
   "workflow-labels",
   "terminal",
   "notifications",
+  "telemetry",
   "general",
 ]);
 
@@ -256,6 +258,7 @@ export function SettingsPage(): ReactElement {
                 {activeSection === "workflow-labels" && <WorkflowLabelsTab />}
                 {activeSection === "notifications" && <NotificationsTab />}
                 {activeSection === "terminal" && <TerminalTab />}
+                {activeSection === "telemetry" && <TelemetryTab />}
               </>
             </SectionErrorBoundary>
           </div>
