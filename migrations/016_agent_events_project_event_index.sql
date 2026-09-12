@@ -1,0 +1,47 @@
+-- idx_agent_events_project_event (epic #153 / #169): the "what happened on
+-- this event, in this repo" read, given an index instead of a table scan.
+--
+-- Why `agent_events` has no index that answers this today
+-- ------------------------------------------------------
+-- The table ships with exactly two indexes, and both were built for a
+-- different question. `idx_agent_events_session(session_id, id DESC)` answers
+-- "this session's timeline", which is the shape the session detail view and
+-- the transcript reconciler want. `idx_agent_events_created(created_at DESC)`
+-- answers "the newest events anywhere", which is the shape the global feed
+-- wants. Neither has `project_id` or `event_type` anywhere in it, so a query
+-- filtered on a repo and a hook event — the read the effective-hooks work
+-- exists to serve — degrades to a full scan of the largest table in the
+-- database. `agent_events` is the table that actually grows: every hook on
+-- every event of every session lands here, which is why
+-- `event_retention_service` was written for this table and no other.
+--
+-- The column order is the query, not a guess
+-- -----------------------------------------
+-- `(project_id, event_type, created_at DESC)` is a covering prefix chain for
+-- the three filters that arrive together: a repo is chosen, an event name is
+-- chosen, and the answer is wanted newest-first. SQLite can seek straight to
+-- the `(project_id, event_type)` group and then walk `created_at` in stored
+-- order, so the ORDER BY costs nothing extra and a LIMIT stops the walk early.
+-- Putting `created_at` first instead would force a scan-and-sort of every
+-- project's rows; putting `event_type` first would leave the per-repo filter
+-- to a post-hoc test on each candidate row. The leftmost prefix `project_id`
+-- alone also serves "everything this repo has ever emitted", so no separate
+-- single-column index is warranted.
+--
+-- `project_id` is nullable and that is fine
+-- ----------------------------------------
+-- A row whose session never resolved to an imported repo carries NULL here.
+-- SQLite indexes NULLs like any other value, so those rows group together at
+-- one end of the index rather than being excluded from it — which is what
+-- makes "unattributed events, by type" as cheap as the attributed case. No
+-- partial index (`WHERE project_id IS NOT NULL`), deliberately: the
+-- unattributed bucket is the one the attribution work is trying to shrink and
+-- therefore the one that must stay queryable.
+--
+-- Pure index addition: no table is created, altered or rebuilt, no row is
+-- written, and nothing that reads `agent_events` today changes meaning. A
+-- freshly migrated database ships this index empty alongside the empty table,
+-- so the clean-slate invariant holds.
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_project_event
+    ON agent_events(project_id, event_type, created_at DESC);
