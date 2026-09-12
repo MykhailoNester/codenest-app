@@ -17,6 +17,7 @@ import {
   GROUP_LABELS,
   GROUP_ORDER,
   projectRoute,
+  resultMeta,
   routeForResult,
   typeColor,
   typeIcon,
@@ -360,11 +361,11 @@ function PaletteInner({ onClose }: { onClose: () => void }): ReactElement {
             padding: "1px 6px",
             borderRadius: 3,
             fontFamily: "var(--font-mono)",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
+            letterSpacing: "0.04em",
+            whiteSpace: "nowrap",
           }}
         >
-          {result.type}
+          {resultMeta(result)}
         </span>
       </button>
     );

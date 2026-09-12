@@ -3051,16 +3051,36 @@ export function useSystemInfo(): UseQueryResult<SystemInfo, SidecarError> {
 
 // ─── Search ──────────────────────────────────────────────────────────────────
 
-export type SearchResultType = "task" | "project" | "doc" | "inbox" | "event";
+export type SearchResultType =
+  | "task"
+  | "project"
+  | "doc"
+  | "inbox"
+  | "event"
+  | "session"
+  | "attention";
+
+/** Which UI surface owns a hit. `lane` is the ingest lane it is evidence from
+ *  (A hooks / B OTLP / C transcript), null when the hit is not lane data. */
+export type SearchSurface =
+  | "tasks"
+  | "project-context"
+  | "docs"
+  | "inbox"
+  | "session-inspector"
+  | "attention";
 
 export interface SearchResult {
   type: SearchResultType;
-  id: number;
+  /** Numeric row id, except `session` which is keyed by its text session id. */
+  id: number | string;
   title: string;
   snippet: string;
   score: number;
   url?: string;
   session_id?: string;
+  lane?: "A" | "B" | "C" | null;
+  surface?: SearchSurface;
 }
 
 export interface SearchResponse {
@@ -3075,6 +3095,8 @@ const DEFAULT_SEARCH_TYPES: SearchResultType[] = [
   "doc",
   "inbox",
   "event",
+  "session",
+  "attention",
 ];
 
 export async function searchAll(

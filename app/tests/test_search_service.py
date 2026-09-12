@@ -151,3 +151,98 @@ async def test_result_has_url(db):
     results = await search_service.search(db, q="url test", types=["task"], limit=10)
     assert results
     assert results[0]["url"].startswith("/tasks/")
+
+
+async def _seed_session(db: aiosqlite.Connection, session_id: str) -> None:
+    await db.execute(
+        "INSERT INTO agent_sessions"
+        "(session_id, profile, cwd, model, source_app, git_branch, title) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (
+            session_id,
+            "default",
+            "/Users/test/work/widget",
+            "claude-opus-4",
+            "vscode",
+            "feature/183-cross-lane-search",
+            "Widget refactor",
+        ),
+    )
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_session_found_by_cwd_model_and_branch(db):
+    await _seed_session(db, "sess-abc")
+    for term in ("widget", "opus", "cross-lane", "vscode", "sess-abc"):
+        results = await search_service.search(db, q=term, types=["session"], limit=10)
+        assert any(r["id"] == "sess-abc" for r in results), term
+
+
+@pytest.mark.asyncio
+async def test_attention_item_searchable(db):
+    await db.execute(
+        "INSERT INTO attention_items(kind, severity, dedup_key, title, detail) "
+        "VALUES (?,?,?,?,?)",
+        (
+            "session_stalled",
+            "stalled",
+            "session_stalled:sess-abc",
+            "Session stalled mid-tool",
+            "idle for 40 minutes",
+        ),
+    )
+    await db.commit()
+    results = await search_service.search(
+        db, q="stalled", types=["attention"], limit=10
+    )
+    assert results
+    assert results[0]["type"] == "attention"
+    assert results[0]["url"] == "/attention"
+
+
+@pytest.mark.asyncio
+async def test_lane_and_surface_are_attributed_not_forced(db):
+    pid = await _project_id(db)
+    await db.execute(
+        "INSERT INTO tasks(title, description, project_id) VALUES (?,?,?)",
+        ("lanecheck task", "a task is not lane data", pid),
+    )
+    await _seed_session(db, "sess-lane")
+    await db.execute(
+        "INSERT INTO agent_events(session_id, event_type, summary, payload_json) "
+        "VALUES (?,?,?,?)",
+        ("sess-lane", "PreToolUse", "lanecheck tool call", "{}"),
+    )
+    await db.commit()
+    results = await search_service.search(
+        db, q="lanecheck", types=["task", "event"], limit=10
+    )
+    by_type = {r["type"]: r for r in results}
+    assert by_type["event"]["lane"] == "A"
+    assert by_type["event"]["surface"] == "session-inspector"
+    assert by_type["task"]["lane"] is None
+    assert by_type["task"]["surface"] == "tasks"
+
+
+@pytest.mark.asyncio
+async def test_project_hit_links_to_context_map(db):
+    results = await search_service.search(
+        db, q="Test Project", types=["project"], limit=10
+    )
+    assert results[0]["url"].endswith("/context")
+
+
+@pytest.mark.asyncio
+async def test_like_wildcards_are_literal(db):
+    await _seed_session(db, "sess-plain")
+    results = await search_service.search(db, q="%wid%", types=["session"], limit=10)
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_empty_database_returns_no_rows_for_new_types(db):
+    results = await search_service.search(
+        db, q="anything", types=["session", "attention"], limit=10
+    )
+    assert results == []

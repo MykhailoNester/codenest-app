@@ -83,3 +83,11 @@ def test_short_query_returns_empty_results(test_app):
     resp = test_app.get("/api/v1/search?q=x")
     assert resp.status_code == 200
     assert resp.json()["results"] == []
+
+
+def test_new_types_accepted_and_results_carry_provenance(test_app):
+    resp = test_app.get("/api/v1/search?q=router&types=task,session,attention")
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert results
+    assert all("lane" in r and "surface" in r for r in results)
