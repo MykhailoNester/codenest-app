@@ -52,13 +52,27 @@ def _pytest_tmp_is_not_ephemeral(tmp_path_factory, monkeypatch):
 def _allow_temp_scan_roots(tmp_path_factory, monkeypatch):
     """Project scanning/import is home-scoped in prod (see
     project_scanner_service._allowed_scan_roots). Tests build project dirs under
-    pytest's temp tree, so widen the allowlist to include it for the test run."""
+    pytest's temp tree, so swap the allowlist for it during the test run.
+
+    The temp tree REPLACES the real roots rather than being added alongside
+    them. An earlier version returned `(home, base)`, which left the developer's
+    actual home directory inside the allowlist for every test in the suite —
+    so the containment guard that exists to stop a path-taking endpoint
+    wandering out of scope would not have stopped a test from reading or
+    writing real files under `~`. #179's verification called this out after
+    checking, separately, that the ticket had not in fact touched the real
+    `~/.claude/settings.json`: nothing but test discipline had been preventing
+    it. Dropping `home` leaves all 1286 tests green, so nothing ever depended
+    on it — it was reach, not requirement.
+
+    A test that genuinely needs a home-scoped root should set one explicitly
+    rather than have the whole suite run with the real one live.
+    """
     base = pathlib.Path(tmp_path_factory.getbasetemp()).resolve()
-    home = pathlib.Path.home().resolve()
     monkeypatch.setattr(
         project_scanner_service,
         "_allowed_scan_roots",
-        lambda: (home, base),
+        lambda: (base,),
     )
 
 
