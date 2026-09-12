@@ -4854,6 +4854,227 @@ export function fetchHookSelfTestReceipt(
   );
 }
 
+// ─── Effective hooks: what is on each event, from all eight contributors ────
+//
+// Backs the Hooks page (#171). The sidecar half is
+// `app/services/effective_hooks_service.py` and `app/models/effective_hooks.py`,
+// and the one fact both halves are built around is that hook blocks **merge**:
+// a block found in one place never stands in for a block found in another, and
+// at event time every hook collected from every source runs. So `total` below
+// is a sum and nothing is ever deducted from it. The settings resolution order
+// that decides a *scalar* setting has no bearing on any number here.
+
+/** One of the eight places a hook on an event can come from. */
+export interface EffectiveHookSource {
+  slug: string;
+  label: string;
+  where: string;
+  /**
+   * False for exactly one source — a settings file named on the command line,
+   * whose path the sidecar never sees. Its `count` is then meaningless and
+   * must never be rendered as a number: it is unknown, not zero.
+   */
+  observable: boolean;
+  note: string;
+}
+
+/** One hook, as one file declares it, on one event. */
+export interface EffectiveHookContribution {
+  event: string;
+  source: string;
+  /** The file that declares it. */
+  origin: string;
+  matcher: string | null;
+  hook_type: string;
+  /** Program name only for anything this app did not author. */
+  executable: string;
+  /** Populated only when `codenest_authored` — otherwise null by design. */
+  command: string | null;
+  redacted: boolean;
+  codenest_authored: boolean;
+  /**
+   * The ceiling the config file declares, in seconds. A configured value, NOT
+   * a measurement — nothing in this response times anything.
+   */
+  timeout_seconds: number | null;
+}
+
+/** What one source contributes to one event. Emitted for all eight, empty ones included. */
+export interface EffectiveHookSourceBucket {
+  source: string;
+  label: string;
+  observable: boolean;
+  count: number;
+  contributions: EffectiveHookContribution[];
+}
+
+/** One hook event and everything found on it. */
+export interface EffectiveHookEvent {
+  event: string;
+  tier: string;
+  ingest_path: string;
+  /** Sum across all eight buckets: how many programs sit on this event. */
+  total: number;
+  by_source: EffectiveHookSourceBucket[];
+}
+
+/** One file the scan tried to read, and how that went. */
+export interface EffectiveHookScannedFile {
+  source: string;
+  path: string;
+  status:
+    | "ok"
+    | "missing_file"
+    | "invalid_json"
+    | "unreadable"
+    | "out_of_scope"
+    | "truncated";
+  detail: string | null;
+}
+
+export interface EffectiveHooksReport {
+  base_url: string;
+  sources: EffectiveHookSource[];
+  scanned: EffectiveHookScannedFile[];
+  events: EffectiveHookEvent[];
+}
+
+export interface EffectiveHooksRequest {
+  config_homes: string[];
+  project_roots: string[];
+}
+
+/**
+ * The effective-hooks read. POST because the request carries two lists of
+ * filesystem paths, but it is a `useQuery` because nothing about it writes —
+ * the verb is a serialisation choice the sidecar's route docstring explains.
+ *
+ * The caller is expected to pass exactly one config home and at most one
+ * project root: that pair is one session's real hook set, and unioning several
+ * config homes would inflate every count on the page with hooks no single
+ * session ever runs.
+ */
+export function useEffectiveHooks(
+  body: EffectiveHooksRequest,
+  enabled = true,
+): UseQueryResult<EffectiveHooksReport, SidecarError> {
+  return useQuery<EffectiveHooksReport, SidecarError>({
+    queryKey: [
+      "workspace",
+      "hooks",
+      "effective",
+      body.config_homes,
+      body.project_roots,
+    ],
+    queryFn: () =>
+      fetchSidecar<EffectiveHooksReport>("/api/v1/workspace/hooks/effective", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+// ─── Write-through install (#170): plan first, then apply ───────────────────
+
+/** What the installer did, or would do, to one event's hook array. */
+export interface HookInstallEventPlan {
+  event: string;
+  action: "ok" | "add" | "repair" | "conflict";
+  /** Hooks this app itself wrote in a shape it no longer emits, rewritten in place. */
+  repaired: number;
+  left_narrow: number;
+  left_foreign: number;
+  left_malformed: number;
+  detail: string | null;
+}
+
+export interface HookInstallResult {
+  config_home: string;
+  settings_path: string;
+  status: "applied" | "planned" | "unchanged" | "refused";
+  refusal: string | null;
+  changed: boolean;
+  created_file: boolean;
+  /** Where the previous content was copied before the write. Null on a dry run. */
+  backup_path: string | null;
+  events: HookInstallEventPlan[];
+}
+
+export interface HookInstallReport {
+  base_url: string;
+  dry_run: boolean;
+  overall: "applied" | "planned" | "unchanged" | "refused";
+  results: HookInstallResult[];
+}
+
+/**
+ * The dry run. A separate route from the writer rather than a flag on it, so
+ * "this call cannot write" is a property of the URL — see the sidecar route's
+ * own docstring. Every install affordance must go through this first.
+ *
+ * A `useQuery` rather than a mutation, unlike `useVerifyHooks`: this call
+ * structurally cannot write, and the page needs its answer *before* the user
+ * asks for anything. A settings.json carrying a pre-#172 `PreToolUse` command
+ * grades "ok" on verify while silently discarding every permission decision,
+ * and the plan is the only read that can say so — a user who has to press a
+ * button to be told is a user who is never told.
+ */
+export function useHookInstallPlan(
+  configHomes: string[],
+  enabled = true,
+): UseQueryResult<HookInstallReport, SidecarError> {
+  return useQuery<HookInstallReport, SidecarError>({
+    queryKey: ["workspace", "hooks", "install-plan", configHomes],
+    queryFn: () =>
+      fetchSidecar<HookInstallReport>("/api/v1/workspace/hooks/install/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config_homes: configHomes }),
+      }),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+/**
+ * The write. Touches the one file every hook every tool ever installed lives
+ * in, so the UI calls it only after the user has seen the plan and confirmed.
+ * Invalidates the effective read, which is what the page shows afterwards.
+ */
+export function useInstallHooks(): UseMutationResult<
+  HookInstallReport,
+  SidecarError,
+  { config_homes: string[] }
+> {
+  const qc = useQueryClient();
+  return useMutation<
+    HookInstallReport,
+    SidecarError,
+    { config_homes: string[] }
+  >({
+    mutationFn: (body) =>
+      fetchSidecar<HookInstallReport>("/api/v1/workspace/hooks/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["workspace", "hooks", "effective"],
+      });
+      void qc.invalidateQueries({
+        queryKey: ["workspace", "hooks", "install-plan"],
+      });
+      void qc.invalidateQueries({
+        queryKey: ["workspace", "hooks", "status"],
+      });
+    },
+  });
+}
+
 export function useImportPreview(): UseMutationResult<
   ImportPreviewResult,
   SidecarError,
