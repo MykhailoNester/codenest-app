@@ -7,6 +7,7 @@ import {
   useCallback,
   type ReactElement,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import type { AgentSession, AgentEvent, ProfileOut } from "../../lib/api";
 import { profileColor } from "../../lib/profile-utils";
 import { Icon } from "../icon";
@@ -73,6 +74,7 @@ function ReplayPanelInner({
   const [scrubPos, setScrubPos] = useState(1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [modalEvent, setModalEvent] = useState<AgentEvent | null>(null);
+  const navigate = useNavigate();
   const trackRef = useRef<HTMLDivElement>(null);
   const color = profileColor(profiles, session.profile);
 
@@ -176,6 +178,15 @@ function ReplayPanelInner({
         title="Session replay"
         subtitle={`${session.profile} · ${projectLabel}`}
         onBack={onClose}
+        actions={
+          <button
+            className="d3-btn d3-btn--ghost"
+            type="button"
+            onClick={() => navigate(`/sessions/${session.session_id}`)}
+          >
+            Inspect lanes
+          </button>
+        }
       />
 
       {/* Scrubber */}

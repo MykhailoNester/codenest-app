@@ -52,6 +52,7 @@ import { InProgressPage } from "./pages/in-progress";
 // TODO: remove InboxPage and its import once workflow_items is merged into tasks.
 import { TeamPage } from "./pages/team";
 import { AgentDetailPage } from "./pages/agent-detail";
+import { SessionInspectorPage } from "./pages/session-inspector";
 import { DocsPage } from "./pages/docs";
 import { TerminalPage } from "./pages/terminal";
 import { TerminalWindowRoot } from "./pages/terminal-window-root";
@@ -429,6 +430,10 @@ function AppInner(): ReactElement {
               <NotificationsPage />
             </FeatureRoute>
           }
+        />
+        <Route
+          path="/sessions/:sessionId"
+          element={<SessionInspectorPage />}
         />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/team/:name" element={<AgentDetailPage />} />
