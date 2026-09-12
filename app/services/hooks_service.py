@@ -46,14 +46,30 @@ Each entry is a ``HookEvent`` carrying four facts:
   about sixteen more events it would *like* to have. The extended tier is
   telemetry the app makes better use of when present, never a precondition.
 * ``discards_stdout`` — whether the generated command redirects curl's output
-  to ``/dev/null``. True for all 22 today and load-bearing for at least two of
+  to ``/dev/null``. True for 21 of the 22 and load-bearing for at least two of
   them: Claude Code feeds a ``SessionStart`` / ``UserPromptSubmit`` hook's
   stdout back into the session as context, so an unredirected response body
   would be injected into the user's conversation. It is a field rather than an
-  unconditional suffix because the epic's P5 context broker is precisely the
-  proposal to stop discarding it for the events that have a return channel —
-  a change that must be expressible per event, behind its own gate, rather
-  than as an edit to the one string every hook command is built from.
+  unconditional suffix because a hook that discards its stdout has no return
+  channel at all, and one event needs one.
+
+  ``PreToolUse`` is that event (#172). Its response body is how a hook answers
+  a permission prompt — ``hookSpecificOutput.permissionDecision`` — and the
+  protocol is bound to ``PreToolUse`` specifically, so pre-authorisation is
+  not expressible anywhere else in this registry. Everything else still
+  discards, including ``PermissionRequest``: it looks like the event that
+  ought to carry a decision and it does not.
+
+  A hook with a live return channel is a hook whose failure mode changed. On
+  every other event the worst a broken sidecar can do is print into
+  ``/dev/null``; on ``PreToolUse`` whatever curl prints is fed to Claude Code
+  as a decision, and FastAPI answers an unhandled exception with a JSON error
+  body. ``_curl_command_for_url`` therefore gives the undiscarded form
+  ``--fail`` (no output at all on an HTTP status ≥ 400, and a non-zero exit
+  the existing ``|| true`` swallows) and sends stderr to ``/dev/null`` rather
+  than leaving it on the terminal. A sidecar that is offline, slow or throwing
+  produces empty stdout, and the session proceeds exactly as if this app were
+  not installed.
 
 Self-test verification
 -----------------------
@@ -136,7 +152,9 @@ HOOK_EVENTS: tuple[HookEvent, ...] = (
     # ─── core: the six already in users' settings.json; paths are frozen ────
     HookEvent("SessionStart", "/api/v1/hooks/session-start", TIER_CORE, True),
     HookEvent("UserPromptSubmit", "/api/v1/hooks/user-prompt", TIER_CORE, True),
-    HookEvent("PreToolUse", "/api/v1/hooks/pre-tool", TIER_CORE, True),
+    # The one undiscarded command: its stdout is the pre-authorisation
+    # decision channel (#172). See `discards_stdout` in the module docstring.
+    HookEvent("PreToolUse", "/api/v1/hooks/pre-tool", TIER_CORE, False),
     HookEvent("PostToolUse", "/api/v1/hooks/post-tool", TIER_CORE, True),
     HookEvent("Stop", "/api/v1/hooks/stop", TIER_CORE, True),
     HookEvent("SessionEnd", "/api/v1/hooks/session-end", TIER_CORE, True),
@@ -216,14 +234,33 @@ def _curl_command_for_url(url: str, discard_stdout: bool = True) -> str:
 
     ``--max-time`` and the trailing ``|| true`` are not optional and are not
     parameters: every one of the 22 commands must carry both, or a stalled or
-    absent sidecar becomes a stalled or erroring Claude Code session. Only the
-    stdout redirect varies, per ``HookEvent.discards_stdout``.
+    absent sidecar becomes a stalled or erroring Claude Code session.
+
+    What varies is the stdout handling, per ``HookEvent.discards_stdout``, and
+    the undiscarded form is not simply "the same command without the
+    redirect". Its stdout is read by Claude Code, so the command has to
+    guarantee that only a *deliberate* sidecar answer can ever appear there:
+
+    * ``--fail`` — curl prints nothing at all on an HTTP status ≥ 400 and
+      exits non-zero, which ``|| true`` swallows. Without it a FastAPI 500's
+      JSON error body would be handed to Claude Code as a hook decision.
+    * ``2>/dev/null`` — stderr is still silenced. ``-s`` already keeps curl
+      quiet, but a transport failure must not paint the user's terminal
+      either, and the redirect costs nothing.
+
+    A connection refused, a timeout and a 500 all therefore produce the same
+    thing: no output, exit 0, session unaffected.
     """
-    redirect = " >/dev/null 2>&1" if discard_stdout else ""
+    if discard_stdout:
+        return (
+            f"curl -s --max-time {_CURL_MAX_TIME} -X POST "
+            "-H 'Content-Type: application/json' --data-binary @- "
+            f"{url} >/dev/null 2>&1 || true"
+        )
     return (
-        f"curl -s --max-time {_CURL_MAX_TIME} -X POST "
+        f"curl -s --fail --max-time {_CURL_MAX_TIME} -X POST "
         "-H 'Content-Type: application/json' --data-binary @- "
-        f"{url}{redirect} || true"
+        f"{url} 2>/dev/null || true"
     )
 
 
@@ -234,7 +271,9 @@ def _curl_command(base: str, spec: HookEvent) -> str:
     on stdin, so the sidecar receives the same body the old ``http`` hook sent.
     ``|| true`` swallows curl's non-zero exit when the app is offline so Claude
     Code never surfaces a hook error. Output is discarded (``>/dev/null 2>&1``)
-    to keep ``SessionStart`` / ``UserPromptSubmit`` stdout out of the context.
+    to keep ``SessionStart`` / ``UserPromptSubmit`` stdout out of the context —
+    except for ``PreToolUse``, whose stdout is the decision channel and which
+    gets the hardened ``--fail`` form instead.
     """
     return _curl_command_for_url(f"{base}{spec.path}", spec.discards_stdout)
 

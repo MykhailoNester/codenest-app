@@ -22,13 +22,34 @@ schedule whose next run succeeded, a task someone unblocked — all leave the
 queue without anyone telling it to, and the page's "resolved today" count is
 therefore a real measure of things that sorted themselves out.
 
+Derived items, and the three ingested ones
+-----------------------------------------
+The paragraph above is true of the five P1 producers and it is no longer true
+of the whole table. `PermissionRequest`, `Notification` and `Elicitation`
+(#172) are written *inward*, from the hook handler, because there is nothing
+to derive them from: the fact that a session is sitting on a permission prompt
+exists only in the hook payload that announced it, and by the time anything
+could re-derive it the prompt has been answered and is gone.
+
+That splits the kinds in two, and the split is load-bearing in exactly one
+place. `_sweep_cleared` resolves a producer's live rows that the pass did not
+re-produce; run over an ingested kind — which has no producer and so emits no
+keys — it would resolve every hook-sourced item on the first refresh after it
+was written. `refresh` therefore sweeps `DERIVED_KINDS` only, and the ingested
+kinds end instead by being answered (`respond`) or by expiring.
+
 The three severities
 --------------------
-`blocking` — something cannot continue until a human acts. **P1 has no
-producer for it and the count is honestly 0.** Every blocking source in the
-design (`PermissionRequest`, `Notification`, `Elicitation`) is a hook that P2
-adds; the severity exists now so the page, the grouping and the rail count do
-not change shape when P2 lands.
+`blocking` — something cannot continue until a human acts. This is what the
+three ingested kinds write, and until #172 the severity had no producer at all
+and the count was honestly 0.
+
+Being told about a blocking item is not the same as being able to clear it.
+The only channel back into a running session is the `PreToolUse` hook's stdout
+(`preauth_service`); a `PermissionRequest`, an `Elicitation` or a
+`Notification` is answered by the human at that session's terminal, and
+`respond` here records *what the answer was*, closing the row. It does not
+deliver it.
 
 `stalled` — nobody is blocked, but nothing is moving, and it is recent enough
 that someone would plausibly act on it now.
@@ -75,7 +96,9 @@ space-separated bound, the same way `event_retention_service` does.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -84,10 +107,14 @@ import aiosqlite
 
 from . import budget_service
 
+logger = logging.getLogger(__name__)
+
 # Vocabularies. Migration 013 deliberately carries no CHECK constraints (see
 # its header), so these are the enforcement: a write outside them is a bug
 # here, not a row in the table.
-KINDS: frozenset[str] = frozenset(
+
+# The five P1 kinds, each computed by a producer below and closed by the sweep.
+DERIVED_KINDS: frozenset[str] = frozenset(
     {
         "session_stalled",
         "schedule_failed",
@@ -96,8 +123,63 @@ KINDS: frozenset[str] = frozenset(
         "inbox_backlog",
     }
 )
+
+# The three #172 kinds, written from the hook handler and never derived. Keyed
+# by the `hooks_service.HookEvent.event` name that produces each, because the
+# recorder's only input is that name — a second mapping from kind back to
+# event would be a second thing to keep in step.
+HOOK_KINDS: dict[str, str] = {
+    "PermissionRequest": "permission_request",
+    "Elicitation": "elicitation",
+    "Notification": "notification",
+}
+
+KINDS: frozenset[str] = DERIVED_KINDS | frozenset(HOOK_KINDS.values())
 SEVERITIES: tuple[str, ...] = ("blocking", "stalled", "queued")
 STATES: frozenset[str] = frozenset({"open", "resolved", "muted"})
+
+# Why a row ended. 013's header says P1 writes only `condition_cleared` and P2
+# adds the human verbs; `expired` is the one non-human addition, and it is a
+# resolution rather than a read-path filter for the reason `_resolve_expired`
+# gives.
+RESOLUTION_CONDITION_CLEARED = "condition_cleared"
+RESOLUTION_EXPIRED = "expired"
+RESOLUTION_ANSWERED = "answered"
+RESOLUTION_DISMISSED = "dismissed"
+# The two a human can choose. `answered` means the question got its answer;
+# `dismissed` means the human closed the row without giving one. Kept apart
+# because "how many of these did anyone actually answer" is the question that
+# says whether this queue is worth anything.
+HUMAN_RESOLUTIONS: tuple[str, ...] = (RESOLUTION_ANSWERED, RESOLUTION_DISMISSED)
+RESOLUTIONS: frozenset[str] = frozenset(
+    {RESOLUTION_CONDITION_CLEARED, RESOLUTION_EXPIRED, *HUMAN_RESOLUTIONS}
+)
+
+# How long a hook-sourced item is worth showing, per kind.
+#
+# `permission_request` and `elicitation` hold a session's turn open while they
+# wait, and nobody who was at the keyboard leaves one for a quarter of an hour
+# — past that the prompt has been answered or abandoned in the terminal and
+# the row is describing a moment that has gone. A `notification` holds nothing
+# open; it is an announcement, and an hour of page space is a fair price for
+# one. Neither number is a deadline for the human: expiry closes the row, it
+# never changes what the session does.
+_HOOK_ITEM_TTL_MINUTES: dict[str, int] = {
+    "permission_request": 15,
+    "elicitation": 15,
+    "notification": 60,
+}
+
+# Hook-sourced kinds that are literally waiting on an answer, so `respond` has
+# something to record. A `notification` is an announcement and is not.
+_HOOK_KINDS_AWAITING_RESPONSE: frozenset[str] = frozenset(
+    {"permission_request", "elicitation"}
+)
+
+# Title and detail caps. `agent_service._MAX_PAYLOAD_STR` already lets a 2 KB
+# `message` through, and a 2 KB title is a page with one row on it.
+_MAX_TITLE = 120
+_MAX_DETAIL = 200
 
 # A live session that has not produced an event in this long has stopped
 # moving. The design's "no progress > 30m".
@@ -471,6 +553,38 @@ async def _unmute_expired(db: aiosqlite.Connection, moment: datetime) -> int:
     return cur.rowcount or 0
 
 
+async def _resolve_expired(db: aiosqlite.Connection, moment: datetime) -> int:
+    """Resolve items whose `expires_at` has passed, with resolution `expired`.
+
+    A resolution, not a filter in the read path, and not a mute. 013's header
+    draws the line: `resolved` is "the condition went away", `muted` is "still
+    true, deliberately not shown". A permission prompt whose session has moved
+    on is the first of those — it is not being hidden while it waits, it has
+    stopped being a thing anyone can act on — so the honest record is a
+    resolved row whose `resolution` says why it ended, and "resolved today"
+    counts it as what it was.
+
+    The read-path filter is also the option that quietly breaks the table. The
+    partial unique index covers live rows only, so an expired row that stays
+    live keeps owning its `dedup_key`: the next genuine prompt for the same
+    tool in the same session would collide with the invisible corpse and merely
+    bump its `seen_count`, and the new prompt would never appear at all.
+    Resolving releases the key, and the recurrence mints a new row with
+    `seen_count = 1` — exactly the upsert-then-recur behaviour 013 designed the
+    index for.
+
+    Rows with a NULL `expires_at` — every derived item — are untouched.
+    """
+    cur = await db.execute(
+        "UPDATE attention_items "
+        "SET state = 'resolved', resolved_at = ?, resolution = ? "
+        "WHERE state <> 'resolved' AND expires_at IS NOT NULL "
+        "AND replace(expires_at, 'T', ' ') <= ?",
+        (_sql_ts(moment), RESOLUTION_EXPIRED, _sql_ts(moment)),
+    )
+    return cur.rowcount or 0
+
+
 async def _upsert(
     db: aiosqlite.Connection, candidate: dict[str, Any], moment: datetime
 ) -> None:
@@ -486,7 +600,10 @@ async def _upsert(
 
     `severity`, `title` and `detail` are refreshed, because they legitimately
     move while the condition holds: a stalled session's idle time grows, and at
-    the 24-hour ceiling its severity changes.
+    the 24-hour ceiling its severity changes. `expires_at` is refreshed for the
+    same reason and it matters more: a re-delivered permission prompt is a
+    prompt that is *still* waiting, so its clock restarts rather than running
+    out from the first delivery.
     """
     kind = candidate["kind"]
     severity = candidate["severity"]
@@ -500,14 +617,16 @@ async def _upsert(
         INSERT INTO attention_items
             (kind, severity, state, dedup_key, seen_count, title, detail,
              session_id, project_id, task_id, schedule_id, payload_json,
-             first_seen_at, last_seen_at)
-        VALUES (?, ?, 'open', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             first_seen_at, last_seen_at,
+             hook_event, requires_response, expires_at)
+        VALUES (?, ?, 'open', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(dedup_key) WHERE state <> 'resolved' DO UPDATE SET
             seen_count = seen_count + 1,
             last_seen_at = excluded.last_seen_at,
             severity = excluded.severity,
             title = excluded.title,
-            detail = excluded.detail
+            detail = excluded.detail,
+            expires_at = excluded.expires_at
         """,
         (
             kind,
@@ -522,6 +641,9 @@ async def _upsert(
             candidate.get("payload_json"),
             stamp,
             stamp,
+            candidate.get("hook_event"),
+            1 if candidate.get("requires_response") else 0,
+            candidate.get("expires_at"),
         ),
     )
 
@@ -563,13 +685,18 @@ async def refresh(
     just changed one of the source tables.
 
     Returns the same shape as `counts`, plus `auto_resolved` (how many
-    conditions went away on this pass), because the caller that just triggered
-    a refresh is usually about to render exactly those numbers.
+    conditions went away on this pass) and `expired` (how many hook-sourced
+    prompts aged out), because the caller that just triggered a refresh is
+    usually about to render exactly those numbers.
     """
     moment = now or _utcnow()
     await _unmute_expired(db, moment)
+    expired = await _resolve_expired(db, moment)
 
-    produced: dict[str, set[str]] = {kind: set() for kind in KINDS}
+    # `DERIVED_KINDS`, not `KINDS`. The ingested kinds have no producer, so
+    # they emit no keys, so a sweep over them would resolve every hook-sourced
+    # item on the first refresh after it was written. See the module header.
+    produced: dict[str, set[str]] = {kind: set() for kind in DERIVED_KINDS}
     for producer in _PRODUCERS:
         for candidate in await producer(db, moment):
             await _upsert(db, candidate, moment)
@@ -582,7 +709,217 @@ async def refresh(
 
     result = await counts(db, now=moment)
     result["auto_resolved"] = auto_resolved
+    result["expired"] = expired
     return result
+
+
+# ─── Hook-sourced items ───────────────────────────────────────────────────────
+#
+# The inward half of the table. Everything above derives; everything here is
+# told. Called from `agent_service.record_hook_event` inside that recorder's
+# transaction, so the attention row and the `agent_events` row it came from
+# commit together or not at all — the same arrangement #173 uses for cwd spans,
+# and for the same reason.
+
+
+def _clip(text: str, limit: int) -> str:
+    """First line of *text*, trimmed to *limit* with an ellipsis if it was cut."""
+    first = text.strip().splitlines()[0].strip() if text.strip() else ""
+    if len(first) <= limit:
+        return first
+    return first[: limit - 1].rstrip() + "…"
+
+
+def _payload_text(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _fingerprint(payload: dict[str, Any]) -> str:
+    """A stable short name for *this prompt*, for the dedup key.
+
+    The ids come first because they are what Claude Code itself uses to mean
+    "this exact tool call" / "this exact prompt": a re-delivery carries the
+    same one, and two genuinely different prompts never share one. The hash of
+    the text is the fallback for an event that carries neither, and it is a
+    hash rather than the text itself because a dedup key is compared, indexed
+    and read in logs, and a 2 KB key is none of those things well.
+
+    The consequence for `Notification` is the right one by accident and worth
+    stating: the same "waiting for your input" message arriving five times is
+    one row seen five times, not five rows saying the same sentence.
+    """
+    for key in ("tool_use_id", "prompt_id"):
+        value = _payload_text(payload, key)
+        if value:
+            return value[:64]
+    material = "\x00".join(
+        _payload_text(payload, key)
+        for key in ("tool_name", "notification_type", "message")
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+
+def _hook_item_title(kind: str, payload: dict[str, Any]) -> str:
+    message = _payload_text(payload, "message")
+    tool = _payload_text(payload, "tool_name")
+    if kind == "permission_request":
+        return _clip(
+            f"Permission requested: {tool}" if tool else "Permission requested",
+            _MAX_TITLE,
+        )
+    if kind == "elicitation":
+        return _clip(message or "Claude is asking for input", _MAX_TITLE)
+    return _clip(message or "Claude sent a notification", _MAX_TITLE)
+
+
+def _hook_item_detail(payload: dict[str, Any], project_name: str | None) -> str | None:
+    """Enrichment, never a precondition — the module header's rule.
+
+    The message is repeated here for `permission_request`, whose title is the
+    tool name; for the other two the title already *is* the message and this
+    carries only the where.
+    """
+    bits: list[str] = []
+    notification_type = _payload_text(payload, "notification_type")
+    if notification_type:
+        bits.append(notification_type)
+    message = _payload_text(payload, "message")
+    if message:
+        bits.append(_clip(message, _MAX_DETAIL))
+    where = project_name or _payload_text(payload, "cwd")
+    if where:
+        bits.append(where)
+    detail = " · ".join(bits)
+    return _clip(detail, _MAX_DETAIL) if detail else None
+
+
+async def record_hook_item(
+    db: aiosqlite.Connection,
+    event: str,
+    payload: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> str | None:
+    """Write the blocking item for one hook event; return its `dedup_key`.
+
+    Returns None — quietly — for an event this module does not raise items
+    for, and for a payload with no `session_id`. This runs inside a hook
+    handler: the only outcome it must never have is an exception reaching the
+    recorder, so a payload it cannot make sense of costs the queue a row and
+    costs the session nothing.
+
+    Does not commit. `record_hook_event` owns the transaction.
+
+    The timestamps written here are this module's space-separated spelling and
+    not `agent_service._now()`'s `T`-separated one, even though the caller is
+    `agent_service`. Every bound `attention_items` is compared against —
+    `expires_at`, `muted_until`, `resolved_at` — assumes the one spelling, and
+    a table with two of them is the problem the module header exists to
+    describe.
+    """
+    kind = HOOK_KINDS.get(event)
+    if kind is None:
+        return None
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return None
+
+    moment = now or _utcnow()
+    try:
+        cur = await db.execute(
+            "SELECT s.project_id, p.name AS project_name "
+            "  FROM agent_sessions s "
+            "  LEFT JOIN projects p ON p.id = s.project_id "
+            " WHERE s.session_id = ?",
+            (session_id,),
+        )
+        row = await cur.fetchone()
+        project_id = row["project_id"] if row is not None else None
+        project_name = row["project_name"] if row is not None else None
+
+        ttl = _HOOK_ITEM_TTL_MINUTES[kind]
+        candidate: dict[str, Any] = {
+            "kind": kind,
+            # The severity 013 named and P1 could not produce. All three of
+            # these events mean a session has stopped and is waiting on a
+            # person.
+            "severity": "blocking",
+            "dedup_key": f"{kind}:{session_id}:{_fingerprint(payload)}",
+            "title": _hook_item_title(kind, payload),
+            "detail": _hook_item_detail(payload, project_name),
+            "session_id": session_id,
+            "project_id": project_id,
+            "hook_event": event,
+            "requires_response": kind in _HOOK_KINDS_AWAITING_RESPONSE,
+            "expires_at": _sql_ts(moment + timedelta(minutes=ttl)),
+        }
+        tool_name = _payload_text(payload, "tool_name")
+        if tool_name:
+            candidate["payload_json"] = json.dumps({"tool_name": tool_name})
+        await _upsert(db, candidate, moment)
+    except Exception:
+        logger.warning(
+            "attention: could not record %s item for session %s",
+            event,
+            session_id,
+            exc_info=True,
+        )
+        return None
+    return str(candidate["dedup_key"])
+
+
+async def respond(
+    db: aiosqlite.Connection,
+    item_id: int,
+    *,
+    response: Any = None,
+    resolution: str = RESOLUTION_ANSWERED,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Record a human's answer to an item and close it. None if there is no
+    such live item.
+
+    What this is and is not: it writes down what the human decided, it does
+    not deliver the decision. There is no channel from this process into a
+    session's permission prompt — the one channel Claude Code offers is the
+    `PreToolUse` hook's stdout, which is `preauth_service`, and it answers
+    prompts before they are asked rather than after. The human answers at the
+    terminal; this closes the row so the page stops asking.
+
+    `resolution` is one of `HUMAN_RESOLUTIONS`, which is 013's "P2 adds the
+    human verbs" made real. `responded_at` is set even for `dismissed`,
+    because the row did get human attention at that moment and the time it
+    took to get it is the number the page reports.
+
+    Deliberately refuses an already-resolved item rather than re-resolving it:
+    a second answer to a closed question would overwrite the first one's
+    `response_json` and rewrite when it was given.
+    """
+    if resolution not in HUMAN_RESOLUTIONS:
+        raise ValueError(f"unknown human resolution {resolution!r}")
+    moment = now or _utcnow()
+    stamp = _sql_ts(moment)
+    cur = await db.execute(
+        "UPDATE attention_items "
+        "SET state = 'resolved', resolved_at = ?, resolution = ?, "
+        "    response_json = ?, responded_at = ? "
+        "WHERE id = ? AND state <> 'resolved'",
+        (
+            stamp,
+            resolution,
+            json.dumps(response) if response is not None else None,
+            stamp,
+            item_id,
+        ),
+    )
+    if not cur.rowcount:
+        await db.rollback()
+        return None
+    await db.commit()
+    cur = await db.execute("SELECT * FROM attention_items WHERE id = ?", (item_id,))
+    row = await cur.fetchone()
+    return dict(row) if row is not None else None
 
 
 # ─── Reads ────────────────────────────────────────────────────────────────────
@@ -662,6 +999,8 @@ async def list_items(
                a.title, a.detail, a.session_id, a.project_id, a.task_id,
                a.schedule_id, a.payload_json, a.first_seen_at, a.last_seen_at,
                a.resolved_at, a.resolution, a.muted_until,
+               a.hook_event, a.requires_response, a.response_json,
+               a.responded_at, a.expires_at,
                s.pane_id AS pane_id,
                s.status  AS session_status,
                p.name    AS project_name

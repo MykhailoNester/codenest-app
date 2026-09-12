@@ -180,25 +180,48 @@ def test_all_twenty_two_commands_carry_max_time_and_end_in_or_true() -> None:
         assert hooks_service._CURL_MAX_TIME < hooks_service._HOOK_TIMEOUT
 
 
-def test_every_event_discards_stdout_and_the_flag_is_what_does_it() -> None:
-    """All 22 discard today; the flag is the seam P5 would flip, not decoration.
+def test_pre_tool_use_is_the_only_event_that_keeps_its_stdout() -> None:
+    """21 of 22 discard; `PreToolUse` is the one return channel (#172).
 
     Claude Code feeds a `SessionStart` / `UserPromptSubmit` hook's stdout back
     into the session as context, so an unredirected response body would land in
-    the user's conversation. The epic's P5 context broker is the proposal to
-    stop discarding it for exactly the events with a return channel, which is
-    why this is a per-event field rather than an unconditional suffix.
+    the user's conversation. It reads a `PreToolUse` hook's stdout for a
+    permission decision instead, and that protocol is bound to `PreToolUse`
+    alone — `PermissionRequest` looks like the event that should carry it and
+    does not — so this asserts the exact membership rather than a count.
     """
-    assert all(spec.discards_stdout for spec in hooks_service.HOOK_EVENTS)
+    undiscarding = {
+        spec.event for spec in hooks_service.HOOK_EVENTS if not spec.discards_stdout
+    }
+    assert undiscarding == {"PreToolUse"}
 
     hooks = hooks_service.build_hook_settings(_BASE)["hooks"]
     for spec in hooks_service.HOOK_EVENTS:
-        assert ">/dev/null 2>&1" in hooks[spec.event][0]["hooks"][0]["command"]
+        command = hooks[spec.event][0]["hooks"][0]["command"]
+        if spec.discards_stdout:
+            assert ">/dev/null 2>&1" in command, spec.event
+        else:
+            # stderr is still silenced; it is stdout that must stay open.
+            assert ">/dev/null 2>&1" not in command, spec.event
+            assert "2>/dev/null" in command, spec.event
 
-    # The flag, not the event, is what controls the redirect — and dropping it
-    # must not cost the command either half of the non-blocking discipline.
+
+def test_the_undiscarded_command_cannot_leak_an_error_body_as_a_decision() -> None:
+    """The safety property that makes an open return channel survivable.
+
+    Whatever the undiscarded command prints is read by Claude Code as a hook
+    decision, and a FastAPI 500 answers with a JSON error body. `--fail` makes
+    curl print nothing at all on an HTTP status >= 400 and exit non-zero, which
+    the existing `|| true` swallows; stderr goes to `/dev/null` so a transport
+    failure does not paint the terminal either. Offline, slow and throwing all
+    have to look identical from the session's side: no output, exit 0.
+    """
     undiscarded = hooks_service._curl_command_for_url(f"{_BASE}/x", False)
-    assert ">/dev/null" not in undiscarded
+    assert "--fail" in undiscarded
+    assert "2>/dev/null" in undiscarded
+    assert ">/dev/null 2>&1" not in undiscarded
+    # Dropping the redirect must not cost the command either half of the
+    # non-blocking discipline.
     assert undiscarded.strip().endswith("|| true")
     assert "--max-time" in undiscarded
 

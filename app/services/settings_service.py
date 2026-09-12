@@ -19,7 +19,7 @@ import aiosqlite
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from . import profile_service, taxonomy_service
+from . import preauth_service, profile_service, taxonomy_service
 
 
 class SettingPut(BaseModel):
@@ -222,6 +222,13 @@ async def upsert_setting(db: aiosqlite.Connection, key: str, value_json: str) ->
         _validate_terminal_setting(key, value_json)
     if key == "enabled_features":
         _validate_features_setting(value_json)
+    if key == preauth_service.SETTING_KEY:
+        # The pre-authorisation rule set is reachable through this generic
+        # writer as well as its own endpoint, and it is the one setting whose
+        # contents are executed as a decision on a hook's critical path. It
+        # gets the same validation either way, and the hook path's in-process
+        # cache is invalidated below whichever door the write came through.
+        preauth_service.validate_rules_json(value_json)
     now = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
     await db.execute(
         """INSERT INTO app_settings (key, value_json, updated_at)
@@ -232,6 +239,8 @@ async def upsert_setting(db: aiosqlite.Connection, key: str, value_json: str) ->
         (key, value_json, now),
     )
     await db.commit()
+    if key == preauth_service.SETTING_KEY:
+        preauth_service.invalidate_cache()
     return await get_setting(db, key)
 
 

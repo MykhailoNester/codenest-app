@@ -22,6 +22,7 @@ from fastapi import HTTPException
 from app.models.session_end_reason import EndCategory, classify
 
 from . import (
+    attention_service,
     attribution_service,
     budget_service,
     cwd_resolver_service,
@@ -1235,6 +1236,16 @@ async def record_hook_event(
             now,
             event_id=event_id,
         )
+    # Three of these events do not just say what happened, they say a session
+    # has *stopped* and is waiting on a person: `PermissionRequest`,
+    # `Elicitation`, `Notification`. Nothing can derive that afterwards — by
+    # the time a producer looked, the prompt would have been answered and
+    # gone — so the attention row is written here, in this transaction,
+    # alongside the event it was read from (#172). Like the span writer above
+    # it never raises; an item it cannot build costs the queue a row and the
+    # session nothing.
+    if event in attention_service.HOOK_KINDS:
+        await attention_service.record_hook_item(db, event, payload)
     await db.commit()
     # `update` rather than a per-event kind: it is already in the frontend's
     # `SSE_EVENT_NAMES` subscription list and is the stream's generic "this
