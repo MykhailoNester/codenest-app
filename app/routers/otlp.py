@@ -40,7 +40,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
-from app.services import otlp_receiver_service
+from app.services import otlp_receiver_service, otlp_reconcile_service
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -104,9 +104,10 @@ async def otlp_metrics(request: Request) -> JSONResponse:
         log.exception("otlp receiver: request body could not be read")
         return _status(400, "request body could not be read")
 
+    db = await get_db()
     try:
         result = await otlp_receiver_service.ingest(
-            await get_db(), raw, request.headers.get("content-encoding")
+            db, raw, request.headers.get("content-encoding")
         )
     except otlp_receiver_service.OtlpRejected as exc:
         return _status(exc.status_code, exc.detail)
@@ -124,6 +125,20 @@ async def otlp_metrics(request: Request) -> JSONResponse:
                 }
             }
         )
+
+    # Lane B's observations are stored; now let them supersede the app's own
+    # estimate (#176). Deliberately *after* `ingest` has committed and outside
+    # its try block, for two separate reasons: the export is already durable, so
+    # a reconciliation fault must not be reported to the exporter as a dropped
+    # batch; and the service swallows its own failures, so there is nothing
+    # here to catch. All the policy — which fields, what a missing observation
+    # means, what happens to a late figure that disagrees — lives in that
+    # module's header, not in this router.
+    #
+    # Runs even when some points were rejected: an export of forty points with
+    # one bad attribute stored thirty-nine, and those thirty-nine are as
+    # reconcilable as a clean export's would be.
+    await otlp_reconcile_service.reconcile_recent(db)
 
     if not result.rejected_points:
         return JSONResponse({"partialSuccess": {}})

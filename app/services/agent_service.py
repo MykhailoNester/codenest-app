@@ -842,7 +842,6 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
     # than a stale number.
     context_tokens = tokens_in + cache_read + cache_creation
     model = payload.get("model") or transcript_model
-    set_model = "model = COALESCE(?, model)," if model else ""
     # Resolve provider: the session's profile is authoritative; fall back to
     # model-name lookup only when the profile gives no match. This prevents
     # the model-name lookup from overwriting a profile-based provider_id that
@@ -859,46 +858,83 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
     if provider_id is None and model:
         provider_id = await provider_service.resolve_model_to_provider(db, model)
     set_provider = "provider_id = COALESCE(?, provider_id)," if provider_id else ""
-    params: list[Any] = []
-    if model:
-        params.append(model)
-    if provider_id:
-        params.append(provider_id)
-    # Money and tokens are the fields Lane B (OTLP, P3) supersedes outright:
-    # the `cost_delta` above prices every model at Sonnet rates regardless of
-    # which one actually ran. Claim them through the reconciler so that when
-    # Lane B arrives it wins without this statement needing to change, and so
-    # the Session Inspector can label the figure an estimate while Lane A owns
-    # it. `accumulate` rather than `apply` for the three additive columns —
-    # the caller's SQL below is `col = col + ?`.
+    # Money and tokens are the fields Lane B (OTLP, #175/#176) supersedes
+    # outright: the `cost_delta` above prices every model at Sonnet rates
+    # regardless of which one actually ran. Claim them through the reconciler,
+    # and — since #176 — *honour the answer*.
+    #
+    # Recording the claim and writing the column anyway was the shape P1 left
+    # here, and it was harmless only while Lane A was the sole writer of these
+    # five fields. It stops being harmless the moment Lane B lands: a Stop hook
+    # firing after reconciliation would add its estimated delta on top of the
+    # vendor's total, every turn, and the displayed cost would drift upward
+    # away from the real one while provenance still said "B". That is the exact
+    # failure `012_session_field_provenance`'s header describes — "a Stop hook
+    # that estimates cost at flat Sonnet rates would overwrite Lane B's real
+    # figure purely because Stop fires later" — so each fragment below is now
+    # conditional on its own claim.
+    #
+    # `accumulate` for the three additive columns, because the SQL is
+    # `col = col + ?`; `apply` for the two the statement assigns. Lane C claims
+    # none of these five, so before Lane B exists every verdict here is still
+    # `applied=True` and the statement is byte-for-byte what it always was.
+    granted: dict[str, bool] = {}
     for _field, _delta in (
         ("tokens_in", tokens_in),
         ("tokens_out", tokens_out),
         ("cost_usd", cost_delta),
     ):
-        await lane_reconciler_service.accumulate(
+        claim = await lane_reconciler_service.accumulate(
             db, session_id, lane_reconciler_service.LANE_HOOK, _field, _delta
         )
-    await lane_reconciler_service.apply(
+        granted[_field] = claim.applied
+    context_claim = await lane_reconciler_service.apply(
         db,
         session_id,
         lane_reconciler_service.LANE_HOOK,
         "context_tokens",
         context_tokens,
     )
+    granted["context_tokens"] = context_claim.applied
     if model:
-        await lane_reconciler_service.apply(
+        model_claim = await lane_reconciler_service.apply(
             db, session_id, lane_reconciler_service.LANE_HOOK, "model", model
         )
-    params += [tokens_in, tokens_out, cost_delta, context_tokens, now, session_id]
+        granted["model"] = model_claim.applied
+    else:
+        granted["model"] = False
+
+    # `provider_id` is not a reconciled field and is resolved from the profile
+    # first, so it keeps being written from the payload's model even when the
+    # `model` column itself belongs to another lane: losing the column does not
+    # mean the hook stopped being able to see which provider ran.
+    set_model = "model = COALESCE(?, model)," if granted["model"] else ""
+    params: list[Any] = []
+    if granted["model"]:
+        params.append(model)
+    if provider_id:
+        params.append(provider_id)
+    money_sets: list[str] = []
+    for _field, _value, _additive in (
+        ("tokens_in", tokens_in, True),
+        ("tokens_out", tokens_out, True),
+        ("cost_usd", cost_delta, True),
+        ("context_tokens", context_tokens, False),
+    ):
+        if not granted[_field]:
+            continue
+        money_sets.append(f"{_field} = {_field} + ?" if _additive else f"{_field} = ?")
+        params.append(_value)
+    # Liveness is unconditional: `status`, the current-tool trio and
+    # `last_event_at` are Lane A's by precedence and are what makes this a Stop.
+    # A session whose money belongs to Lane B must still go idle.
+    money_clause = "".join(f"{fragment}, " for fragment in money_sets)
+    params += [now, session_id]
     await db.execute(
         f"""UPDATE agent_sessions
            SET {set_model}
                {set_provider}
-               tokens_in = tokens_in + ?,
-               tokens_out = tokens_out + ?,
-               cost_usd = cost_usd + ?,
-               context_tokens = ?,
+               {money_clause}
                status='idle', current_tool=NULL, current_tool_use_id=NULL,
                current_tool_started_at=NULL, last_event_at=?
            WHERE session_id=?""",
@@ -906,6 +942,22 @@ async def record_stop(db: aiosqlite.Connection, payload: dict) -> None:
     )
     # Distribute this turn's cost across the projects touched since the last
     # Stop — must run BEFORE the new Stop event is appended (turn boundary).
+    #
+    # Deliberately still `cost_delta`, and deliberately NOT gated on the claim
+    # above. `session_project_costs` is a per-turn, per-project ledger and Lane
+    # B has no project dimension at all — its counters are whole-session
+    # totals, so there is nothing in an OTLP export that could say which of the
+    # three repos a turn touched spent the money. Estimated attribution of a
+    # real turn is worth more than no attribution, so the estimate keeps
+    # flowing here even once the session's own `cost_usd` belongs to Lane B.
+    #
+    # The consequence is real and should be stated rather than discovered: on a
+    # session Lane B owns, the sum of its project attributions no longer equals
+    # the session total, and `budget_service`'s project scope and workspace
+    # scope will disagree by whatever the Sonnet-rate estimate was wrong by.
+    # Reconciling the two needs a per-turn vendor figure that does not exist on
+    # this wire; the surfaces that read both (#177) own the question of how to
+    # show that.
     await attribution_service.attribute_turn_cost(
         db, session_id, cost_delta, tokens_in, tokens_out
     )
