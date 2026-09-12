@@ -59,6 +59,7 @@ import { TerminalWindowRoot } from "./pages/terminal-window-root";
 import { ScreenshotRingPage } from "./pages/screenshot-ring";
 import { SettingsPage } from "./pages/settings";
 import { ProjectsPage } from "./pages/projects";
+import { ProjectContextPage } from "./pages/project-context";
 import { MarkdownEditorPage } from "./pages/markdown-editor";
 import { MarketplacePage } from "./pages/marketplace";
 import { ParallelRunsPage } from "./pages/parallel-runs";
@@ -392,6 +393,10 @@ function AppInner(): ReactElement {
         <Route path="/command" element={<CommandCenterPage />} />
         <Route path="/" element={<DashboardPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
+        <Route
+          path="/projects/:projectId/context"
+          element={<ProjectContextPage />}
+        />
         <Route
           path="/attention"
           element={

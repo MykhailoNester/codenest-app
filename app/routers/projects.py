@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
+from app.services import project_context_service
 from app.services.project_service import (
     create_project,
     delete_project,
@@ -42,6 +43,15 @@ async def api_get_project(project_id: int):
         return JSONResponse({"error": "not found"}, status_code=404)
     stats = await get_project_stats(db, project_id)
     return JSONResponse({**dict(project), **stats})
+
+
+@router.get("/api/v1/projects/{project_id}/context")
+async def api_project_context(project_id: int):
+    db = await get_db()
+    report = await project_context_service.assemble(db, project_id)
+    if report is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse(report)
 
 
 @router.post("/api/v1/projects")
