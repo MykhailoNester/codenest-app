@@ -107,11 +107,18 @@ async def _count(db: aiosqlite.Connection, table: str) -> int:
 
 
 async def test_documented_defaults(migrated_db: aiosqlite.Connection) -> None:
-    """The three documented windows, read from their single definition."""
+    """The documented windows, read from their single definition.
+
+    Four since #175: the three `agent_events` classes plus Lane B's
+    `otlp_metric_series`, which shares this mechanism rather than growing a
+    second one. Asserted as an exact dict on purpose — a class added without a
+    documented default should fail here and be thought about.
+    """
     assert svc.default_retention_days() == {
         "session": 90,
         "tool": 30,
         "ephemeral": 7,
+        "otlp": 90,
     }
     # And with no app_settings row written, those are what takes effect: a
     # fresh install prunes from the defaults (the choice recorded in
@@ -291,7 +298,12 @@ async def test_prune_on_empty_table(migrated_db: aiosqlite.Connection) -> None:
     """Nothing to do is not an error, and still reports every class."""
     result = await svc.prune_agent_events(migrated_db)
     assert result["rows_deleted"] == 0
-    assert set(result["classes"]) == {"session", "tool", "ephemeral"}
+    assert set(result["classes"]) == {c.key for c in svc.RETENTION_CLASSES}
+    # …which is the three `agent_events` classes plus Lane B's (#175). Derived
+    # from the registry rather than relisted, so a new class shows up in the
+    # summary automatically — that is the property being asserted here, not
+    # the membership, which `test_documented_defaults` pins exactly.
+    assert {"session", "tool", "ephemeral", "otlp"} <= set(result["classes"])
 
 
 # ─── Sessions are never deleted ──────────────────────────────────────────────

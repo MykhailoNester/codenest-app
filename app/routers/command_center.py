@@ -533,6 +533,13 @@ async def factory_reset() -> dict:
         # item whose subject is gone for good would never be re-produced and so
         # would never be swept either.
         "attention_items",
+        # Lane B's metric series (#175). No FK to `agent_sessions` either — the
+        # receiver enforces the join itself and refuses any export naming a
+        # session that does not exist, so the constraint would buy nothing on a
+        # path that takes pushed input. Named here because a reset that left
+        # these behind would leave the only durable record of what wiped
+        # sessions cost, attached to session ids nothing can resolve.
+        "otlp_metric_series",
         "projects",
         "app_settings",
         "workspace_state",

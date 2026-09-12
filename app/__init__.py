@@ -413,6 +413,7 @@ def create_app() -> FastAPI:
         mcp_servers,
         metrics,
         notifications,
+        otlp,
         parallel_runs,
         plugins,
         preview,
@@ -473,5 +474,9 @@ def create_app() -> FastAPI:
     app.include_router(integrations.router)
     app.include_router(sync.router)
     app.include_router(workspace.router)
+    # Lane B ingest (#175). Mounted last and, unlike every other router here,
+    # outside `/api/v1` — the OTLP/HTTP spec fixes the path an exporter posts
+    # to, so `/v1/metrics` is not ours to rename. See app/routers/otlp.py.
+    app.include_router(otlp.router)
 
     return app
