@@ -519,6 +519,13 @@ async def factory_reset() -> dict:
         # already been read, and the wiped database would never refill.
         "transcript_scan_state",
         "agent_session_compactions",
+        # Per-repo session spans (#173). Same reason again: no FK to
+        # `agent_sessions`, because they are written from the hook ingest path
+        # and a hook must never be blocked by an FK check. They are derived
+        # from `agent_events`, but not rebuilt automatically, so a reset that
+        # left them would keep showing per-project stretches of sessions that
+        # no longer exist and that nothing would ever recompute away.
+        "session_project_spans",
         # The attention queue (#162). Derived, and carrying no FK to any of its
         # subjects, so nothing above cascades into it. It would rebuild itself
         # on the next refresh anyway — but not before the wiped app showed a

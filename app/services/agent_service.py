@@ -27,6 +27,7 @@ from . import (
     cwd_resolver_service,
     lane_reconciler_service,
     notification_service,
+    session_project_spans_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -574,7 +575,18 @@ async def _append_event(
     summary: str,
     payload: dict,
     project_id: int | None = None,
+    created_at: str | None = None,
 ) -> int:
+    """Append one row to `agent_events`. Returns its id.
+
+    `created_at` defaults to a fresh clock read, which is what every handler
+    that has no other timestamp to honour wants. A caller passes one when the
+    row has to carry the *same* instant as something else it is writing:
+    `record_hook_event` stamps the event and the span derived from it
+    identically, because `session_project_spans_service` replays spans out of
+    `agent_events.created_at` and a one-tick skew between the two clock reads
+    would make a rebuilt span list disagree with the one the hooks wrote.
+    """
     trimmed = _trim_event_payload(tool_name, payload)
     cursor = await db.execute(
         """INSERT INTO agent_events
@@ -587,7 +599,7 @@ async def _append_event(
             tool_use_id,
             summary,
             json.dumps(trimmed, default=str),
-            _now(),
+            created_at or _now(),
             project_id,
         ),
     )
@@ -1206,7 +1218,23 @@ async def record_hook_event(
         tool_use_id,
         _summarize_hook_event(event, payload),
         payload,
+        created_at=now,
     )
+    # A directory change is the only thing in this stream that means more than
+    # "write it down": it is the moment a session's attribution stops being
+    # the one guessed at SessionStart. `session_project_spans_service` turns
+    # the pair of events into per-repo spans (#173) — from the row just
+    # written, inside this transaction, so a span and the event it was derived
+    # from commit together. It never raises; the rest of this recorder runs
+    # whatever it makes of the payload.
+    if event in session_project_spans_service.CWD_EVENT_TYPES:
+        await session_project_spans_service.record_cwd_observation(
+            db,
+            session_id,
+            session_project_spans_service.observed_cwd(payload),
+            now,
+            event_id=event_id,
+        )
     await db.commit()
     # `update` rather than a per-event kind: it is already in the frontend's
     # `SSE_EVENT_NAMES` subscription list and is the stream's generic "this
