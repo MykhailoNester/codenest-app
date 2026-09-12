@@ -20,6 +20,11 @@ export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
   preview: true,
   budgets: true,
   schedules: true,
+  // ON by default (#171). The Hooks page is the only surface that can tell a
+  // user their `PreToolUse` hook is discarding every permission decision — an
+  // install from before #172 grades "ok" on verify while silently throwing
+  // those answers away, and a page shipped off cannot say so.
+  hooks: true,
   snippets: false,
   gallery: false,
   feed: false,
@@ -84,6 +89,7 @@ export const FEATURES: Readonly<Record<string, readonly string[]>> = {
   preview: ["preview"],
   feed: ["feed"],
   budgets: ["budgets"],
+  hooks: ["hooks"],
   sync: ["sync"],
   snippets: ["library"],
   gallery: ["marketplace"],
@@ -106,6 +112,7 @@ export const KNOWN_FEATURES_ORDERED: readonly string[] = [
   "preview",
   "feed",
   "budgets",
+  "hooks",
   "sync",
   "snippets",
   "gallery",
@@ -301,6 +308,16 @@ export const NAV_ITEMS = [
     label: "Plugins",
     icon: "plugin",
     path: "/plugins",
+    group: "system",
+  },
+  {
+    // #171. Icon `zap` rather than a newly invented `hook` key: `Icon` renders
+    // `null` for a name it does not know, so a made-up key would silently draw
+    // nothing. `zap` is unused by any other rail row.
+    slug: "hooks",
+    label: "Hooks",
+    icon: "zap",
+    path: "/hooks",
     group: "system",
   },
   { slug: "sync", label: "Sync", icon: "sync", path: "/sync", group: "system" },

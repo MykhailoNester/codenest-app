@@ -74,8 +74,9 @@ describe("nav restructure (#165) — registry shape", () => {
   it("keeps every slug that existed before the restructure", () => {
     // The restructure is a reordering. Losing a page from the rail would be a
     // silent feature removal, so the count is pinned. 19 → 20 with #162's
-    // `attention` row, which is the one addition the restructure anticipated.
-    expect(NAV_ITEMS).toHaveLength(20);
+    // `attention` row, which is the one addition the restructure anticipated;
+    // 20 → 21 with #171's `hooks` row in the System group.
+    expect(NAV_ITEMS).toHaveLength(21);
   });
 
   it("mission owns / and replaces the dashboard slug", () => {

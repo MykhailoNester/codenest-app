@@ -62,6 +62,7 @@ import { MarkdownEditorPage } from "./pages/markdown-editor";
 import { MarketplacePage } from "./pages/marketplace";
 import { ParallelRunsPage } from "./pages/parallel-runs";
 import { McpServersPage } from "./pages/mcp-servers";
+import { HooksPage } from "./pages/hooks";
 import { SchedulesPage } from "./pages/schedules";
 import { PreviewPage } from "./pages/preview";
 import { LibraryPage } from "./pages/library";
@@ -477,6 +478,14 @@ function AppInner(): ReactElement {
         />
         <Route path="/plugins" element={<PluginsPage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />
+        <Route
+          path="/hooks"
+          element={
+            <FeatureRoute navSlug="hooks">
+              <HooksPage />
+            </FeatureRoute>
+          }
+        />
         <Route
           path="/sync"
           element={

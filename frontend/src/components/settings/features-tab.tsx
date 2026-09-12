@@ -55,6 +55,11 @@ const FEATURE_META: Record<string, { label: string; description: string }> = {
     label: "Budgets",
     description: "Cost budget tracking by workspace, project, or agent.",
   },
+  hooks: {
+    label: "Hooks",
+    description:
+      "How many hooks run on each Claude Code event and which file put each one there, across all eight contributor sources — plus installing and repairing this app's own hook block.",
+  },
   sync: {
     label: "Sync",
     description: "External sync targets and snapshot management.",

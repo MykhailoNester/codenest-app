@@ -1,0 +1,443 @@
+/* Hooks page (#171).
+   Conventions copied from mcp-servers.module.css: a flex column page, cards on
+   a faint lift over the page ground, everything coloured from the tokens in
+   styles/tokens.css. No backdrop-filter anywhere — it is banned on full-size
+   panels in this app (it drove WebKit Graphics to ~5 cores). */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+  color: var(--fg-1);
+}
+
+.subtitle {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  margin: 4px 0 0;
+  max-width: 76ch;
+  line-height: 1.6;
+}
+
+.sectionTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin: 0 0 6px;
+}
+
+.sectionNote {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  margin: 0 0 8px;
+  max-width: 76ch;
+  line-height: 1.55;
+}
+
+/* ─── scope bar ──────────────────────────────────────────────────────────── */
+
+.scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  padding: 12px 14px;
+  background: var(--bg-2);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+.select {
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  color: var(--fg-0);
+  border-radius: var(--r-1);
+  padding: 5px 8px;
+  font-size: 12px;
+  max-width: 340px;
+}
+
+/* ─── counters ───────────────────────────────────────────────────────────── */
+
+.counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.counter {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  padding: 10px 14px;
+  background: var(--bg-2);
+  min-width: 150px;
+}
+
+.counterValue {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--fg-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.counterLabel {
+  font-size: 11px;
+  color: var(--fg-3);
+  margin-top: 2px;
+}
+
+.counterNote {
+  font-size: 11px;
+  color: var(--warn);
+  margin-top: 4px;
+}
+
+/* ─── banners ────────────────────────────────────────────────────────────── */
+
+.banner {
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--fg-4);
+  border-radius: var(--r-3);
+  padding: 12px 14px;
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bannerAlarm {
+  border-left-color: var(--err);
+  background: var(--err-soft);
+}
+
+.bannerWarn {
+  border-left-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.bannerInfo {
+  border-left-color: var(--info);
+  background: var(--info-soft);
+}
+
+.bannerTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.bannerBody {
+  font-size: 12px;
+  color: var(--fg-2);
+  line-height: 1.6;
+  max-width: 82ch;
+}
+
+/* ─── cards / rows ───────────────────────────────────────────────────────── */
+
+.card {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  padding: 12px 14px;
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eventRow {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+.eventHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  font-size: 12.5px;
+}
+
+.eventHead:hover {
+  background: var(--bg-3);
+}
+
+.eventName {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-0);
+  min-width: 190px;
+}
+
+.eventTotal {
+  font-size: 12px;
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.eventTotalZero {
+  color: var(--fg-4);
+}
+
+.chevron {
+  color: var(--fg-4);
+  font-size: 10px;
+  width: 10px;
+}
+
+.tier {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--fg-3);
+}
+
+.tierCore {
+  color: var(--info);
+  border-color: var(--info);
+}
+
+.eventBody {
+  border-top: 1px solid var(--line-1);
+  padding: 10px 12px 12px;
+  background: var(--bg-1);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ─── source buckets ─────────────────────────────────────────────────────── */
+
+.buckets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 6px;
+}
+
+.bucket {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  padding: 7px 9px;
+  background: var(--bg-2);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bucketEmpty {
+  opacity: 0.62;
+}
+
+.bucketUnknown {
+  border-color: var(--warn);
+  opacity: 1;
+}
+
+.bucketLabel {
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+
+.bucketCount {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.bucketCountUnknown {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warn);
+  text-transform: none;
+}
+
+/* ─── contributions ──────────────────────────────────────────────────────── */
+
+.contribution {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  padding: 8px 10px;
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.contribHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  font-size: 11px;
+  color: var(--fg-3);
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--fg-3);
+}
+
+.badgeOurs {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.badgeRedacted {
+  color: var(--fg-3);
+}
+
+/* ─── scanned files ──────────────────────────────────────────────────────── */
+
+.scanRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line-1);
+  font-size: 11.5px;
+}
+
+.scanOk {
+  color: var(--ok);
+}
+
+.scanInfo {
+  color: var(--fg-4);
+}
+
+.scanWarn {
+  color: var(--warn);
+}
+
+/* ─── buttons ────────────────────────────────────────────────────────────── */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: var(--r-2);
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  background: var(--bg-3);
+  color: var(--fg-1);
+  border: 1px solid var(--line-2);
+}
+
+.btnDanger {
+  background: var(--err-soft);
+  color: var(--err);
+  border: 1px solid var(--err);
+}
+
+.empty {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed var(--line-1);
+  border-radius: var(--r-3);
+}
+
+/* ─── source legend ──────────────────────────────────────────────────────── */
+
+.legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px;
+}
+
+.legendItem {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  padding: 9px 11px;
+  background: var(--bg-2);
+}
+
+.legendItemUnknown {
+  border-color: var(--warn);
+}
+
+.legendName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.legendWhere {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.legendNote {
+  font-size: 11px;
+  color: var(--fg-2);
+  margin-top: 5px;
+  line-height: 1.55;
+}

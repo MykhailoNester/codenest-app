@@ -44,6 +44,7 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         "preview",  # Dev-server preview pane (slug: preview)
         "feed",  # Activity feed (slug: feed)
         "budgets",  # Cost budgets (slug: budgets)
+        "hooks",  # Hooks — what is on each hook event (slug: hooks)
         "sync",  # Sync targets (slug: sync)
         "snippets",  # Snippet library (slug: library)
         "gallery",  # Template/agent gallery (slug: marketplace)
@@ -78,6 +79,11 @@ _FEATURES_DEFAULT: dict[str, bool] = {
     "preview": True,
     "budgets": True,
     "schedules": True,
+    # ON by default (#171): the Hooks page is the only place a user can be told
+    # that a `PreToolUse` hook installed before #172 is discarding every
+    # permission decision it is handed. Verify grades that file "ok", so a page
+    # that ships off is a user who is never told.
+    "hooks": True,
     "snippets": False,
     "gallery": False,
     "feed": False,
