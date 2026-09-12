@@ -15,7 +15,13 @@ Three lanes converge on one session row and they do not agree:
   nothing about whether the session is still alive.
 * **Lane B — OTLP** (P3). Vendor-authoritative on money. Lane A's Stop handler
   prices *every* model at Sonnet rates (see `agent_service.record_stop`), so
-  its `cost_usd` is an estimate that Lane B supersedes outright.
+  its `cost_usd` is an estimate that Lane B supersedes outright. Its receiver
+  is `otlp_receiver_service` (#175) and its writer is
+  `otlp_reconcile_service` (#176). It claims four of the five fields it is
+  ranked first for; `context_tokens` is the exception, because it is a
+  per-turn measurement and Lane B has only session totals — that module's
+  header has the argument. Being ranked first means "if this lane writes the
+  field, it wins", never "this lane must write it".
 
 Why a registry rather than a `CASE WHEN` at each write
 ------------------------------------------------------
@@ -43,6 +49,16 @@ second lane actually contests this phase. `_upsert_session_start` and
 until Lane B needs them (P3): they are the two riskiest edits on the hook
 path, and converting them buys nothing while Lane A is the only writer of the
 fields they touch.
+
+Lane B's arrival in #176 did not change that list, because neither of those two
+writes any of the five money-and-token fields — `_upsert_session_start` sets
+liveness, attribution and provenance columns only. What #176 *did* have to
+change is that `record_stop` now **honours** the verdicts it was already
+recording. Claiming and then writing regardless was invisible while Lane A was
+the only writer of those columns and would have become an upward drift the
+moment Lane B landed: a Stop firing after reconciliation would add its
+estimated delta on top of the vendor's total while provenance still named
+Lane B. Recording a claim is not the point; branching on it is.
 
 Never raises into ingest
 ------------------------
