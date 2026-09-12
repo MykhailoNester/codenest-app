@@ -18,14 +18,15 @@ classes have wildly different value-per-byte:
     harness or `/ship` worktree run under a throwaway root. These rows are
     scratch by construction, never attributable to a project, and stop being
     interesting the moment the run ends. Shortest window (7 days).
-  * **tool** — `PreToolUse` / `PostToolUse` on a non-ephemeral session. The
-    bulk of the table by a wide margin (~95% of rows live) and the coarsest
-    per-row value: they answer "what did this session actually do", which
-    matters while the work is fresh and rarely after. Middle window (30 days).
+  * **tool** — the per-tool-call events on a non-ephemeral session, listed in
+    `_TOOL_EVENT_TYPES`. The bulk of the table by a wide margin (~95% of rows
+    live) and the coarsest per-row value: they answer "what did this session
+    actually do", which matters while the work is fresh and rarely after.
+    Middle window (30 days).
   * **session** — everything else on a non-ephemeral session (`SessionStart`,
-    `UserPromptSubmit`, `Stop`, `SessionEnd`). Few rows, and each one anchors
-    a session's shape: when it started, what was asked, how it ended. Longest
-    window (90 days).
+    `UserPromptSubmit`, `Stop`, `SessionEnd`, and the session-grain events
+    #168 added). Few rows, and each one anchors a session's shape: when it
+    started, what was asked, how it ended. Longest window (90 days).
 
 The three classes are **mutually exclusive and exhaustive** — every row lands
 in exactly one, with `ephemeral` taking precedence over the event-type split.
@@ -85,11 +86,31 @@ logger = logging.getLogger(__name__)
 _BATCH_ROWS = 5000
 
 # `event_type` values written by `agent_service._append_event` for tool
-# activity. The remaining vocabulary (`SessionStart`, `UserPromptSubmit`,
-# `Stop`, `SessionEnd`) is the `session` class by exclusion, deliberately: a
-# new hook type added later falls into the *longest* window rather than
+# activity. Everything else is the `session` class by exclusion, deliberately:
+# a new hook type added later falls into the *longest* window rather than
 # silently inheriting the shortest one.
-_TOOL_EVENT_TYPES: tuple[str, ...] = ("PreToolUse", "PostToolUse")
+#
+# That default is the right one for a *session*-grain event and the wrong one
+# for a tool-grain event, which is why this tuple had to grow when #168 widened
+# ingest from 6 hook events to 22. `PermissionRequest`, `PermissionDenied` and
+# `PostToolUseFailure` are each emitted once per tool call, on the same events
+# and at the same volume as the `PreToolUse`/`PostToolUse` pair they sit
+# alongside — they are the 30-day class by every property that put the pair
+# there. Left out, they would have inherited the 90-day session window: three
+# more high-volume event types on the window that exists for the handful of
+# rows that anchor a session's shape, which is the growth this module was
+# written to stop.
+#
+# The other thirteen events #168 added are genuinely session-grain — a
+# `SessionStart`-like cardinality of a few rows per session — and correctly
+# take the default by exclusion.
+_TOOL_EVENT_TYPES: tuple[str, ...] = (
+    "PreToolUse",
+    "PostToolUse",
+    "PermissionRequest",
+    "PermissionDenied",
+    "PostToolUseFailure",
+)
 
 _TOOL_TYPE_LIST = ", ".join(f"'{t}'" for t in _TOOL_EVENT_TYPES)
 
@@ -144,7 +165,7 @@ RETENTION_CLASSES: tuple[RetentionClass, ...] = (
         default_days=7,
         where_sql=_EPHEMERAL_SESSION,
     ),
-    # 30 days — `PreToolUse` / `PostToolUse` on a real session. ~95% of the
+    # 30 days — the per-tool-call events on a real session. ~95% of the
     # table; the "what did it do" detail, valuable while the work is fresh.
     RetentionClass(
         key="tool",

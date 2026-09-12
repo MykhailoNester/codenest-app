@@ -24,16 +24,24 @@ def _clear_self_test_tokens() -> None:
 
 
 def test_build_hook_settings_covers_all_events() -> None:
+    """The snippet offers every registered event, both tiers (#168).
+
+    Exhaustive coverage of the 22 — and the `--max-time` / `|| true`
+    discipline on each — lives in `test_hook_event_registry.py`; this keeps
+    asserting the block's *shape* against one core event whose path predates
+    the `/event/` namespace and must never move.
+    """
     block = hooks_service.build_hook_settings("http://127.0.0.1:8002")
     hooks = block["hooks"]
-    assert set(hooks) == {
+    assert set(hooks) == {spec.event for spec in hooks_service.HOOK_EVENTS}
+    assert {
         "SessionStart",
         "UserPromptSubmit",
         "PreToolUse",
         "PostToolUse",
         "Stop",
         "SessionEnd",
-    }
+    } <= set(hooks)
     entry = hooks["PostToolUse"][0]
     # Each event has a wildcard matcher so every session is captured.
     assert entry["matcher"] == "*"

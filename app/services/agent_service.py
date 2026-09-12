@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -434,6 +435,17 @@ async def _record_provenance(
 
 # Top-level hook-payload keys kept verbatim. Allowlist, not denylist: an
 # unknown field a future Claude Code version adds is dropped by default.
+#
+# That default is safe for storage and lethal for a *new event type*: an event
+# whose entire content lives in top-level fields nobody added here persists as
+# `{session_id, cwd, hook_event_name, truncated: true}` — a row that exists,
+# passes every "did it ingest" check, and holds nothing. Adding an event to
+# `hooks_service.HOOK_EVENTS` is therefore only half the work; its fields must
+# be listed here or the event is recorded empty.
+#
+# The second block below is that list for the 16 events P2 added (#168), plus
+# `duration_ms`, which `PostToolUse` has been emitting and this allowlist has
+# been silently discarding since it was written.
 _PAYLOAD_TOP_LEVEL: frozenset[str] = frozenset(
     {
         "session_id",
@@ -446,6 +458,31 @@ _PAYLOAD_TOP_LEVEL: frozenset[str] = frozenset(
         "tool_name",
         "tool_use_id",
         "prompt_id",
+        # Notification / Elicitation — the text shown to the user, and which
+        # kind of notification it was (the two fields that make a Needs-You
+        # row legible rather than "something happened").
+        "message",
+        "notification_type",
+        # PermissionDenied / StopFailure — why it was refused or gave up.
+        "reason",
+        # PostToolUseFailure / StopFailure — the failure itself.
+        "error",
+        # SubagentStart / SubagentStop — which subagent, and of what type.
+        "agent_id",
+        "agent_type",
+        # PreCompact / PostCompact — auto vs. manual compaction.
+        "trigger",
+        # CwdChanged / DirectoryAdded — the directory now in play. Feeds the
+        # cwd resolver's project attribution for a session that moved.
+        "new_cwd",
+        # PreModelSwitch / PostModelSwitch — the model being switched to.
+        "to_model",
+        # TaskCreated / TaskCompleted — which task.
+        "task_id",
+        # PostToolUse and PostToolUseFailure — how long the tool call took.
+        # Lane B (OTLP, P3) is authoritative on this; keeping Lane A's copy
+        # gives the tool-reliability view something to work with before then.
+        "duration_ms",
     }
 )
 # Per-tool tool_input allowlist, keyed by lowercased tool_name.
@@ -972,6 +1009,228 @@ async def record_session_end(db: aiosqlite.Connection, payload: dict) -> None:
             payload={"session_id": session_id, "reason": reason},
             priority="normal",
         )
+
+
+# ─── Generic hook recorder ───────────────────────────────────────────────────
+#
+# The six handlers above each own a bespoke reading of their payload — the
+# usage arithmetic in `record_stop`, the /clear relink in `record_session_start`,
+# the tool-slot bookkeeping in the pre/post pair. The sixteen events P2 added
+# (#168) have nothing of that kind to do: they are observations to be written
+# down. One recorder serves all of them, and the only things that vary per
+# event are the summary line and which payload fields the summary reads.
+
+
+def _payload_str(payload: dict, key: str) -> str | None:
+    """`payload[key]` when it is a non-empty string, else None.
+
+    Hook payloads arrive from an external process; a field can be absent, null,
+    or (for `task_id` / `duration_ms`) a number. Everything the summary builder
+    below interpolates goes through here so a malformed payload produces a
+    duller summary rather than an exception on the ingest path.
+    """
+    value = payload.get(key)
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return None
+
+
+def _summarize_hook_event(event: str, payload: dict) -> str:
+    """The one-line `agent_events.summary` for a generic event.
+
+    `summary` is not decoration: it is the column `agent_events_fts` indexes
+    and the string the Command Center timeline renders, so an event whose
+    summary is just its own name is an event nobody can find or read. Each
+    branch below names the payload field that actually carries this event's
+    meaning; the fallback is the event name, for an event whose payload turned
+    out to carry nothing usable.
+    """
+    detail: str | None = None
+    if event in ("Notification", "Elicitation"):
+        detail = _payload_str(payload, "message") or _payload_str(
+            payload, "notification_type"
+        )
+    elif event in ("PermissionRequest", "PermissionDenied"):
+        tool = _payload_str(payload, "tool_name")
+        reason = _payload_str(payload, "reason")
+        detail = f"{tool} — {reason}" if tool and reason else (tool or reason)
+    elif event == "PostToolUseFailure":
+        tool = _payload_str(payload, "tool_name")
+        error = _payload_str(payload, "error")
+        detail = f"{tool} — {error}" if tool and error else (tool or error)
+    elif event in ("SubagentStart", "SubagentStop"):
+        detail = _payload_str(payload, "agent_type") or _payload_str(
+            payload, "agent_id"
+        )
+    elif event in ("TaskCreated", "TaskCompleted"):
+        detail = _payload_str(payload, "task_id")
+    elif event == "StopFailure":
+        detail = _payload_str(payload, "error") or _payload_str(payload, "reason")
+    elif event in ("PreCompact", "PostCompact"):
+        detail = _payload_str(payload, "trigger")
+    elif event in ("CwdChanged", "DirectoryAdded"):
+        detail = _payload_str(payload, "new_cwd")
+    elif event in ("PreModelSwitch", "PostModelSwitch"):
+        detail = _payload_str(payload, "to_model")
+    return f"{event}: {_truncate(detail, 200)}" if detail else event
+
+
+async def _ensure_session_row(
+    db: aiosqlite.Connection,
+    session_id: str,
+    cwd: str | None,
+    transcript_path: str | None,
+) -> None:
+    """Create this session's row if — and only if — it does not exist yet.
+
+    Deliberately NOT `_upsert_session_start`. That function's UPDATE branch
+    sets `status='active'` unconditionally, which is correct for the five
+    events that genuinely prove a session is running and catastrophic for the
+    sixteen here: `TaskCompleted`, `SubagentStop`, `StopFailure`,
+    `Notification` and `PostCompact` all fire around the end of a session and
+    can arrive after `SessionEnd`. Routed through the upsert they would flip
+    `status` from 'ended' back to 'active' — resurrecting a finished session
+    in the exact column `cleanup_stale_sessions` sweeps on and the Needs-You
+    stalled-session producer reads, so the session would reappear as live work
+    and then be force-closed again on the next sweep.
+
+    An insert-if-absent has no such branch: an existing row is not touched at
+    all. The row it does create is a fallback, not the normal path — an event
+    for a session whose `SessionStart` the app never saw (hooks pasted
+    mid-session, or the sidecar offline when it started). `agent_events`
+    carries an enforced foreign key to `agent_sessions`, so without it the
+    event could not be stored at all, and 'active' is the honest status for a
+    session we are hearing from for the first time right now.
+    """
+    if await _get_session(db, session_id) is not None:
+        return
+
+    from . import provider_service  # local import to avoid circular dep
+
+    profile = await _derive_profile(db, transcript_path)
+    resolution = await cwd_resolver_service.resolve(db, cwd)
+    provider_id = await provider_service.resolve_profile_to_provider(db, profile)
+    now = _now()
+    # ON CONFLICT DO NOTHING rather than a bare INSERT: the existence check
+    # above and this statement are two round trips on one connection, and a
+    # concurrent hook for the same session can land between them.
+    await db.execute(
+        """INSERT INTO agent_sessions
+           (session_id, profile, cwd, transcript_path, status,
+            started_at, last_event_at, project_id, provider_id)
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
+           ON CONFLICT(session_id) DO NOTHING""",
+        (
+            session_id,
+            profile,
+            cwd,
+            transcript_path,
+            now,
+            now,
+            resolution.project_id,
+            provider_id,
+        ),
+    )
+    # The resolver already computed these two; recording them costs nothing and
+    # not recording them costs a retention class. A session first seen through
+    # an extended hook in an ephemeral cwd would otherwise keep migration 011's
+    # `session_kind='project'` default until a core hook happened to arrive —
+    # so its events would sit in the 90-day session window rather than the
+    # 7-day ephemeral one, which is the opposite of what #157 classified them
+    # for. Same two writers `_upsert_session_start` uses, so the two paths
+    # cannot disagree about what a resolution means.
+    await _record_git_branch(db, session_id, resolution.git_branch)
+    await _record_session_kind(db, session_id, resolution.session_kind)
+
+
+async def _touch_last_event_at(
+    db: aiosqlite.Connection, session_id: str, now: str
+) -> None:
+    """Advance `last_event_at`, and nothing else, for a generic event.
+
+    `last_event_at` is a liveness field (Lane A outranks Lane C on it), so the
+    claim goes through the reconciler like every other converted writer. The
+    column UPDATE stays here because that is what `lane_reconciler_service.apply`
+    asks of its callers — its docstring is explicit that the write is left to
+    the caller, since the statement differs per field.
+
+    `status` is conspicuously absent from the SET list and must stay absent:
+    that a session emitted a `Notification` says something happened *to* it,
+    not that it is running. The five core handlers that do assert liveness
+    keep their own statements.
+    """
+    claim = await lane_reconciler_service.apply(
+        db, session_id, lane_reconciler_service.LANE_HOOK, "last_event_at", now
+    )
+    if not claim.applied:
+        return
+    await db.execute(
+        "UPDATE agent_sessions SET last_event_at = ? WHERE session_id = ?",
+        (now, session_id),
+    )
+
+
+async def record_hook_event(
+    db: aiosqlite.Connection, event: str, payload: dict
+) -> None:
+    """Record one generic hook event. The single recorder behind all 16 routes.
+
+    `event` is a `hooks_service.HookEvent.event` name and becomes the row's
+    `event_type` verbatim — the value `event_retention_service` buckets on and
+    the Command Center filters by.
+
+    Like every recorder here it returns silently on a payload with no
+    `session_id`: there is no row to hang the event off, and raising would
+    reach a hook handler.
+    """
+    session_id = payload.get("session_id")
+    if not session_id or not isinstance(session_id, str):
+        return
+
+    await _ensure_session_row(
+        db, session_id, payload.get("cwd"), payload.get("transcript_path")
+    )
+    now = _now()
+    await _touch_last_event_at(db, session_id, now)
+
+    tool_name = _payload_str(payload, "tool_name")
+    tool_use_id = _payload_str(payload, "tool_use_id")
+    event_id = await _append_event(
+        db,
+        session_id,
+        event,
+        tool_name,
+        tool_use_id,
+        _summarize_hook_event(event, payload),
+        payload,
+    )
+    await db.commit()
+    # `update` rather than a per-event kind: it is already in the frontend's
+    # `SSE_EVENT_NAMES` subscription list and is the stream's generic "this
+    # session changed, refetch it" signal. A new name would be published to a
+    # stream nobody is subscribed to for it, and so silently dropped.
+    await _broadcast(db, session_id, event_id, "update")
+
+
+def make_hook_event_recorder(
+    event: str,
+) -> Callable[[aiosqlite.Connection, dict], Awaitable[None]]:
+    """A `(db, payload)` handler bound to one event, for the router to mount.
+
+    The router registers a distinct route per event; each needs its own
+    two-argument callable to hand to `_safe_handle`, which logs
+    `handler.__name__` on failure — hence the explicit name rather than a
+    `functools.partial`, which has none.
+    """
+
+    async def _record(db: aiosqlite.Connection, payload: dict) -> None:
+        await record_hook_event(db, event, payload)
+
+    _record.__name__ = f"record_hook_event[{event}]"
+    return _record
 
 
 async def cleanup_stale_sessions(db: aiosqlite.Connection) -> dict:
