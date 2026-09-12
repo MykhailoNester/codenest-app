@@ -16,11 +16,13 @@ from app.models.hooks import (
     HookSelfTestReceipt,
     HookVerifyReport,
 )
+from app.models.telemetry import TelemetryReport
 from app.models.workspace import Workspace
 from app.services import (
     effective_hooks_service,
     hooks_service,
     preauth_service,
+    telemetry_enable_service,
     workspace_context_service,
     workspace_service,
 )
@@ -131,6 +133,75 @@ async def post_hook_install(body: HookInstallRequest) -> HookInstallReport:
     """
     return HookInstallReport(
         **await hooks_service.install_settings_files(body.config_homes)
+    )
+
+
+class TelemetryRequest(BaseModel):
+    config_homes: list[str] = []
+
+
+@router.post("/telemetry/plan")
+async def post_telemetry_plan(body: TelemetryRequest) -> TelemetryReport:
+    """What turning telemetry on — and what turning it back off — would change.
+
+    Three routes rather than one with a ``mode`` in the body, for the reason
+    ``/hooks/install/plan`` is its own URL: the call that cannot write should
+    not be the same call that can, with the difference carried in a field a
+    client, a default or a serialisation bug could get wrong. The service
+    mirrors that split — ``plan_telemetry_files`` reaches a planner that never
+    mutates the body and never reaches the write block at all.
+
+    The response carries *both* directions. The consent screen shows what would
+    be written and what removing it would take away at the same time, and
+    computing the two together is what keeps them from being two answers to two
+    different reads of the file.
+
+    Never 4xx/5xx on the state of a user's files, exactly as the hook routes do
+    not: a missing, unreadable or unexpectedly shaped settings.json is a
+    per-result ``refusal`` the UI has to explain.
+    """
+    return TelemetryReport(
+        **await telemetry_enable_service.plan_telemetry_files(body.config_homes)
+    )
+
+
+@router.post("/telemetry/enable")
+async def post_telemetry_enable(body: TelemetryRequest) -> TelemetryReport:
+    """Write the five telemetry variables into each config home's settings.json.
+
+    The consent-bearing write. It merges into the ``env`` block the same way
+    ``/hooks/install`` merges into ``hooks``: adds what is missing, rewrites
+    only values this app itself wrote, leaves every other entry — the user's own
+    and every other tool's — exactly where it was, and takes a timestamped copy
+    of the file first through the same function.
+
+    What the caller consents to is not this route; it is what the export
+    carries and who can reach the receiving endpoint. Both are stated on the
+    surface that calls this, and this docstring is not the place they live —
+    ``app/services/otlp_receiver_service.py``'s "What this endpoint trusts, and
+    what it does not" is, and the screen is written from it.
+    """
+    return TelemetryReport(
+        **await telemetry_enable_service.enable_telemetry_files(body.config_homes)
+    )
+
+
+@router.post("/telemetry/disable")
+async def post_telemetry_disable(body: TelemetryRequest) -> TelemetryReport:
+    """Remove the telemetry variables this app wrote, and only those.
+
+    A real route rather than a sentence telling the user to hand-edit JSON:
+    consent that cannot be withdrawn where it was given is not consent. An entry
+    whose value this app did not write is reported and left — which for
+    ``CLAUDE_CODE_ENABLE_TELEMETRY`` means telemetry stays on, and the result
+    says so on the key rather than in a footnote.
+
+    It does not retract anything already recorded. Cost figures Lane B has
+    written stay written and stay outranking every other lane; this stops new
+    ones arriving.
+    """
+    return TelemetryReport(
+        **await telemetry_enable_service.disable_telemetry_files(body.config_homes)
     )
 
 

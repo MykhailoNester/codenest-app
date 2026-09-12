@@ -1308,6 +1308,71 @@ async def install_settings_files(
     )
 
 
+# ─── write-through install, part 4: the reuse seam (#179) ────────────────────
+#
+# `settings.json` has a second thing in it this app has a reason to write: the
+# `env` block that turns Claude Code telemetry on and points its OTLP exporter
+# at this sidecar (#179). That is a different key, a different vocabulary and a
+# different consent question, so it is a different module — but it is the same
+# file, and it must not be a second writer.
+#
+# Everything that makes the install above safe is a property of *how the file
+# is touched*, not of what is written into it: the containment policy on the
+# resolved path, the one reader with its size/UTF-8/JSON rules, the temp-file
+# and rename, the timestamped backup beside the target. A module that copied
+# those would be one `os.replace` away from being the one that truncates a
+# user's settings.json, and the copy would drift from this one silently.
+#
+# So the four primitives are published here, under names without a leading
+# underscore, and `telemetry_enable_service` calls them. They are thin on
+# purpose: each is exactly its private counterpart, with no argument massaged
+# and no behaviour added, so this section can never become a second
+# implementation of anything. `_install_one` above still calls the private
+# names directly, which keeps the #170 path byte-for-byte what it was.
+
+
+def read_settings_file(path: Path) -> tuple[str, object | None, str | None]:
+    """`(status, parsed, detail)` for a settings.json — see `_read_settings`.
+
+    Status is `'ok' | 'missing_file' | 'invalid_json' | 'unreadable'`. Blocking;
+    call it from a `to_thread` hop.
+    """
+    return _read_settings(path)
+
+
+def resolve_write_target(config_home: str) -> tuple[Path | None, str | None]:
+    """`(path to write, refusal)` for a config home — see `_resolve_write_target`.
+
+    Exactly one of the two is None. This is the containment check, and for a
+    writer on an unauthenticated loopback route it is the only thing between a
+    caller-supplied path and an arbitrary overwrite.
+    """
+    return _resolve_write_target(config_home)
+
+
+def atomic_write(target: Path, data: bytes, mode: int | None) -> None:
+    """Write *data* over *target* without a window in which it is truncated —
+    see `_atomic_write`."""
+    _atomic_write(target, data, mode)
+
+
+def write_backup(target: Path, previous: bytes, mode: int | None) -> Path:
+    """Copy *previous* beside *target* and return where it went — see
+    `_write_backup`. The suffix and timestamp scheme is shared, so a user
+    looking for "the copy this app took" finds one naming convention."""
+    return _write_backup(target, previous, mode)
+
+
+def loopback_equivalents(base_url: str) -> tuple[str, ...]:
+    """*base_url* spelled with each loopback alias, itself first.
+
+    Published for the same reason as the four above: `127.0.0.1:8002` and
+    `localhost:8002` are the same endpoint, and a second module deciding that
+    for itself is a second module that can decide it differently.
+    """
+    return _equivalent_base_urls(base_url)
+
+
 # ─── Self-test token state (self-test, part 3: the live probe) ───────────────
 #
 # In-process only — a migration for a 10-minute ephemeral nonce would be dead

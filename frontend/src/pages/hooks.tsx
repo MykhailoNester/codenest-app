@@ -526,6 +526,20 @@ function InstallCard({
         A dry run of what installing or repairing would do to{" "}
         <code>{planResult.settings_path}</code>. Nothing below has been written.
       </p>
+      {/*
+        The only pointer to #179's surface, and it belongs here: this page is
+        where a user learns that this app writes their settings.json, and the
+        `env` block is the other thing it writes into the same file. The
+        telemetry screen itself lives in Settings, which — unlike this page —
+        cannot be switched off in Features, so the path to turning telemetry
+        back off can never disappear. See `telemetry-tab.tsx`'s header.
+      */}
+      <p className={styles.sectionNote}>
+        This app writes one other thing into this same file: the environment
+        variables that turn Claude Code telemetry on and point it here. Those
+        live in Settings &rarr; Telemetry, with their own dry run, their own
+        confirm and a real off switch.
+      </p>
       <div className={styles.card}>
         <div className={styles.bannerBody}>{planHeadline(planResult)}</div>
 

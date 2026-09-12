@@ -18,6 +18,7 @@ export type SettingsSectionId =
   | "workflow-labels"
   | "terminal"
   | "notifications"
+  | "telemetry"
   | "general";
 
 interface NavGroup {
@@ -49,6 +50,12 @@ const NAV_GROUPS: NavGroup[] = [
     heading: "System",
     items: [
       { id: "notifications", label: "Notifications" },
+      // #179. In Settings rather than behind a nav slug on purpose: this is
+      // where telemetry is consented to *and* withdrawn, and Settings is the
+      // one surface in the app that cannot be switched off in Features. See
+      // the header of `telemetry-tab.tsx` for why the Hooks page — which owns
+      // the same writer and the same file — was the wrong home for it.
+      { id: "telemetry", label: "Telemetry" },
       { id: "general", label: "General" },
     ],
   },

@@ -5075,6 +5075,121 @@ export function useInstallHooks(): UseMutationResult<
   });
 }
 
+// ─── Guided telemetry enable (#179): plan first, then enable or disable ─────
+
+/**
+ * What would happen — or did happen — to one environment variable.
+ *
+ * `value` is only ever a value *this app* writes. A key the app did not author
+ * is reported by name and action and never by content: a settings.json `env`
+ * block is where an `ANTHROPIC_API_KEY` lives, and the rule is the one
+ * `app/models/effective_hooks.py` states for a third-party hook command's argv.
+ */
+export interface TelemetryKeyPlan {
+  key: string;
+  /** enable direction: ok | add | update | conflict. disable: remove | absent. */
+  action: "ok" | "add" | "update" | "conflict" | "remove" | "absent";
+  value: string | null;
+  detail: string | null;
+}
+
+/** A key this app does not set that changes what enabling means on this machine. */
+export interface TelemetryNote {
+  key: string;
+  /** `blocking` — the enable will not take effect as described. */
+  severity: "blocking" | "warn";
+  detail: string;
+}
+
+export interface TelemetryResult {
+  config_home: string;
+  settings_path: string;
+  status: "applied" | "planned" | "unchanged" | "refused";
+  refusal: string | null;
+  changed: boolean;
+  created_file: boolean;
+  /** Where the previous content was copied before the write. Null on a dry run. */
+  backup_path: string | null;
+  /** The state of the file **as this call found it**, not the one it leaves. */
+  state: "off" | "partial" | "on";
+  enable: TelemetryKeyPlan[];
+  disable: TelemetryKeyPlan[];
+  /** How many env entries this app did not author and did not touch. A count. */
+  left_foreign: number;
+  notes: TelemetryNote[];
+}
+
+export interface TelemetryReport {
+  base_url: string;
+  /** `<base>/v1/metrics` — the URL actually POSTed to, which the env var is not. */
+  endpoint_url: string;
+  export_interval_ms: number;
+  dry_run: boolean;
+  mode: "plan" | "enable" | "disable";
+  overall: "applied" | "planned" | "unchanged" | "refused";
+  results: TelemetryResult[];
+}
+
+/**
+ * The dry run, on its own route because it structurally cannot write.
+ *
+ * A `useQuery`, and fetched before the user asks for anything: the consent
+ * screen is not allowed to describe what enabling would do in the abstract. It
+ * names the file, the five keys, which of them are already set by somebody
+ * else, and what turning it back off would remove — all of which are facts
+ * about this machine that only this response carries.
+ */
+export function useTelemetryPlan(
+  configHomes: string[],
+  enabled = true,
+): UseQueryResult<TelemetryReport, SidecarError> {
+  return useQuery<TelemetryReport, SidecarError>({
+    queryKey: ["workspace", "telemetry", "plan", configHomes],
+    queryFn: () =>
+      fetchSidecar<TelemetryReport>("/api/v1/workspace/telemetry/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config_homes: configHomes }),
+      }),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+/**
+ * The two writes. One mutation, `mode` chosen by the caller, because the two
+ * routes are otherwise identical in shape and a second hook would only be a
+ * second place to forget an invalidation.
+ *
+ * Both invalidate the plan — the screen's whole state is derived from it — and
+ * the session/dashboard reads, because enabling changes where the cost figures
+ * on them come from.
+ */
+export function useSetTelemetry(): UseMutationResult<
+  TelemetryReport,
+  SidecarError,
+  { mode: "enable" | "disable"; config_homes: string[] }
+> {
+  const qc = useQueryClient();
+  return useMutation<
+    TelemetryReport,
+    SidecarError,
+    { mode: "enable" | "disable"; config_homes: string[] }
+  >({
+    mutationFn: ({ mode, config_homes }) =>
+      fetchSidecar<TelemetryReport>(`/api/v1/workspace/telemetry/${mode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config_homes }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["workspace", "telemetry", "plan"],
+      });
+    },
+  });
+}
+
 export function useImportPreview(): UseMutationResult<
   ImportPreviewResult,
   SidecarError,
