@@ -5629,6 +5629,61 @@ export function useQuerySourceSpend(): UseQueryResult<
   });
 }
 
+// ─── Usage & limits (#182) ──────────────────────────────────────────────────
+
+export type UsageWindow = "24h" | "7d" | "30d";
+
+export const USAGE_WINDOWS: readonly UsageWindow[] = ["24h", "7d", "30d"];
+
+/** Lane A's flat-rate figures, over the sessions no vendor figure displaced. */
+export interface UsageEstimate {
+  lane: string;
+  observed: boolean;
+  sessions: number;
+  cost_usd: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+}
+
+/** Lane B's totals. A metric with no series is `null` — not observed, not 0. */
+export interface UsageVendor {
+  lane: string;
+  observed: boolean;
+  sessions: number;
+  cost_usd: number | null;
+  tokens_input: number | null;
+  tokens_output: number | null;
+  tokens_cache_read: number | null;
+  tokens_cache_creation: number | null;
+}
+
+export interface UsageConsumption {
+  window: UsageWindow;
+  since: string;
+  sessions: {
+    total: number;
+    vendor_observed: number;
+    not_observed: number;
+    superseded: number;
+  };
+  estimate: UsageEstimate;
+  vendor: UsageVendor;
+}
+
+export function useUsageConsumption(
+  window: UsageWindow,
+): UseQueryResult<UsageConsumption, SidecarError> {
+  return useQuery<UsageConsumption, SidecarError>({
+    queryKey: ["usage", "consumption", window],
+    queryFn: () =>
+      fetchSidecar<UsageConsumption>(
+        `/api/v1/usage/consumption?window=${window}`,
+      ),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
 // ─── Session Inspector (#179) ───────────────────────────────────────────────
 
 /** A single lane's claim on one field, as recorded when it wrote the column. */
@@ -5827,7 +5882,9 @@ export function useProjectContext(
     queryKey: ["project-context", projectId],
     enabled: projectId !== null && Number.isFinite(projectId),
     queryFn: () =>
-      fetchSidecar<ProjectContextReport>(`/api/v1/projects/${projectId}/context`),
+      fetchSidecar<ProjectContextReport>(
+        `/api/v1/projects/${projectId}/context`,
+      ),
     staleTime: 10_000,
   });
 }

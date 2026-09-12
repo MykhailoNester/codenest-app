@@ -17,6 +17,9 @@ vi.mock("../../lib/api", () => ({
   useCreateBudget: () => idle,
   useUpdateBudget: () => idle,
   useDeleteBudget: () => idle,
+  USAGE_WINDOWS: ["24h", "7d", "30d"],
+  useUsageConsumption: () => ({ data: undefined, isPending: true }),
+  usePlanUsage: () => ({ data: undefined, isLoading: true }),
 }));
 
 vi.mock("../../components/layout/shell", () => ({
