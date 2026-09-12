@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.database import get_db
-from app.services import session_service
+from app.services import session_inspector_service, session_service
 
 router = APIRouter()
 
@@ -35,6 +35,15 @@ async def get_session(session_id: str):
     if not replay:
         raise HTTPException(status_code=404, detail="Session not found")
     return replay
+
+
+@router.get("/api/v1/sessions/{session_id}/inspect")
+async def inspect_session(session_id: str):
+    db = await get_db()
+    report = await session_inspector_service.inspect(db, session_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return report
 
 
 @router.get("/api/v1/sessions/{session_id}/cost")

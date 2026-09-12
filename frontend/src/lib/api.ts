@@ -5628,3 +5628,105 @@ export function useQuerySourceSpend(): UseQueryResult<
     staleTime: 10_000,
   });
 }
+
+// ─── Session Inspector (#179) ───────────────────────────────────────────────
+
+/** A single lane's claim on one field, as recorded when it wrote the column. */
+export interface FieldClaim {
+  lane: string;
+  value_text: string | null;
+  claimed_at: string;
+}
+
+export interface InspectorField {
+  field: string;
+  group: "money" | "other";
+  value: string | number | null;
+  /** claimed = a lane owns it; untracked = a value predating provenance;
+   *  unobserved = nothing has ever measured it. */
+  state: "claimed" | "untracked" | "unobserved";
+  winning_lane: string | null;
+  lanes_allowed: string[];
+  claims: FieldClaim[];
+}
+
+export interface InspectorLane {
+  lane: string;
+  label: string;
+  observed: boolean;
+  evidence: string;
+  fields_won: number;
+}
+
+export interface InspectorSpan {
+  seq: number;
+  project_id: number | null;
+  project_name: string | null;
+  cwd: string;
+  repo_path: string | null;
+  started_at: string;
+  ended_at: string | null;
+  last_seen_at: string;
+  seconds: number | null;
+  open: boolean;
+}
+
+export interface InspectorAttentionItem {
+  id: number;
+  kind: string;
+  severity: string;
+  state: string;
+  title: string;
+  detail: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+  resolution: string | null;
+}
+
+export interface InspectorOperation {
+  span_name: string;
+  category: string;
+  operation: string;
+  count: number;
+  error_count: number;
+  total_duration_ms: number;
+  avg_duration_ms: number;
+  min_duration_ms: number;
+  max_duration_ms: number;
+  last_seen_at: string | null;
+}
+
+export interface InspectorEvent {
+  id: number;
+  event_type: string;
+  tool_name: string | null;
+  summary: string | null;
+  created_at: string;
+}
+
+export interface SessionInspectorReport {
+  session: AgentSession & Record<string, unknown>;
+  lanes: InspectorLane[];
+  fields: InspectorField[];
+  spans: InspectorSpan[];
+  attention: InspectorAttentionItem[];
+  operations: InspectorOperation[];
+  events: InspectorEvent[];
+  event_counts: { event_type: string; count: number }[];
+  events_truncated: boolean;
+}
+
+export function useSessionInspector(
+  sessionId: string,
+): UseQueryResult<SessionInspectorReport, SidecarError> {
+  return useQuery<SessionInspectorReport, SidecarError>({
+    queryKey: ["session-inspector", sessionId],
+    enabled: Boolean(sessionId),
+    queryFn: () =>
+      fetchSidecar<SessionInspectorReport>(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/inspect`,
+      ),
+    staleTime: 10_000,
+  });
+}
