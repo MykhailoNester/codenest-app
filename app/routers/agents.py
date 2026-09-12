@@ -24,6 +24,7 @@ from app.services import (
     budget_service,
     cwd_resolver_service,
     event_retention_service,
+    hooks_service,
     plan_usage_service,
     session_backfill_service,
     session_hud_service,
@@ -112,6 +113,51 @@ async def hook_session_end(request: Request):
     payload = await _read_json(request)
     await _safe_handle(agent_service.record_session_end, payload)
     return JSONResponse(_OK)
+
+
+def _make_hook_event_endpoint(spec: hooks_service.HookEvent):
+    """The FastAPI endpoint for one extended hook event.
+
+    A closure per event rather than a single `/event/{slug}` path-parameter
+    route: a catch-all would accept any slug a typo or a future Claude Code
+    version produced and quietly ingest it under whatever name arrived, and it
+    would collapse 16 events into one line in an access log. With a literal
+    path per event an unregistered slug 404s at the router and never reaches
+    the recorder, and each event's latency stays attributable to itself — which
+    matters because all 22 sit on the critical path of every Claude Code
+    session and the epic's stated risk for P2 is exactly that.
+    """
+    handler = agent_service.make_hook_event_recorder(spec.event)
+
+    async def endpoint(request: Request):
+        payload = await _read_json(request)
+        await _safe_handle(handler, payload)
+        return JSONResponse(_OK)
+
+    endpoint.__name__ = f"hook_{spec.event}"
+    return endpoint
+
+
+# Mount the extended tier at import time, straight off the registry. Nothing
+# here restates the event list: adding an entry to `hooks_service.HOOK_EVENTS`
+# is the whole of what it takes to give an event a route.
+def _mount_extended_hook_routes() -> None:
+    """Register one route per extended event.
+
+    A function rather than a bare module-level loop so the loop variable does
+    not outlive it — a stray `_spec` in the module namespace is the kind of
+    thing that later reads like a constant to someone skimming the file.
+    """
+    for spec in hooks_service.extended_events():
+        router.add_api_route(
+            spec.path,
+            _make_hook_event_endpoint(spec),
+            methods=["POST"],
+            name=f"hook_{spec.event}",
+        )
+
+
+_mount_extended_hook_routes()
 
 
 async def _read_json(request: Request) -> dict:

@@ -15,6 +15,46 @@ before the harness kills it — the sidecar is never on the critical path. Each
 event carries a ``"matcher": "*"`` so every session is captured regardless of
 cwd.
 
+The event registry
+------------------
+``HOOK_EVENTS`` is the single enumeration of every Claude Code hook event this
+app ingests, and the import path the rest of P2 consumes — the settings
+snippet, the settings diff, the ingest routes and the retention split all read
+it rather than restating a list of their own. A second copy of the list is the
+bug this module exists to prevent: the app already shipped one
+(``frontend/src/pages/onboarding/hooks-step.tsx``'s ``FALLBACK_SNIPPET``,
+deliberately kept as a *loading placeholder* and replaced by this module's
+live snippet the moment the sidecar answers), and every further copy is one
+more place for an event to be added in one and forgotten in the other.
+
+Each entry is a ``HookEvent`` carrying four facts:
+
+* ``event`` — the Claude Code hook event name, and the ``agent_events.event_type``
+  value the recorder writes. It is what ``event_retention_service`` classifies on,
+  so renaming one silently re-buckets history.
+* ``path`` — the sidecar ingest path, stored whole rather than derived from the
+  event name. The original six predate the ``/event/`` namespace and sit at
+  ``/api/v1/hooks/<slug>`` with slugs that are not mechanical transforms of
+  their names (``UserPromptSubmit`` → ``user-prompt``); every event added since
+  lives under ``/api/v1/hooks/event/<slug>``. Those six paths are already
+  pasted into real users' ``settings.json`` files and can never move.
+* ``tier`` — ``TIER_CORE`` for the six the app has always required,
+  ``TIER_EXTENDED`` for everything added in P2. This is what keeps widening the
+  registry from being a user-visible regression: ``classify_settings_hooks``
+  grades a ``settings.json`` against the core tier only, so an install that was
+  green yesterday does not turn amber today merely because the app learned
+  about sixteen more events it would *like* to have. The extended tier is
+  telemetry the app makes better use of when present, never a precondition.
+* ``discards_stdout`` — whether the generated command redirects curl's output
+  to ``/dev/null``. True for all 22 today and load-bearing for at least two of
+  them: Claude Code feeds a ``SessionStart`` / ``UserPromptSubmit`` hook's
+  stdout back into the session as context, so an unredirected response body
+  would be injected into the user's conversation. It is a field rather than an
+  unconditional suffix because the epic's P5 context broker is precisely the
+  proposal to stop discarding it for the events that have a return channel —
+  a change that must be expressible per event, behind its own gate, rather
+  than as an edit to the one string every hook command is built from.
+
 Self-test verification
 -----------------------
 ``hooks_status`` only ever goes green on an inbound ping from a *real* Claude
@@ -56,15 +96,96 @@ import aiosqlite
 # contain and avoids IPv4/IPv6 resolution surprises on some macOS setups.
 _DEFAULT_BASE_URL = "http://localhost:8002"
 
-# Claude Code hook event name -> sidecar ingest endpoint path segment.
-_HOOK_EVENTS: tuple[tuple[str, str], ...] = (
-    ("SessionStart", "session-start"),
-    ("UserPromptSubmit", "user-prompt"),
-    ("PreToolUse", "pre-tool"),
-    ("PostToolUse", "post-tool"),
-    ("Stop", "stop"),
-    ("SessionEnd", "session-end"),
+# Tier names. `core` is the six events the app has always ingested and still
+# grades a settings.json against; `extended` is everything P2 added, which the
+# app uses when present and never requires. See the module docstring.
+TIER_CORE = "core"
+TIER_EXTENDED = "extended"
+
+# URL prefix for every event added after the original six. Keeping a distinct
+# path per event (rather than one catch-all taking the event name as a path
+# parameter) means an unknown or misspelled event 404s at the router instead of
+# reaching the recorder, and it keeps each hook's latency attributable to its
+# own route in an access log.
+_EVENT_PREFIX = "/api/v1/hooks/event"
+
+
+@dataclass(frozen=True)
+class HookEvent:
+    """One Claude Code hook event and how this app ingests it.
+
+    Frozen because the tuple below is module-level shared state read on the
+    hook path; nothing may mutate an entry in place. See the module docstring
+    for what each field means and why `path` is stored rather than derived.
+    """
+
+    event: str
+    path: str
+    tier: str
+    discards_stdout: bool
+
+
+# The one and only enumeration of ingested hook events. Ordered core-first,
+# then extended in the rough order a session emits them, because this order is
+# what the pasted settings.json snippet reads in.
+#
+# Deliberately absent — the epic's P2 paragraph names them, the design's triage
+# puts all four in "not for us", and the design wins: `InstructionsLoaded`,
+# `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`.
+HOOK_EVENTS: tuple[HookEvent, ...] = (
+    # ─── core: the six already in users' settings.json; paths are frozen ────
+    HookEvent("SessionStart", "/api/v1/hooks/session-start", TIER_CORE, True),
+    HookEvent("UserPromptSubmit", "/api/v1/hooks/user-prompt", TIER_CORE, True),
+    HookEvent("PreToolUse", "/api/v1/hooks/pre-tool", TIER_CORE, True),
+    HookEvent("PostToolUse", "/api/v1/hooks/post-tool", TIER_CORE, True),
+    HookEvent("Stop", "/api/v1/hooks/stop", TIER_CORE, True),
+    HookEvent("SessionEnd", "/api/v1/hooks/session-end", TIER_CORE, True),
+    # ─── extended: P2, all behind the one generic recorder ──────────────────
+    HookEvent("Notification", f"{_EVENT_PREFIX}/notification", TIER_EXTENDED, True),
+    HookEvent("Elicitation", f"{_EVENT_PREFIX}/elicitation", TIER_EXTENDED, True),
+    HookEvent(
+        "PermissionRequest", f"{_EVENT_PREFIX}/permission-request", TIER_EXTENDED, True
+    ),
+    HookEvent(
+        "PermissionDenied", f"{_EVENT_PREFIX}/permission-denied", TIER_EXTENDED, True
+    ),
+    HookEvent(
+        "PostToolUseFailure",
+        f"{_EVENT_PREFIX}/post-tool-failure",
+        TIER_EXTENDED,
+        True,
+    ),
+    HookEvent("SubagentStart", f"{_EVENT_PREFIX}/subagent-start", TIER_EXTENDED, True),
+    HookEvent("SubagentStop", f"{_EVENT_PREFIX}/subagent-stop", TIER_EXTENDED, True),
+    HookEvent("TaskCreated", f"{_EVENT_PREFIX}/task-created", TIER_EXTENDED, True),
+    HookEvent("TaskCompleted", f"{_EVENT_PREFIX}/task-completed", TIER_EXTENDED, True),
+    HookEvent("StopFailure", f"{_EVENT_PREFIX}/stop-failure", TIER_EXTENDED, True),
+    HookEvent("PreCompact", f"{_EVENT_PREFIX}/pre-compact", TIER_EXTENDED, True),
+    HookEvent("PostCompact", f"{_EVENT_PREFIX}/post-compact", TIER_EXTENDED, True),
+    HookEvent("CwdChanged", f"{_EVENT_PREFIX}/cwd-changed", TIER_EXTENDED, True),
+    HookEvent(
+        "DirectoryAdded", f"{_EVENT_PREFIX}/directory-added", TIER_EXTENDED, True
+    ),
+    HookEvent(
+        "PreModelSwitch", f"{_EVENT_PREFIX}/pre-model-switch", TIER_EXTENDED, True
+    ),
+    HookEvent(
+        "PostModelSwitch", f"{_EVENT_PREFIX}/post-model-switch", TIER_EXTENDED, True
+    ),
 )
+
+_EVENTS_BY_NAME: dict[str, HookEvent] = {spec.event: spec for spec in HOOK_EVENTS}
+
+
+def core_events() -> tuple[HookEvent, ...]:
+    """The six events a settings.json is graded against (see `tier`)."""
+    return tuple(spec for spec in HOOK_EVENTS if spec.tier == TIER_CORE)
+
+
+def extended_events() -> tuple[HookEvent, ...]:
+    """The P2 events, each served by the one generic recorder."""
+    return tuple(spec for spec in HOOK_EVENTS if spec.tier == TIER_EXTENDED)
+
 
 # curl ``--max-time`` ceiling (seconds) — how long curl waits for the sidecar
 # before giving up. Kept under ``_HOOK_TIMEOUT`` so curl aborts itself first.
@@ -86,22 +207,28 @@ def settings_json_path(config_home: str | None) -> str:
     return str(Path(home).expanduser() / "settings.json")
 
 
-def _curl_command_for_url(url: str) -> str:
+def _curl_command_for_url(url: str, discard_stdout: bool = True) -> str:
     """Shell command that POSTs the hook payload (stdin) to *url*.
 
     Shared by the real hook builder (``_curl_command``) and the self-test
     minter (``mint_self_test``) so the two can never drift apart — the
     live-probe test asserts the two are the same command, URL substituted.
+
+    ``--max-time`` and the trailing ``|| true`` are not optional and are not
+    parameters: every one of the 22 commands must carry both, or a stalled or
+    absent sidecar becomes a stalled or erroring Claude Code session. Only the
+    stdout redirect varies, per ``HookEvent.discards_stdout``.
     """
+    redirect = " >/dev/null 2>&1" if discard_stdout else ""
     return (
         f"curl -s --max-time {_CURL_MAX_TIME} -X POST "
         "-H 'Content-Type: application/json' --data-binary @- "
-        f"{url} >/dev/null 2>&1 || true"
+        f"{url}{redirect} || true"
     )
 
 
-def _curl_command(base: str, ep: str) -> str:
-    """Shell command that POSTs the hook payload (stdin) to the sidecar.
+def _curl_command(base: str, spec: HookEvent) -> str:
+    """Shell command that POSTs *spec*'s hook payload (stdin) to the sidecar.
 
     ``--data-binary @-`` forwards the hook event JSON that Claude Code pipes in
     on stdin, so the sidecar receives the same body the old ``http`` hook sent.
@@ -109,7 +236,7 @@ def _curl_command(base: str, ep: str) -> str:
     Code never surfaces a hook error. Output is discarded (``>/dev/null 2>&1``)
     to keep ``SessionStart`` / ``UserPromptSubmit`` stdout out of the context.
     """
-    return _curl_command_for_url(f"{base}/api/v1/hooks/{ep}")
+    return _curl_command_for_url(f"{base}{spec.path}", spec.discards_stdout)
 
 
 def build_hook_settings(base_url: str | None = None) -> dict:
@@ -120,6 +247,11 @@ def build_hook_settings(base_url: str | None = None) -> dict:
     ``"http"`` type which raises ``ECONNREFUSED`` in every session. Each event
     gets a single entry with ``"matcher": "*"`` so all sessions are captured
     regardless of cwd or project.
+
+    Covers every entry in ``HOOK_EVENTS``, both tiers: a user pasting the
+    snippet gets the full 22, and the core/extended distinction only governs
+    how a settings.json that *already exists* is graded
+    (``classify_settings_hooks``), never what this offers.
 
     Example for SessionStart::
 
@@ -138,19 +270,19 @@ def build_hook_settings(base_url: str | None = None) -> dict:
     """
     base = (base_url or sidecar_base_url()).rstrip("/")
     hooks = {
-        event: [
+        spec.event: [
             {
                 "matcher": "*",
                 "hooks": [
                     {
                         "type": "command",
-                        "command": _curl_command(base, ep),
+                        "command": _curl_command(base, spec),
                         "timeout": _HOOK_TIMEOUT,
                     }
                 ],
             }
         ]
-        for event, ep in _HOOK_EVENTS
+        for spec in HOOK_EVENTS
     }
     return {"hooks": hooks}
 
@@ -212,10 +344,8 @@ _LOOPBACK_HOST_ORDER: tuple[str, ...] = ("localhost", "127.0.0.1", "[::1]")
 
 def hook_endpoint_path(event: str) -> str | None:
     """'SessionStart' -> '/api/v1/hooks/session-start'; None for unknown events."""
-    for known_event, ep in _HOOK_EVENTS:
-        if known_event == event:
-            return f"/api/v1/hooks/{ep}"
-    return None
+    spec = _EVENTS_BY_NAME.get(event)
+    return spec.path if spec is not None else None
 
 
 def _equivalent_base_urls(base_url: str) -> tuple[str, ...]:
@@ -299,7 +429,7 @@ def _classify_event(
     entries: object, event: str, equivalents: tuple[str, ...]
 ) -> tuple[str, str | None]:
     target_path = hook_endpoint_path(event)
-    assert target_path is not None  # event always comes from _HOOK_EVENTS
+    assert target_path is not None  # event always comes from HOOK_EVENTS
     pattern = _endpoint_pattern(target_path)
 
     if not isinstance(entries, list):
@@ -336,8 +466,8 @@ def _classify_event(
 
 def _all_missing() -> list[dict[str, Any]]:
     return [
-        {"event": event, "status": "missing", "detail": None}
-        for event, _ep in _HOOK_EVENTS
+        {"event": spec.event, "status": "missing", "detail": None}
+        for spec in core_events()
     ]
 
 
@@ -350,6 +480,17 @@ def classify_settings_hooks(
     not equality: a real settings.json will have other hooks, other matchers,
     and other top-level keys, so this only asks "does *some* entry for this
     event target our endpoint under a wildcard matcher".
+
+    Grades the **core tier only** (`hooks_service.core_events`), which is the
+    whole point of `HookEvent.tier`. `build_hook_settings` offers all 22 events
+    and the app is better off with all 22, but file_status is a verdict on
+    whether the user's wiring is *broken* — and it is not broken merely because
+    it predates P2. Grading all 22 would take every existing install, which has
+    exactly the core six in it and is working perfectly, from 'ok' to 'partial'
+    on upgrade, and light sixteen red chips on the onboarding card describing
+    nothing that ever worked. A user who re-pastes the snippet gets the full
+    set; one who does not keeps a green card and the six events the app has
+    always run on.
     """
     if not isinstance(parsed, dict):
         return "absent", _all_missing(), "settings.json does not contain a JSON object"
@@ -362,9 +503,11 @@ def classify_settings_hooks(
 
     equivalents = _equivalent_base_urls(base_url)
     verdicts: list[dict[str, Any]] = []
-    for event, _ep in _HOOK_EVENTS:
-        status, detail = _classify_event(hooks_block.get(event), event, equivalents)
-        verdicts.append({"event": event, "status": status, "detail": detail})
+    for spec in core_events():
+        status, detail = _classify_event(
+            hooks_block.get(spec.event), spec.event, equivalents
+        )
+        verdicts.append({"event": spec.event, "status": status, "detail": detail})
 
     statuses = {v["status"] for v in verdicts}
     if statuses == {"ok"}:
@@ -489,7 +632,10 @@ def _verify_sync(config_homes: Sequence[str], base: str) -> dict[str, Any]:
 
     return {
         "base_url": base,
-        "expected_events": [event for event, _ep in _HOOK_EVENTS],
+        # Core tier only, matching what `classify_settings_hooks` graded — the
+        # frontend renders one chip per name here and must not be handed a
+        # name it has no verdict for.
+        "expected_events": [spec.event for spec in core_events()],
         "overall": _overall_status(results),
         "results": results,
     }

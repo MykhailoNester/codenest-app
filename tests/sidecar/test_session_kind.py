@@ -659,3 +659,45 @@ async def test_an_unknown_kind_filter_raises(
         await agent_service.list_sessions(migrated_db, session_kind="cloud")
     with pytest.raises(ValueError, match="unknown session_kind"):
         await agent_service.count_sessions(migrated_db, session_kind="cloud")
+
+
+@pytest.mark.asyncio
+async def test_a_session_first_seen_through_an_extended_hook_gets_its_kind(
+    migrated_db: aiosqlite.Connection,
+    real_ephemeral_roots: None,
+    tmp_path: pathlib.Path,
+) -> None:
+    """#168's generic recorder must classify, not just attribute.
+
+    `cwd_resolver_service.resolve` returns `project_id`, `git_branch` and
+    `session_kind` in one object. `_ensure_session_row` — the path that creates
+    a session whose FIRST event is an extended hook, now the common case for a
+    subagent or task event — originally used only `project_id` and dropped the
+    other two.
+
+    That is not cosmetic. `event_retention_service` files an ephemeral
+    session's events under a 7-day window and a project session's under 90, so
+    a session mis-classified here keeps its rows for nearly three months past
+    the class #157 created for them. The resolver had already done the work;
+    this pins that the answer is used.
+    """
+    scratch = tmp_path / "cn-scratch"
+    scratch.mkdir()
+
+    await agent_service.record_hook_event(
+        migrated_db,
+        "SubagentStart",
+        {"session_id": "s-ext-first", "cwd": str(scratch)},
+    )
+    await migrated_db.commit()
+
+    row = await (
+        await migrated_db.execute(
+            "SELECT session_kind, status FROM agent_sessions WHERE session_id = ?",
+            ("s-ext-first",),
+        )
+    ).fetchone()
+
+    assert row is not None, "the extended hook must create the session row"
+    assert row["session_kind"] == "ephemeral"
+    assert row["status"] == "active"
