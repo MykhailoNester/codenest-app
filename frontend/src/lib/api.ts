@@ -5584,3 +5584,47 @@ export function useTraceOperations(): UseQueryResult<
     staleTime: 10_000,
   });
 }
+
+// ─── Lane B spend split by query_source (#177) ──────────────────────────────
+
+/**
+ * One bucket of Lane B spend. `query_source` is whatever value the CLI put on
+ * the series — the set is discovered from stored rows, never declared here —
+ * and `null` means the series carried no such attribute.
+ */
+export interface QuerySourceBucket {
+  query_source: string | null;
+  sessions: number;
+  series: number;
+  cost_usd: number;
+  tokens_input: number;
+  tokens_output: number;
+  tokens_cache_read: number;
+  tokens_cache_creation: number;
+}
+
+export interface QuerySourceAttribution {
+  sessions: number;
+  lane_b_cost_usd: number;
+  attributed_cost_usd: number;
+  delta_usd: number;
+}
+
+export interface QuerySourceReport {
+  lane: string;
+  sources: QuerySourceBucket[];
+  total_cost_usd: number;
+  attribution: QuerySourceAttribution;
+}
+
+export function useQuerySourceSpend(): UseQueryResult<
+  QuerySourceReport,
+  SidecarError
+> {
+  return useQuery<QuerySourceReport, SidecarError>({
+    queryKey: ["metrics", "query-sources"],
+    queryFn: () =>
+      fetchSidecar<QuerySourceReport>("/api/v1/metrics/query-sources"),
+    staleTime: 10_000,
+  });
+}

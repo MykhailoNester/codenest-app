@@ -340,6 +340,10 @@ MAX_TOKENS_PER_POINT = 1e12
 # the "no blobs" rule.
 MAX_MODEL_LEN = 128
 
+# Same treatment for `query_source`. The vocabulary is the CLI's and is not
+# known here, so the only thing this module asserts about a value is its length.
+MAX_QUERY_SOURCE_LEN = 64
+
 # Seconds between repeats of the same rejection-reason warning. A misconfigured
 # exporter pushes every 5–60 s forever; without a cooldown one broken setup
 # fills the log with the same line. The counters in `receiver_stats()` keep the
@@ -642,6 +646,7 @@ class Observation:
     metric_key: str
     series_key: str
     model: str | None
+    query_source: str | None
     temporality: str
     value: float
 
@@ -849,6 +854,7 @@ def parse_export(body: dict[str, Any]) -> ParseResult:
                         k: v for k, v in point_attrs.items() if k not in _IDENTITY_ATTRS
                     }
                     model = dimensions.get("model")
+                    source = _pick(dimensions, "query_source", "query.source")
                     result.observations.append(
                         Observation(
                             session_id=session_id,
@@ -857,6 +863,11 @@ def parse_export(body: dict[str, Any]) -> ParseResult:
                             model=(
                                 model[:MAX_MODEL_LEN]
                                 if isinstance(model, str) and model
+                                else None
+                            ),
+                            query_source=(
+                                source[:MAX_QUERY_SOURCE_LEN]
+                                if isinstance(source, str) and source
                                 else None
                             ),
                             temporality=temporality,
@@ -884,9 +895,9 @@ def _now() -> str:
 
 _UPSERT_SQL = """
 INSERT INTO otlp_metric_series
-    (session_id, metric_key, series_key, model, temporality, value, points,
-     created_at, last_seen_at)
-VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+    (session_id, metric_key, series_key, model, query_source, temporality,
+     value, points, created_at, last_seen_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
 ON CONFLICT(session_id, metric_key, series_key) DO UPDATE SET
     -- Cumulative series restate a running total, so the arrival replaces
     -- rather than adds; MAX rather than a plain assignment because a
@@ -902,6 +913,7 @@ ON CONFLICT(session_id, metric_key, series_key) DO UPDATE SET
     -- COALESCE, so a point that arrives without a `model` attribute cannot
     -- blank a model this series already told us.
     model = COALESCE(excluded.model, otlp_metric_series.model),
+    query_source = COALESCE(excluded.query_source, otlp_metric_series.query_source),
     temporality = excluded.temporality,
     last_seen_at = excluded.last_seen_at
 """
@@ -1019,6 +1031,7 @@ async def ingest(
                 obs.metric_key,
                 obs.series_key,
                 obs.model,
+                obs.query_source,
                 obs.temporality,
                 obs.value,
                 now,
@@ -1102,4 +1115,83 @@ async def session_totals(db: aiosqlite.Connection, session_id: str) -> dict[str,
         "lane": LANE,
         "model": model,
         **totals,
+    }
+
+
+async def spend_by_query_source(db: aiosqlite.Connection) -> dict[str, Any]:
+    """Lane B's cost and tokens split by the `query_source` dimension.
+
+    The vocabulary is read off the rows, never declared: whatever distinct
+    values the CLI has actually exported are the buckets, and a series that
+    carried no such attribute (or predates migration 019) stays its own bucket
+    under a `null` key rather than being folded into a guess.
+    """
+    buckets: dict[str | None, dict[str, Any]] = {}
+    async with db.execute(
+        "SELECT query_source, metric_key, SUM(value) AS total,"
+        " COUNT(DISTINCT session_id) AS sessions, COUNT(*) AS series"
+        " FROM otlp_metric_series GROUP BY query_source, metric_key"
+    ) as cur:
+        rows = await cur.fetchall()
+
+    for row in rows:
+        source = row["query_source"]
+        bucket = buckets.get(source)
+        if bucket is None:
+            bucket = {
+                "query_source": source,
+                "sessions": 0,
+                "series": 0,
+                **dict.fromkeys(sorted(METRIC_KEYS), 0.0),
+            }
+            buckets[source] = bucket
+        if row["metric_key"] in METRIC_KEYS:
+            bucket[row["metric_key"]] = float(row["total"] or 0.0)
+        bucket["series"] += int(row["series"] or 0)
+        bucket["sessions"] = max(bucket["sessions"], int(row["sessions"] or 0))
+
+    sources = sorted(
+        buckets.values(),
+        key=lambda b: (-float(b[METRIC_KEY_COST]), b["query_source"] is None),
+    )
+    return {
+        "lane": LANE,
+        "sources": sources,
+        "total_cost_usd": sum(float(b[METRIC_KEY_COST]) for b in sources),
+        "attribution": await attribution_gap(db),
+    }
+
+
+async def attribution_gap(db: aiosqlite.Connection) -> dict[str, Any]:
+    """What Lane B says those sessions cost, against what was attributed to projects.
+
+    `attribution_service.attribute_turn_cost` still splits Lane A's flat-rate
+    estimate across projects, because Lane B's counters have no project
+    dimension. On a session Lane B owns, the two do not agree, and the
+    difference is `delta_usd` — shown rather than reconciled, because no
+    per-turn per-project vendor figure exists to reconcile it with.
+    """
+    async with db.execute(
+        "WITH lane_b AS ("
+        "  SELECT session_id, SUM(value) AS cost FROM otlp_metric_series"
+        "  WHERE metric_key = ? GROUP BY session_id"
+        ")"
+        " SELECT COUNT(*) AS sessions,"
+        " COALESCE(SUM(lane_b.cost), 0) AS lane_b_cost_usd,"
+        " COALESCE(SUM(("
+        "   SELECT COALESCE(SUM(c.cost_usd), 0) FROM session_project_costs c"
+        "   WHERE c.session_id = lane_b.session_id"
+        " )), 0) AS attributed_cost_usd"
+        " FROM lane_b",
+        (METRIC_KEY_COST,),
+    ) as cur:
+        row = await cur.fetchone()
+
+    lane_b_cost = float(row["lane_b_cost_usd"] if row else 0.0)
+    attributed = float(row["attributed_cost_usd"] if row else 0.0)
+    return {
+        "sessions": int(row["sessions"] if row else 0),
+        "lane_b_cost_usd": lane_b_cost,
+        "attributed_cost_usd": attributed,
+        "delta_usd": lane_b_cost - attributed,
     }

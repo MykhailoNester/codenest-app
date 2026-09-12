@@ -91,6 +91,7 @@ async def _seed_series(
     *,
     series_key: str = "s1",
     model: str | None = MODEL,
+    query_source: str | None = None,
     temporality: str = receiver.TEMPORALITY_CUMULATIVE,
 ) -> None:
     """One Lane B series row, written the way the receiver writes them.
@@ -103,7 +104,17 @@ async def _seed_series(
     now = receiver._now()
     await conn.execute(
         receiver._UPSERT_SQL,
-        (session_id, metric_key, series_key, model, temporality, value, now, now),
+        (
+            session_id,
+            metric_key,
+            series_key,
+            model,
+            query_source,
+            temporality,
+            value,
+            now,
+            now,
+        ),
     )
     await conn.commit()
 

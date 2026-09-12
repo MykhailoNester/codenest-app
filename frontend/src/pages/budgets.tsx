@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { toast } from "sonner";
 import {
   useBudgetBurn,
+  useQuerySourceSpend,
   useCreateBudget,
   useDeleteBudget,
   useProjects,
@@ -9,6 +10,7 @@ import {
   type BudgetCreateInput,
   type BudgetPeriod,
   type BudgetScope,
+  type QuerySourceBucket,
 } from "../lib/api";
 import { Shell } from "../components/layout/shell";
 import { budgetBarColor, budgetBarPct } from "../lib/budget-format";
@@ -288,6 +290,127 @@ function CreateForm({ onSubmit, submitting }: CreateFormProps): ReactElement {
   );
 }
 
+const UNATTRIBUTED = "unattributed";
+
+function sourceLabel(bucket: QuerySourceBucket): string {
+  return bucket.query_source ?? UNATTRIBUTED;
+}
+
+function tokenTotal(bucket: QuerySourceBucket): number {
+  return (
+    bucket.tokens_input +
+    bucket.tokens_output +
+    bucket.tokens_cache_read +
+    bucket.tokens_cache_creation
+  );
+}
+
+function QuerySourceSplit(): ReactElement {
+  const { data, isPending, isError, error } = useQuerySourceSpend();
+  const sources = data?.sources ?? [];
+  const total = data?.total_cost_usd ?? 0;
+  const attribution = data?.attribution;
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-0)" }}>
+        Where the spend came from
+      </div>
+      <div style={{ fontSize: 11, color: "var(--fg-3)" }}>
+        Cost and tokens Claude Code reported on its own metrics signal, split by
+        the <code>query_source</code> dimension it stamped on each counter. The
+        buckets are whatever values have actually arrived — nothing here knows
+        the vocabulary in advance, and a series that carried no query source is
+        its own <code>{UNATTRIBUTED}</code> row rather than a guess.
+      </div>
+
+      {isError ? (
+        <div style={{ fontSize: 11, color: "var(--danger, #e5484d)" }}>
+          Could not read the split: {error.message}
+        </div>
+      ) : isPending ? (
+        <div style={{ fontSize: 12, color: "var(--fg-3)" }}>Reading…</div>
+      ) : sources.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--fg-3)" }}>
+          No metrics exports have arrived yet. Turn on telemetry and point the
+          OTLP metrics exporter at this app to populate this.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {sources.map((bucket) => {
+            const share = total > 0 ? (bucket.cost_usd / total) * 100 : 0;
+            return (
+              <div
+                key={sourceLabel(bucket)}
+                style={{ display: "flex", flexDirection: "column", gap: 3 }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    fontSize: 12,
+                    color: bucket.query_source ? "var(--fg-0)" : "var(--fg-3)",
+                  }}
+                >
+                  <span style={{ fontFamily: "monospace" }}>
+                    {sourceLabel(bucket)}
+                  </span>
+                  <span style={{ fontFamily: "monospace" }}>
+                    ${bucket.cost_usd.toFixed(4)} · {share.toFixed(1)}% ·{" "}
+                    {tokenTotal(bucket).toLocaleString()} tok ·{" "}
+                    {bucket.sessions} session{bucket.sessions === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    height: 6,
+                    background: "var(--bg-1)",
+                    borderRadius: 3,
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.min(100, share)}%`,
+                      height: "100%",
+                      background: bucket.query_source
+                        ? "var(--accent, #4f8cff)"
+                        : "var(--line-2)",
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {attribution && attribution.sessions > 0 ? (
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--fg-3)",
+            borderTop: "1px solid var(--line-1)",
+            paddingTop: 8,
+          }}
+        >
+          Of the {attribution.sessions} session
+          {attribution.sessions === 1 ? "" : "s"} these figures cover, Claude
+          Code reported ${attribution.lane_b_cost_usd.toFixed(4)} while the
+          per-project ledger below adds up to $
+          {attribution.attributed_cost_usd.toFixed(4)} — a difference of $
+          {attribution.delta_usd.toFixed(4)}. The two disagree on purpose: the
+          vendor figure has no project dimension, so project attribution is
+          still split from this app&rsquo;s own flat-rate estimate. Budgets
+          scoped to a project are measured against that estimate; workspace and
+          agent budgets are measured against the session totals.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function BudgetsPage(): ReactElement {
   const { data: items = [], isPending } = useBudgetBurn();
   const { data: projects = [] } = useProjects();
@@ -309,6 +432,8 @@ export function BudgetsPage(): ReactElement {
           color: "var(--fg-1)",
         }}
       >
+        <QuerySourceSplit />
+
         <CreateForm
           submitting={create.isPending}
           onSubmit={(input) => {

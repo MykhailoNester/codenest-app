@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from ..database import get_db
-from ..services import metrics_service
+from ..services import metrics_service, otlp_receiver_service
 
 router = APIRouter()
 
@@ -58,3 +58,9 @@ async def activity_metrics(
         profile_id=profile_id,
     )
     return JSONResponse(result)
+
+
+@router.get("/api/v1/metrics/query-sources")
+async def query_source_spend() -> JSONResponse:
+    db = await get_db()
+    return JSONResponse(await otlp_receiver_service.spend_by_query_source(db))
