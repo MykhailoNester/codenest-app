@@ -496,6 +496,38 @@ def test_authorship_is_exact_membership_not_a_substring_scan() -> None:
         assert not effective._is_codenest_authored(command, authored), command
 
 
+def test_an_install_from_an_earlier_generation_is_still_ours() -> None:
+    """A hook we wrote before the current command shape is still a hook we wrote.
+
+    The marker arrived in #170. Every install made before it carries one of the
+    shapes in ``_LEGACY_COMMAND_FORMS`` instead, and the user has done nothing
+    to deserve losing it: the hook still posts to our own endpoint and still
+    feeds this database. Reporting it as a stranger's would reduce it to the
+    bare name ``curl`` on the one page whose whole job is to say what runs on
+    each event and who put it there — a wrong answer dressed up as a careful
+    one.
+
+    Pinned per generation and per loopback spelling, because the failure this
+    guards against is silent: nothing raises, the page simply attributes the
+    user's own hooks to nobody.
+    """
+    authored = effective.authored_commands(_BASE)
+
+    for base in ("http://localhost:8002", "http://127.0.0.1:8002"):
+        for spec in hooks_service.HOOK_EVENTS:
+            url = f"{base}{spec.path}"
+            for form in hooks_service._LEGACY_COMMAND_FORMS:
+                command = form.format(url=url)
+                assert effective._is_codenest_authored(command, authored), command
+
+    # Carrying the old generations must not have loosened membership into a
+    # scan: the case #169 was repaired for stays closed.
+    assert not effective._is_codenest_authored(
+        f"curl -H 'Authorization: Bearer SECRET' -X POST {_BASE}/api/v1/hooks/stop",
+        authored,
+    )
+
+
 def test_a_same_host_third_party_command_is_redacted_end_to_end(report) -> None:
     """The criterion, on the path a real request takes.
 

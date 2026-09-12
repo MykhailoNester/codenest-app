@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.models.effective_hooks import EffectiveHooksReport
 from app.models.hooks import (
+    HookInstallReport,
     HookSelfTestIngest,
     HookSelfTestMint,
     HookSelfTestReceipt,
@@ -47,7 +48,12 @@ async def get_workspace_context() -> dict:
 
 @router.get("/hooks/snippet")
 async def get_hook_snippet(config_home: str | None = None) -> dict:
-    """The settings.json hooks block to paste (guided copy-paste; no auto-write)."""
+    """The settings.json hooks block, for the user to paste by hand.
+
+    Read-only and still the honest default: ``/hooks/install`` writes the same
+    block for them, but a user is entitled to see what a program is about to
+    put in their config file before it does.
+    """
     base = hooks_service.sidecar_base_url()
     block = hooks_service.build_hook_settings(base)
     return {
@@ -80,6 +86,51 @@ async def post_hook_verify(body: HookVerifyRequest) -> HookVerifyReport:
     """
     return HookVerifyReport(
         **await hooks_service.verify_settings_files(body.config_homes)
+    )
+
+
+class HookInstallRequest(BaseModel):
+    config_homes: list[str] = []
+
+
+@router.post("/hooks/install/plan")
+async def post_hook_install_plan(body: HookInstallRequest) -> HookInstallReport:
+    """What ``/hooks/install`` would change, without changing anything.
+
+    A separate path rather than a ``dry_run`` flag on the writer. The one
+    endpoint in this app that rewrites a file the user did not hand it should
+    not share a route with the one that only reads it: "this call cannot write"
+    is worth being a property of the URL rather than of a request body a
+    client, a default or a serialisation bug could get wrong.
+    """
+    return HookInstallReport(
+        **await hooks_service.plan_settings_files(body.config_homes)
+    )
+
+
+@router.post("/hooks/install")
+async def post_hook_install(body: HookInstallRequest) -> HookInstallReport:
+    """Merge the hook block into each config home's settings.json.
+
+    The write half of ``/hooks/snippet``: adds the events that are missing,
+    rewrites the hooks this app itself wrote in a shape it no longer emits, and
+    leaves every hook it did not author exactly where it found it. Running it
+    twice changes nothing the second time.
+
+    Takes the same list of caller-supplied paths ``/hooks/verify`` does and
+    applies the same containment policy to each, which for a writer is load
+    bearing rather than tidy: the sidecar is unauthenticated by design (see
+    AGENTS.md), so the only thing standing between a localhost caller and an
+    arbitrary file is that policy.
+
+    Never 4xx/5xx on the state of a user's files, for the reason ``verify``
+    gives: an unparseable, oversized, unwritable or unexpectedly shaped
+    settings.json is a per-result ``refusal`` the UI must explain. A 500 here
+    would mean the service itself failed, which is a different thing and should
+    stay distinguishable.
+    """
+    return HookInstallReport(
+        **await hooks_service.install_settings_files(body.config_homes)
     )
 
 
