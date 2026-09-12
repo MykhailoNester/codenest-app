@@ -5730,3 +5730,104 @@ export function useSessionInspector(
     staleTime: 10_000,
   });
 }
+
+// ─── Project Context Map (#181) ─────────────────────────────────────────────
+
+export interface ProjectContextRoot {
+  id: number;
+  path: string;
+  label: string | null;
+  source: string;
+  enabled: boolean;
+}
+
+export interface ProjectContextSession {
+  session_id: string;
+  profile: string;
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  cwd: string | null;
+  session_project_name: string | null;
+  /** span = a session_project_spans row put it here; session = the session
+   *  never moved, so its own project_id is the only record. */
+  attributed_by: "span" | "session";
+  spans: number;
+  seconds_here: number | null;
+  open_span: boolean;
+  first_here_at: string | null;
+  last_here_at: string | null;
+  directories: string[];
+  /** Lane A's flat-rate estimate, split across projects. Null = never split. */
+  estimated_cost_usd: number | null;
+  /** Lane B's figure for the WHOLE session — it has no project dimension. */
+  lane_b_session_cost_usd: number | null;
+}
+
+export interface ProjectContextCost {
+  lane: string;
+  estimate_usd: number;
+  estimate_tokens_in: number;
+  estimate_tokens_out: number;
+  estimated_sessions: number;
+  lane_b_sessions: number;
+  lane_b_whole_session_usd: number | null;
+}
+
+export interface ProjectContextRan {
+  name: string;
+  runs: number;
+  last_run_at: string | null;
+}
+
+export interface ProjectContextLink {
+  name: string;
+  enabled: boolean;
+  verify_status: string;
+  link_path: string;
+}
+
+export interface ProjectContextConfigured {
+  agents: ProjectContextLink[];
+  skills: ProjectContextLink[];
+  commands: ProjectContextLink[];
+  mcp_servers: { name: string; slug: string; enabled: boolean }[];
+  launch_presets: { id: number; name: string; target: string }[];
+}
+
+export interface ProjectContextAttentionItem {
+  id: number;
+  kind: string;
+  severity: string;
+  state: string;
+  title: string;
+  detail: string | null;
+  session_id: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolution: string | null;
+}
+
+export interface ProjectContextReport {
+  project: Record<string, unknown> & { id: number; name: string };
+  roots: ProjectContextRoot[];
+  sessions: ProjectContextSession[];
+  sessions_truncated: boolean;
+  cost: ProjectContextCost;
+  agents_ran: ProjectContextRan[];
+  skills_ran: ProjectContextRan[];
+  configured: ProjectContextConfigured;
+  attention: ProjectContextAttentionItem[];
+}
+
+export function useProjectContext(
+  projectId: number | null,
+): UseQueryResult<ProjectContextReport, SidecarError> {
+  return useQuery<ProjectContextReport, SidecarError>({
+    queryKey: ["project-context", projectId],
+    enabled: projectId !== null && Number.isFinite(projectId),
+    queryFn: () =>
+      fetchSidecar<ProjectContextReport>(`/api/v1/projects/${projectId}/context`),
+    staleTime: 10_000,
+  });
+}

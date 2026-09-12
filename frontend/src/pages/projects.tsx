@@ -1066,6 +1066,16 @@ export function ProjectsPage(): ReactElement {
                         >
                           Work Board
                         </button>
+                        <button
+                          className="d3-btn d3-btn--ghost"
+                          type="button"
+                          style={{ fontSize: 12 }}
+                          onClick={() =>
+                            void navigate(`/projects/${p.id}/context`)
+                          }
+                        >
+                          Context Map
+                        </button>
                         {p.path && (
                           <>
                             <button
