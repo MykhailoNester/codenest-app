@@ -288,7 +288,7 @@ function PlanCard({
 
       <p style={meta}>{preservationNote(result)}</p>
       <p style={meta}>
-        Turning it off would remove {summary.removable} of the five.
+        Turning it off would remove {summary.removable} of the seven.
       </p>
 
       {result.status === "refused" ? (

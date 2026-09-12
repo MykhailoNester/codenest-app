@@ -109,16 +109,17 @@ async def _count(db: aiosqlite.Connection, table: str) -> int:
 async def test_documented_defaults(migrated_db: aiosqlite.Connection) -> None:
     """The documented windows, read from their single definition.
 
-    Four since #175: the three `agent_events` classes plus Lane B's
-    `otlp_metric_series`, which shares this mechanism rather than growing a
-    second one. Asserted as an exact dict on purpose — a class added without a
-    documented default should fail here and be thought about.
+    Five since #178: the three `agent_events` classes plus Lane B's two
+    tables, which share this mechanism rather than growing a second one.
+    Asserted as an exact dict on purpose — a class added without a documented
+    default should fail here and be thought about.
     """
     assert svc.default_retention_days() == {
         "session": 90,
         "tool": 30,
         "ephemeral": 7,
         "otlp": 90,
+        "otlp_spans": 90,
     }
     # And with no app_settings row written, those are what takes effect: a
     # fresh install prunes from the defaults (the choice recorded in

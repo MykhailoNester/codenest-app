@@ -896,9 +896,10 @@ async def test_logs_endpoint_refuses_without_reading_the_body(
     assert "prompt" in resp.json()["message"]
 
 
-async def test_traces_endpoint_refuses(client: TestClient) -> None:
+async def test_traces_endpoint_is_a_real_receiver(client: TestClient) -> None:
+    """#178 replaced the 501 with a receiver; see test_otlp_trace_receiver.py."""
     resp = client.post("/v1/traces", content=b"{}")
-    assert resp.status_code == 501
+    assert resp.status_code == 200
 
 
 # ─── The instrument inventory is data, not prose ─────────────────────────────

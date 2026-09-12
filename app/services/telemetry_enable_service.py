@@ -20,14 +20,22 @@ exact file, and the four primitives it needs are published at the bottom of
 `hooks_service` (see the "reuse seam" comment there). Nothing in this module
 opens a file for writing; it decides *what* and `hooks_service` decides *how*.
 
-The five variables, and the one that is a pin rather than a setting
-==================================================================
+The seven variables, and the ones that are pins rather than settings
+====================================================================
 `CLAUDE_CODE_ENABLE_TELEMETRY=1`
     The master switch. Without it the CLI creates no meter and exports nothing.
 
 `OTEL_METRICS_EXPORTER=otlp`
-    Which exporter the metrics signal uses. Deliberately only the *metrics*
-    signal: see "logs are not enabled, ever" below.
+    Which exporter the metrics signal uses.
+
+`OTEL_TRACES_EXPORTER=otlp` and `OTEL_TRACES_SAMPLER=always_on`
+    The traces signal (#178). `claude_code.hook`, `claude_code.tool` and eight
+    siblings are spans, not counters, so this is the only switch that can ever
+    produce a hook-latency figure; `/v1/traces` receives them and aggregates
+    per operation. The sampler is pinned because a sampled-out span is a
+    measurement that never happens, and the SDK's default is not ours to
+    assume. Metrics and traces, and only those two: see "logs are not enabled,
+    ever" below.
 
 `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`
     Pinned, and the pin is load-bearing rather than tidy. `otlp_receiver_service`
@@ -144,6 +152,13 @@ ENV_METRICS_EXPORTER = "OTEL_METRICS_EXPORTER"
 ENV_PROTOCOL = "OTEL_EXPORTER_OTLP_PROTOCOL"
 ENV_ENDPOINT = "OTEL_EXPORTER_OTLP_ENDPOINT"
 ENV_INTERVAL = "OTEL_METRIC_EXPORT_INTERVAL"
+# #178. The trace signal carries `claude_code.hook`, `claude_code.tool` and
+# eight siblings — the only place hook and tool latency exists — and
+# `/v1/traces` is a real receiver since that ticket. Protocol and endpoint are
+# not repeated per signal: the generic `OTEL_EXPORTER_OTLP_*` pair above
+# governs both, and the exporter appends `/v1/traces` itself.
+ENV_TRACES_EXPORTER = "OTEL_TRACES_EXPORTER"
+ENV_TRACES_SAMPLER = "OTEL_TRACES_SAMPLER"
 
 # Order is the order the plan renders in, and it is the order a reader needs to
 # understand the thing: the switch, then what it exports, then how, then where,
@@ -151,6 +166,8 @@ ENV_INTERVAL = "OTEL_METRIC_EXPORT_INTERVAL"
 AUTHORED_KEYS: tuple[str, ...] = (
     ENV_ENABLE,
     ENV_METRICS_EXPORTER,
+    ENV_TRACES_EXPORTER,
+    ENV_TRACES_SAMPLER,
     ENV_PROTOCOL,
     ENV_ENDPOINT,
     ENV_INTERVAL,
@@ -163,11 +180,16 @@ VALUE_ENABLE = "1"
 VALUE_METRICS_EXPORTER = "otlp"
 VALUE_PROTOCOL = "http/json"
 VALUE_INTERVAL_MS = "60000"
+VALUE_TRACES_EXPORTER = "otlp"
+# Pinned rather than inherited: a span dropped by a sampler is a latency figure
+# that never arrives, and the default is not ours to assume.
+VALUE_TRACES_SAMPLER = "always_on"
 
 # The path an OTLP/HTTP exporter appends to `OTEL_EXPORTER_OTLP_ENDPOINT`.
 # Rendered for the consent copy so the screen can name the URL that will
 # actually be POSTed to rather than the base the env var holds.
 METRICS_PATH = "/v1/metrics"
+TRACES_PATH = "/v1/traces"
 
 # ─── keys this module does not set, and watches for ──────────────────────────
 #
@@ -179,6 +201,7 @@ METRICS_PATH = "/v1/metrics"
 # `/v1/metrics` appended). One of these present means our endpoint is ignored
 # and the enable silently does nothing.
 ENV_METRICS_ENDPOINT = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
+ENV_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 
 # The logs signal — prompt and response text. Never set by us; refused by the
 # receiver. Worth saying out loud when the user already has it on.
@@ -217,7 +240,7 @@ MODE_DISABLE = "disable"
 
 
 def desired_env(base_url: str) -> dict[str, str]:
-    """The five variables this app writes, at *base_url*.
+    """The seven variables this app writes, at *base_url*.
 
     The single source of what an enable means. The plan, the write, the
     authorship test and the consent copy's value column all read this; a second
@@ -226,6 +249,8 @@ def desired_env(base_url: str) -> dict[str, str]:
     return {
         ENV_ENABLE: VALUE_ENABLE,
         ENV_METRICS_EXPORTER: VALUE_METRICS_EXPORTER,
+        ENV_TRACES_EXPORTER: VALUE_TRACES_EXPORTER,
+        ENV_TRACES_SAMPLER: VALUE_TRACES_SAMPLER,
         ENV_PROTOCOL: VALUE_PROTOCOL,
         ENV_ENDPOINT: base_url,
         ENV_INTERVAL: VALUE_INTERVAL_MS,
@@ -235,6 +260,11 @@ def desired_env(base_url: str) -> dict[str, str]:
 def metrics_endpoint_url(base_url: str) -> str:
     """Where the exporter will actually POST — `<base>/v1/metrics`."""
     return f"{base_url.rstrip('/')}{METRICS_PATH}"
+
+
+def traces_endpoint_url(base_url: str) -> str:
+    """Where the span exporter will POST — `<base>/v1/traces`."""
+    return f"{base_url.rstrip('/')}{TRACES_PATH}"
 
 
 # Older spellings of a value this app used to write, per key. Append-only and
@@ -250,7 +280,7 @@ def _authored_values(
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """`(current spellings, older spellings)` of "written by this app" for *key*.
 
-    One current spelling for four of the five keys. The endpoint has one per
+    One current spelling for six of the seven keys. The endpoint has one per
     loopback alias of the sidecar's own base URL, and all of them are *current*
     rather than stale: `127.0.0.1:8002` and `localhost:8002` are the same
     endpoint, and rewriting one into the other would be a change with no effect
@@ -305,8 +335,8 @@ def _conflict_detail(key: str) -> str:
         return (
             "already set to something this app did not write, so it is left"
             " exactly as it is. Until it is removed or changed by hand,"
-            " Claude Code will keep exporting to wherever it currently points"
-            " and this app will receive nothing."
+            " Claude Code will keep exporting metrics and spans to wherever it"
+            " currently points and this app will receive nothing."
         )
     if key == ENV_ENABLE:
         return (
@@ -339,6 +369,21 @@ def _notes(env: Mapping[str, Any]) -> list[dict[str, str]]:
                     " overrides the generic endpoint and is used exactly as"
                     " written, so turning telemetry on here will export to that"
                     " address and not to this app. This app does not change it."
+                ),
+            }
+        )
+
+    if ENV_TRACES_ENDPOINT in env:
+        notes.append(
+            {
+                "key": ENV_TRACES_ENDPOINT,
+                "severity": SEVERITY_BLOCKING,
+                "detail": (
+                    "A signal-specific traces endpoint is set in this file. It"
+                    " overrides the generic endpoint and is used exactly as"
+                    " written, so spans will go to that address and not to this"
+                    " app, and no hook or tool timing will appear here. This app"
+                    " does not change it."
                 ),
             }
         )
@@ -663,7 +708,7 @@ async def plan_telemetry_files(
 async def enable_telemetry_files(
     config_homes: Sequence[str], base_url: str | None = None
 ) -> dict[str, Any]:
-    """Write the five variables into each config home's settings.json.
+    """Write the seven variables into each config home's settings.json.
 
     Idempotent by construction rather than by convention: a second call finds
     every key present with exactly the value this app emits, plans no change,
@@ -704,6 +749,8 @@ __all__ = [
     "ENV_INTERVAL",
     "ENV_METRICS_EXPORTER",
     "ENV_PROTOCOL",
+    "ENV_TRACES_EXPORTER",
+    "ENV_TRACES_SAMPLER",
     "MODE_DISABLE",
     "MODE_ENABLE",
     "MODE_PLAN",
@@ -716,4 +763,5 @@ __all__ = [
     "env_authorship",
     "metrics_endpoint_url",
     "plan_telemetry_files",
+    "traces_endpoint_url",
 ]

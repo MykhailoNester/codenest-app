@@ -45,6 +45,7 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         "feed",  # Activity feed (slug: feed)
         "budgets",  # Cost budgets (slug: budgets)
         "hooks",  # Hooks — what is on each hook event (slug: hooks)
+        "latency",  # Tool & hook latency from the trace receiver (slug: latency)
         "sync",  # Sync targets (slug: sync)
         "snippets",  # Snippet library (slug: library)
         "gallery",  # Template/agent gallery (slug: marketplace)
@@ -84,6 +85,10 @@ _FEATURES_DEFAULT: dict[str, bool] = {
     # permission decision it is handed. Verify grades that file "ok", so a page
     # that ships off is a user who is never told.
     "hooks": True,
+    # ON by default (#178): the only surface that shows hook and tool latency
+    # at all, and it says on its face when nothing has been received yet — so
+    # a user who has not enabled telemetry sees why rather than nothing.
+    "latency": True,
     "snippets": False,
     "gallery": False,
     "feed": False,

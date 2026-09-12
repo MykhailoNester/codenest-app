@@ -25,6 +25,8 @@ export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
   // install from before #172 grades "ok" on verify while silently throwing
   // those answers away, and a page shipped off cannot say so.
   hooks: true,
+  // ON by default (#178). Mirrors `_FEATURES_DEFAULT`.
+  latency: true,
   snippets: false,
   gallery: false,
   feed: false,
@@ -90,6 +92,7 @@ export const FEATURES: Readonly<Record<string, readonly string[]>> = {
   feed: ["feed"],
   budgets: ["budgets"],
   hooks: ["hooks"],
+  latency: ["latency"],
   sync: ["sync"],
   snippets: ["library"],
   gallery: ["marketplace"],
@@ -113,6 +116,7 @@ export const KNOWN_FEATURES_ORDERED: readonly string[] = [
   "feed",
   "budgets",
   "hooks",
+  "latency",
   "sync",
   "snippets",
   "gallery",
@@ -318,6 +322,15 @@ export const NAV_ITEMS = [
     label: "Hooks",
     icon: "zap",
     path: "/hooks",
+    group: "system",
+  },
+  {
+    // #178. Icon `sprint` rather than a newly invented key: `Icon` renders
+    // `null` for a name it does not know, and `sprint` is unused elsewhere.
+    slug: "latency",
+    label: "Latency",
+    icon: "sprint",
+    path: "/latency",
     group: "system",
   },
   { slug: "sync", label: "Sync", icon: "sync", path: "/sync", group: "system" },

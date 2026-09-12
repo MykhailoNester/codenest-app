@@ -540,6 +540,8 @@ async def factory_reset() -> dict:
         # these behind would leave the only durable record of what wiped
         # sessions cost, attached to session ids nothing can resolve.
         "otlp_metric_series",
+        # Lane B's span aggregates (#178). Same reasoning as the line above.
+        "otlp_span_stats",
         "projects",
         "app_settings",
         "workspace_state",

@@ -236,6 +236,18 @@ RETENTION_CLASSES: tuple[RetentionClass, ...] = (
         table="otlp_metric_series",
         timestamp_column="last_seen_at",
     ),
+    # 90 days — Lane B's per-operation span aggregates (#178), on their own
+    # table and the same clock. One row per (session, span name, operation),
+    # so the table is bounded by distinct operations rather than by activity;
+    # the window retires a session's operations once the session is long past.
+    RetentionClass(
+        key="otlp_spans",
+        setting_key="otlp_span_retention_days",
+        default_days=90,
+        where_sql="1",
+        table="otlp_span_stats",
+        timestamp_column="last_seen_at",
+    ),
 )
 
 _CLASSES_BY_KEY: dict[str, RetentionClass] = {c.key: c for c in RETENTION_CLASSES}

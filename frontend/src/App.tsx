@@ -63,6 +63,7 @@ import { MarketplacePage } from "./pages/marketplace";
 import { ParallelRunsPage } from "./pages/parallel-runs";
 import { McpServersPage } from "./pages/mcp-servers";
 import { HooksPage } from "./pages/hooks";
+import { LatencyPage } from "./pages/latency";
 import { SchedulesPage } from "./pages/schedules";
 import { PreviewPage } from "./pages/preview";
 import { LibraryPage } from "./pages/library";
@@ -483,6 +484,14 @@ function AppInner(): ReactElement {
           element={
             <FeatureRoute navSlug="hooks">
               <HooksPage />
+            </FeatureRoute>
+          }
+        />
+        <Route
+          path="/latency"
+          element={
+            <FeatureRoute navSlug="latency">
+              <LatencyPage />
             </FeatureRoute>
           }
         />

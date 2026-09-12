@@ -99,7 +99,19 @@ def test_the_logs_signal_is_never_enabled() -> None:
     """
     assert tes.ENV_LOGS_EXPORTER not in tes.AUTHORED_KEYS
     assert not any(k.startswith("OTEL_LOGS") for k in tes.AUTHORED_KEYS)
-    assert not any(k.startswith("OTEL_TRACES") for k in tes.AUTHORED_KEYS)
+
+
+def test_the_traces_signal_is_enabled_and_not_sampled_away() -> None:
+    """#178: hook and tool latency exists only on the traces signal.
+
+    `/v1/traces` is a real receiver now, so the enable that leaves this off is
+    an enable that cannot produce the one number the epic wanted. The sampler
+    is pinned for the same reason — a sampled-out span never arrives.
+    """
+    env = tes.desired_env(_BASE)
+    assert env[tes.ENV_TRACES_EXPORTER] == "otlp"
+    assert env[tes.ENV_TRACES_SAMPLER] == "always_on"
+    assert tes.traces_endpoint_url(_BASE) == f"{_BASE}/v1/traces"
 
 
 def test_the_endpoint_is_the_base_url_and_the_exporter_appends_the_path() -> None:

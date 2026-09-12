@@ -36,16 +36,6 @@ import {
 } from "../telemetry-copy";
 import type { TelemetryKeyPlan, TelemetryResult } from "../../../lib/api";
 
-const ALL = [
-  HEADLINE,
-  EXPOSURE_TITLE,
-  ...WHAT_LEAVES,
-  ...WHAT_DOES_NOT_LEAVE,
-  ...NOT_INCLUDED,
-  ...EXPOSURE,
-  ...HOW_TO_TURN_OFF,
-].join("\n");
-
 function key(
   k: string,
   action: TelemetryKeyPlan["action"],
@@ -119,6 +109,12 @@ describe("the unauthenticated-endpoint disclosure", () => {
 // ─── what is and is not exported ─────────────────────────────────────────────
 
 describe("what leaves Claude Code", () => {
+  it("names the transaction in the headline, variables included", () => {
+    expect(HEADLINE).toContain("seven environment variables");
+    expect(HEADLINE).toContain("metrics and traces");
+  });
+
+
   it("names the identity attributes individually", () => {
     // `_IDENTITY_ATTRS` in `otlp_receiver_service`. "Some metadata" would be
     // true and useless; `user.email` is the word that lets someone decide.
@@ -152,43 +148,43 @@ describe("what leaves Claude Code", () => {
 });
 
 describe("what this does not give you", () => {
-  it("refuses the hook-latency promise by name", () => {
-    // Ten of the eighteen instrument names are spans; a metrics receiver
-    // cannot receive one, and #178 (the trace receiver) is not built.
+  it("refuses content, which the traces signal does not carry", () => {
+    // #178 made hook latency real, so the honest remaining limits changed.
+    // What must never soften is that timing is not content.
     const text = NOT_INCLUDED.join("\n");
-    expect(text).toContain("Not hook latency");
-    expect(text).toContain("tool reliability");
-    expect(text).toContain("claude_code.hook");
-    expect(text).toContain("spans, not counters");
-    expect(text).toContain("no trace receiver");
+    expect(text).toContain("Not your prompts");
+    expect(text).toContain("not the arguments a tool was called with");
   });
 
-  it("never claims a span-borne instrument is available anywhere in the copy", () => {
-    for (const span of [
-      "claude_code.tool.execution",
-      "claude_code.subagent.spawn",
-      "claude_code.mcp.rpc",
-      "claude_code.compaction",
-    ]) {
-      // They may be named as *unavailable*; what is banned is any sentence
-      // offering one. The NOT_INCLUDED block is the only place spans appear.
-      const outside = ALL.replace(NOT_INCLUDED.join("\n"), "");
-      expect(outside).not.toContain(span);
-    }
+  it("says nothing is backfilled", () => {
+    expect(NOT_INCLUDED.join("\n")).toContain("Nothing is backfilled");
+  });
+
+  it("says what the span aggregate keeps and what it throws away", () => {
+    const text = WHAT_LEAVES.join("\n");
+    expect(text).toContain("one span per operation");
+    expect(text).toContain("throws the individual spans away");
+    expect(text).toContain("never stores a span body");
   });
 });
 
 // ─── the protocol pin, which is load-bearing ─────────────────────────────────
 
 describe("the per-variable explanations", () => {
-  it("covers all five variables and nothing else", () => {
+  it("covers all seven variables and nothing else", () => {
     expect(Object.keys(KEY_PURPOSE).sort()).toEqual([
       "CLAUDE_CODE_ENABLE_TELEMETRY",
       "OTEL_EXPORTER_OTLP_ENDPOINT",
       "OTEL_EXPORTER_OTLP_PROTOCOL",
       "OTEL_METRICS_EXPORTER",
       "OTEL_METRIC_EXPORT_INTERVAL",
+      "OTEL_TRACES_EXPORTER",
+      "OTEL_TRACES_SAMPLER",
     ]);
+  });
+
+  it("says the sampler is pinned so spans are not dropped", () => {
+    expect(KEY_PURPOSE["OTEL_TRACES_SAMPLER"]).toContain("always_on");
   });
 
   it("explains the http/json pin as a receiver constraint, not a preference", () => {

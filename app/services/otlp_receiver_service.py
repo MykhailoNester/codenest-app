@@ -66,9 +66,9 @@ which is the growth this receiver was written to avoid.
 by name: it is the instrument that would finally make hook latency answerable,
 and it is a **span**, not a counter. It arrives on `POST /v1/traces` or not at
 all, so no metrics receiver can store it and this one does not pretend to.
-That is a fact about the signal, not a scoping decision — see the report for
-#178, which owns the latency surface and now owns the question of whether a
-trace receiver is worth building for it.
+That is a fact about the signal, not a scoping decision. #178 built the trace
+receiver that does store it — `otlp_trace_receiver_service` — which is why the
+ten span names below are still correctly absent from *this* module.
 
 Logs are refused, deliberately
 ==============================

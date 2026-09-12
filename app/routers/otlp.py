@@ -16,20 +16,20 @@ full path by hand, which is the configuration nobody has. The deviation from
 the app's convention is the protocol's; `/health` is already the other route
 that sits outside `/api/v1` for an equivalent reason.
 
-Why `/v1/logs` and `/v1/traces` exist and answer 501
-====================================================
+Why `/v1/logs` exists and answers 501
+=====================================
 So the refusal is legible. A user who turns on `OTEL_LOGS_EXPORTER=otlp`
 against this sidecar would otherwise get FastAPI's bare 404 "Not Found" and no
 way to tell a wrong port from an unsupported signal. 501 also tells an OTLP
 exporter the batch is permanently rejected, so it drops it instead of retrying
-on a timer forever. Neither handler reads its request body: the logs signal is
-the one carrying prompt and response text, and there is no reason for it to
+on a timer forever. The handler never reads its request body: the logs signal
+is the one carrying prompt and response text, and there is no reason for it to
 enter this process even transiently.
 
-`/v1/traces` is refused today for a narrower reason than `/v1/logs` — see the
-receiver's docstring on `claude_code.hook`. Spans are where hook, tool and
-LLM-request latency actually live. #178 owns that surface and owns the
-question of whether this route should become real.
+`/v1/traces` is real since #178: spans are where hook, tool and LLM-request
+latency actually live, so the route that refused them is the route that had to
+become a receiver. Its storage is an aggregate per operation, not a row per
+span — see `otlp_trace_receiver_service`.
 """
 
 from __future__ import annotations
@@ -40,7 +40,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
-from app.services import otlp_receiver_service, otlp_reconcile_service
+from app.services import (
+    otlp_receiver_service,
+    otlp_reconcile_service,
+    otlp_trace_receiver_service,
+)
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -170,10 +174,62 @@ async def otlp_logs() -> JSONResponse:
 
 
 @router.post("/v1/traces")
-async def otlp_traces() -> JSONResponse:
-    """Refuse the traces signal. See the module header."""
-    return _status(
-        501,
-        "OTLP traces are not accepted by this receiver yet. Metrics are"
-        " accepted at /v1/metrics.",
+async def otlp_traces(request: Request) -> JSONResponse:
+    """Accept one OTLP/HTTP JSON trace export (#178).
+
+    Same contract as `/v1/metrics`: a rejected span is a 200 with
+    `rejectedSpans`, a rejected request is a 4xx, and nothing raises into the
+    app's generic 500 handler.
+    """
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
+    if content_type and not content_type.lower().startswith(_JSON_CONTENT_TYPES):
+        return _status(
+            415, f"unsupported Content-Type {content_type!r}: {_PROTOBUF_HINT}"
+        )
+
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > otlp_trace_receiver_service.MAX_BODY_BYTES:
+                return _status(413, f"body too large ({declared} bytes)")
+        except ValueError:
+            pass
+
+    try:
+        raw = await request.body()
+    except Exception:
+        log.exception("otlp trace receiver: request body could not be read")
+        return _status(400, "request body could not be read")
+
+    db = await get_db()
+    try:
+        result = await otlp_trace_receiver_service.ingest(
+            db, raw, request.headers.get("content-encoding")
+        )
+    except otlp_trace_receiver_service.OtlpRejected as exc:
+        return _status(exc.status_code, exc.detail)
+    except Exception:
+        log.exception("otlp trace receiver: ingest failed")
+        return JSONResponse(
+            {
+                "partialSuccess": {
+                    "rejectedSpans": 0,
+                    "errorMessage": "receiver error; export dropped",
+                }
+            }
+        )
+
+    if not result.rejected_spans:
+        return JSONResponse({"partialSuccess": {}})
+
+    reasons = ", ".join(
+        f"{reason}={count}" for reason, count in sorted(result.rejections.items())
+    )
+    return JSONResponse(
+        {
+            "partialSuccess": {
+                "rejectedSpans": str(result.rejected_spans),
+                "errorMessage": f"rejected spans: {reasons}",
+            }
+        }
     )

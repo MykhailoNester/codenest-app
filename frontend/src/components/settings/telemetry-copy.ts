@@ -28,11 +28,11 @@
  *    one that can make them wrong, permanently, because Lane B outranks every
  *    other source of a cost figure and no other source can write one back.
  *    Accuracy and that hazard are the same sentence and are printed together.
- * 3. **"Now you'll see hook latency."** No. Ten of the eighteen instrument
- *    names Claude Code ships are *spans*, not counters — `claude_code.hook`
- *    among them — and a metrics receiver cannot receive a span. This app has no
- *    trace receiver. Promising it would be the easiest lie on this screen to
- *    tell and the easiest to believe.
+ * 3. **"Now you'll see hook latency."** True since #178, and only because this
+ *    enable now turns on the *traces* signal too — `claude_code.hook` and its
+ *    nine siblings are spans, not counters, and a metrics receiver cannot
+ *    receive one. What the traces signal buys is timing, not content, and the
+ *    copy says which.
  *
  * What is *not* here: any statement about a specific env value or file path.
  * Those come from the plan response, which read this machine. A consent screen
@@ -49,19 +49,22 @@ import type {
 export const KEY_PURPOSE: Readonly<Record<string, string>> = {
   CLAUDE_CODE_ENABLE_TELEMETRY:
     "The master switch. Without it Claude Code creates no meter and exports nothing.",
-  OTEL_METRICS_EXPORTER:
-    "Turns on the metrics signal, and only the metrics signal.",
+  OTEL_METRICS_EXPORTER: "Turns on the metrics signal: cost and token counts.",
+  OTEL_TRACES_EXPORTER:
+    "Turns on the traces signal: one span per hook, tool call, MCP request and LLM request. This is the only signal that carries how long anything took.",
+  OTEL_TRACES_SAMPLER:
+    "Pinned to always_on. A sampled-out span is a measurement that never happens, and the SDK's default is not this app's to assume.",
   OTEL_EXPORTER_OTLP_PROTOCOL:
     "Pinned to http/json. This app's receiver parses JSON with no OpenTelemetry or protobuf dependency at all; the OTLP default, http/protobuf, arrives as bytes it refuses with a 415.",
   OTEL_EXPORTER_OTLP_ENDPOINT:
-    "This app's sidecar. The exporter appends /v1/metrics to it itself.",
+    "This app's sidecar. The exporter appends /v1/metrics and /v1/traces to it itself.",
   OTEL_METRIC_EXPORT_INTERVAL:
     "How often an export is sent, in milliseconds. Set explicitly, at Claude Code's own current default, so this figure is one this app chose rather than one it inherited.",
 } as const;
 
 /** The lead paragraph. States the transaction before any of its detail. */
 export const HEADLINE =
-  "Claude Code sends no telemetry until you turn it on. This writes five environment variables into your Claude Code settings.json and points its metrics exporter at this app, so the cost and token figures shown here stop being this app's estimates and start being the numbers the CLI itself reports.";
+  "Claude Code sends no telemetry until you turn it on. This writes seven environment variables into your Claude Code settings.json and points its metrics and traces exporters at this app, so the cost and token figures shown here stop being this app's estimates and start being the numbers the CLI itself reports — and so hook and tool timing, which exists nowhere else, starts arriving at all.";
 
 /**
  * What actually leaves Claude Code.
@@ -75,6 +78,7 @@ export const HEADLINE =
 export const WHAT_LEAVES = [
   "Every 60 seconds, while a session is running, Claude Code POSTs a metrics export to this app's sidecar. Two of the eight counters it carries are the ones this app keeps: what the session has cost, and its input, output, cache-read and cache-creation token counts, plus the model name.",
   "The other six leave Claude Code too, and this app throws them away on arrival: how many lines of code you changed, how many commits you made, how many pull requests you opened, how many times you accepted or rejected an edit, how many sessions you started, and how long you were actively working. They are dropped before anything is written to this app's database — but, exactly as with the identity attributes below, dropping happens at this end, after they have left Claude Code. An earlier draft of this paragraph said \"eight counters\" and then described only the two, which understated what crosses the socket; if you are deciding whether to turn this on, the six are part of what you are deciding about.",
+  "On a second signal — traces — Claude Code sends one span per operation as it finishes: every hook that ran, every tool call, every MCP request, every LLM request, each with its start and end time and whether it failed. This app keeps a running count, failure count and duration per tool and per hook and throws the individual spans away; it never stores a span body, a prompt, a command line or a file path.",
   "Alongside them the export carries attributes identifying you and your machine: user.id, user.email, organization.id, terminal.type, your Claude Code version and your OS. This app drops those rather than storing them — they are stripped before anything is written to its database — but they are in the export. Dropping happens at this end, after they have left Claude Code.",
   "If this app is not running, the export fails and nothing is sent. If something else is listening on that port, it receives the export instead.",
 ] as const;
@@ -92,14 +96,14 @@ export const WHAT_DOES_NOT_LEAVE = [
 /**
  * What this does NOT give you.
  *
- * Present because the absence is not obvious and the plausible guess is wrong:
- * a user who turns on "telemetry" reasonably expects timing. Ground truth is
- * that hook and tool timing live on the traces signal, and there is no trace
- * receiver in this app.
+ * Until #178 this block refused the hook-latency promise outright, because the
+ * timing lives on the traces signal and this app had no trace receiver. It has
+ * one now, so the honest remaining limits are different ones: no content, and
+ * no history.
  */
 export const NOT_INCLUDED = [
-  "Not hook latency, and not tool reliability. Those live on OpenTelemetry's traces signal — claude_code.hook, claude_code.tool, claude_code.llm_request and seven others are spans, not counters, and a metrics receiver cannot receive a span.",
-  "This app has no trace receiver: /v1/traces answers 501. Turning telemetry on will not make a hook-timing number appear anywhere in this app.",
+  "Not your prompts, not Claude's responses, and not the arguments a tool was called with. Span timing says that a Bash call took 1.2 seconds; it does not say what the command was.",
+  "Not anything from before you turn this on. Nothing is backfilled: sessions that ran without the traces exporter have no timing and never will.",
 ] as const;
 
 /**
@@ -130,7 +134,7 @@ export const EXPOSURE = [
 /** How to withdraw. A real button, named as such, not an instruction to edit JSON. */
 export const HOW_TO_TURN_OFF = [
   "Turn telemetry off below. It removes exactly the variables this app wrote, from the same file, through the same backup and the same atomic replace — no hand-editing of JSON.",
-  "A variable this app did not write is not removed. It is listed and left, including one of these five whose value you have since changed by hand.",
+  "A variable this app did not write is not removed. It is listed and left, including one of these seven whose value you have since changed by hand.",
   "Turning it off stops new figures arriving. It does not retract figures already recorded: those stay, and stay outranking this app's own estimates.",
 ] as const;
 
@@ -156,7 +160,7 @@ export interface TelemetrySummary {
   conflict: number;
   /** Whether pressing "turn on" would rewrite the file at all. */
   changes: boolean;
-  /** How many of the five turning it off would remove. */
+  /** How many of the seven turning it off would remove. */
   removable: number;
 }
 
@@ -194,11 +198,11 @@ export function stateHeadline(result: TelemetryResult): string {
   }
   switch (result.state) {
     case "on":
-      return "Telemetry is on and pointed at this app. All five variables are present with the values this app writes.";
+      return "Telemetry is on and pointed at this app. All seven variables are present with the values this app writes.";
     case "partial":
-      return "Telemetry is partly configured in this file. Some of the five variables are set and some are not — see exactly which below.";
+      return "Telemetry is partly configured in this file. Some of the seven variables are set and some are not — see exactly which below.";
     default:
-      return "Telemetry is off. None of the five variables is set in this file, and Claude Code is exporting nothing.";
+      return "Telemetry is off. None of the seven variables is set in this file, and Claude Code is exporting nothing.";
   }
 }
 

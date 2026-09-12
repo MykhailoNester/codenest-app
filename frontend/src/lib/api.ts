@@ -5537,3 +5537,50 @@ export function usePromoteAgentToOrg(): UseMutationResult<
     },
   });
 }
+
+// ─── Trace receiver: per-operation span aggregates (#178) ───────────────────
+
+/** One (span name, operation) pair rolled up across every session. */
+export interface TraceOperationStat {
+  span_name: string;
+  category: string;
+  /** Tool name, hook event name, MCP method — "" when the span carried none. */
+  operation: string;
+  count: number;
+  error_count: number;
+  total_duration_ms: number;
+  avg_duration_ms: number;
+  min_duration_ms: number;
+  max_duration_ms: number;
+  sessions: number;
+  last_seen_at: string | null;
+}
+
+export interface TraceReceiverStats {
+  requests: number;
+  spans_seen: number;
+  spans_stored: number;
+  spans_rejected: number;
+  rejections: Record<string, number>;
+  unknown_sessions: string[];
+  unknown_spans: string[];
+}
+
+export interface TraceOperationsReport {
+  operations: TraceOperationStat[];
+  session_count: number;
+  span_count: number;
+  receiver: TraceReceiverStats;
+}
+
+export function useTraceOperations(): UseQueryResult<
+  TraceOperationsReport,
+  SidecarError
+> {
+  return useQuery<TraceOperationsReport, SidecarError>({
+    queryKey: ["traces", "operations"],
+    queryFn: () =>
+      fetchSidecar<TraceOperationsReport>("/api/v1/traces/operations"),
+    staleTime: 10_000,
+  });
+}
