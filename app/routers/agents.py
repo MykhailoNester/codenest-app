@@ -26,6 +26,7 @@ from app.services import (
     event_retention_service,
     hooks_service,
     plan_usage_service,
+    preauth_service,
     session_backfill_service,
     session_hud_service,
     transcript_scanner_service,
@@ -89,8 +90,35 @@ async def hook_user_prompt(request: Request):
 
 @router.post("/api/v1/hooks/pre-tool")
 async def hook_pre_tool(request: Request):
+    """Record the tool call, then answer it if the user has a standing rule.
+
+    This is the only hook route whose *body* matters. Its command is the one
+    in `hooks_service.HOOK_EVENTS` that does not redirect to `/dev/null`, so
+    whatever this returns becomes the hook's stdout and Claude Code reads it
+    for a permission decision (#172). Two consequences shape the code below.
+
+    First, the sidecar is now on the correctness path of every tool call in
+    every session on this machine, not just its telemetry path. The installed
+    command carries `curl --fail`, so an exception escaping this route prints
+    nothing at all into the session rather than handing Claude Code a FastAPI
+    error body as a decision — but relying on that alone would be relying on
+    the failure mode of a string in a user's settings.json, so the evaluation
+    is wrapped here as well and a failure decides nothing.
+
+    Second, it is on the *latency* path: `curl --max-time 5` means a slow
+    answer here is a five-second stall on every tool use. `preauth_service`
+    keeps the rule set in process for exactly that reason, and the no-rules
+    case — which is every install until someone writes one — touches no table.
+    """
     payload = await _read_json(request)
     await _safe_handle(agent_service.record_pre_tool, payload)
+    try:
+        verdict = await preauth_service.evaluate(await get_db(), payload)
+    except Exception:
+        log.exception("pre-authorisation evaluation failed; deciding nothing")
+        verdict = None
+    if verdict is not None:
+        return JSONResponse(preauth_service.hook_response(*verdict))
     return JSONResponse(_OK)
 
 

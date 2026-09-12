@@ -35,6 +35,13 @@ import styles from "./onboarding-page.module.css";
 // silently no-ops when the desktop app is offline (the native "http" type
 // raises ECONNREFUSED in every session instead). Once the sidecar responds, its
 // live snippet (with the correct runtime base URL) replaces this.
+//
+// PreToolUse is the one entry that does NOT redirect stdout: its response body
+// is the pre-authorisation decision channel, so it carries `--fail` (nothing is
+// printed on an HTTP error) and silences stderr only. It has to match the
+// sidecar here rather than merely look plausible — a user who pastes this while
+// the sidecar is still starting would otherwise get an install in which their
+// standing permission rules silently never apply.
 const FALLBACK_SNIPPET = `{
   "hooks": {
     "SessionStart": [
@@ -44,7 +51,7 @@ const FALLBACK_SNIPPET = `{
       { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/user-prompt >/dev/null 2>&1 || true", "timeout": 6 }] }
     ],
     "PreToolUse": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/pre-tool >/dev/null 2>&1 || true", "timeout": 6 }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --fail --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/pre-tool 2>/dev/null || true", "timeout": 6 }] }
     ],
     "PostToolUse": [
       { "matcher": "*", "hooks": [{ "type": "command", "command": "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:8002/api/v1/hooks/post-tool >/dev/null 2>&1 || true", "timeout": 6 }] }
