@@ -12,13 +12,15 @@
  * own copy of that logic. See `agent-pane.tsx`'s `scrollMemoryRef` for why.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import {
+  ASK_USER_QUESTION_TOOL,
   childToolCount,
   delegationElapsedMs,
   formatDuration,
   groupTurnBlocks,
+  parseAgentQuestions,
   splitInlineCode,
   summarizeToolRun,
   toolRunElapsedMs,
@@ -32,6 +34,7 @@ import {
 import { subagentDescription, subagentLabel } from "../../lib/agent-views";
 import { AgentMarkdown } from "./agent-markdown";
 import { AgentPermissionDialog } from "./agent-permission-dialog";
+import { AgentQuestionDialog } from "./agent-question-dialog";
 import styles from "./agent-conversation.module.css";
 
 interface AgentConversationProps {
@@ -40,6 +43,9 @@ interface AgentConversationProps {
   onAllowPermission: () => void;
   onAllowPermissionSession: () => void;
   onDenyPermission: () => void;
+  /** Answers an `AskUserQuestion` ask: an allow carrying the user's selection
+   *  as `updatedInput`, instead of the echo `onAllowPermission` sends. */
+  onAnswerQuestion: (updatedInput: Record<string, unknown>) => void;
   /** The most recent non-permission `control` frame's synopsis, if any —
    * rendered as one muted informational row (Design decision 14). Kept
    * outside `ConversationState` because the pure reducer deliberately
@@ -405,11 +411,22 @@ export function AgentConversation({
   onAllowPermission,
   onAllowPermissionSession,
   onDenyPermission,
+  onAnswerQuestion,
   lastControlNote,
   onOpenSubagent,
 }: AgentConversationProps): ReactElement {
   const permission = state.permissions[0];
   const extraPending = Math.max(0, state.permissions.length - 1);
+  // `null` for anything but a well-formed `AskUserQuestion` — including a
+  // malformed one, which keeps the generic dialog rather than rendering an
+  // empty question box.
+  const questions = useMemo(
+    () =>
+      permission?.toolName === ASK_USER_QUESTION_TOOL
+        ? parseAgentQuestions(permission.input)
+        : null,
+    [permission],
+  );
 
   return (
     <div className={styles.conv} data-testid="agent-conversation">
@@ -435,14 +452,26 @@ export function AgentConversation({
 
       {permission ? (
         <>
-          <AgentPermissionDialog
-            request={permission}
-            isFocusedPane={isFocusedPane}
-            pendingBehind={extraPending}
-            onAllow={onAllowPermission}
-            onAllowSession={onAllowPermissionSession}
-            onDeny={onDenyPermission}
-          />
+          {questions !== null ? (
+            <AgentQuestionDialog
+              key={permission.requestId}
+              request={permission}
+              questions={questions}
+              isFocusedPane={isFocusedPane}
+              pendingBehind={extraPending}
+              onAnswer={onAnswerQuestion}
+              onDeny={onDenyPermission}
+            />
+          ) : (
+            <AgentPermissionDialog
+              request={permission}
+              isFocusedPane={isFocusedPane}
+              pendingBehind={extraPending}
+              onAllow={onAllowPermission}
+              onAllowSession={onAllowPermissionSession}
+              onDeny={onDenyPermission}
+            />
+          )}
           {extraPending > 0 ? (
             <div className={styles.morePending}>
               {extraPending} more request{extraPending === 1 ? "" : "s"} waiting

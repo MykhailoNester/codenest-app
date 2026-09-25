@@ -106,6 +106,7 @@ function renderConversation(
       onAllowPermission={noop}
       onAllowPermissionSession={noop}
       onDenyPermission={noop}
+      onAnswerQuestion={noop}
       onOpenSubagent={onOpenSubagent}
     />,
   );

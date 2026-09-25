@@ -649,6 +649,18 @@ export function AgentPane({
     resolvePermission(leafId, permission.requestId);
   }
 
+  function handleAnswerQuestion(updatedInput: Record<string, unknown>): void {
+    const permission = conversation?.permissions[0];
+    if (!permission) return;
+    void agentRespondPermission({
+      paneId: leafId,
+      requestId: permission.requestId,
+      allow: true,
+      updatedInput,
+    });
+    resolvePermission(leafId, permission.requestId);
+  }
+
   function handleDeny(): void {
     const permission = conversation?.permissions[0];
     if (!permission) return;
@@ -887,6 +899,7 @@ export function AgentPane({
               onAllowPermission={handleAllow}
               onAllowPermissionSession={handleAllowSession}
               onDenyPermission={handleDeny}
+              onAnswerQuestion={handleAnswerQuestion}
               lastControlNote={lastControlNote}
               onOpenSubagent={openSubagent}
             />
