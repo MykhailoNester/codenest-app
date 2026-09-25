@@ -149,7 +149,8 @@ export function dockHasContent(state: ConversationState): boolean {
 // a row — the most useful moment to read a sub-agent's result is right after
 // it ends. The *live* helpers stay in use for the group headers' running
 // counts and ticker origin, which is the only place "counts degrade as
-// things finish" applies.
+// things finish" applies. Whether a group of such rows is still on *screen*
+// is a separate question — see `dockGroupVisible` (#131).
 // ---------------------------------------------------------------------------
 
 /** How a dock row's leading dot reads. `ended` is the honest fourth state for
@@ -176,6 +177,8 @@ export interface DockAgentRow {
   toolCount: number;
   /** Exact span, or `null` while running / when either end is unknown. */
   elapsedMs: number | null;
+  /** `block.endedAt` — the grace window's origin (`dockGroupVisible`). */
+  endedAt: number | null;
   running: boolean;
   /** `block.startedAt`, epoch ms. The group header's live ticker measures
    *  from the oldest *running* row's value; rows themselves never tick —
@@ -214,6 +217,7 @@ export function dockAgentRows(state: ConversationState): DockAgentRow[] {
       description: subagentDescription(block),
       toolCount: childToolCount(block),
       elapsedMs: block.endedAt === null ? null : Math.max(0, block.endedAt - block.startedAt),
+      endedAt: block.endedAt,
       running: status === "running",
       startedAt: block.startedAt,
     };
@@ -264,6 +268,8 @@ export interface DockWorkflowRow {
   totalTokens: number | null;
   /** `run.endedAt - run.startedAt`, or `null` while the run is still going. */
   elapsedMs: number | null;
+  /** `run.endedAt` — the grace window's origin (`dockGroupVisible`). */
+  endedAt: number | null;
   running: boolean;
   /** `run.startedAt` — the header ticker's origin, as above. */
   startedAt: number;
@@ -339,6 +345,7 @@ export function dockWorkflowRows(state: ConversationState): DockWorkflowRow[] {
       counts: orchestrationCountsLabel(orchestrationCounts(run)),
       totalTokens: run.totalTokens,
       elapsedMs: run.endedAt === null ? null : Math.max(0, run.endedAt - run.startedAt),
+      endedAt: run.endedAt,
       running,
       startedAt: run.startedAt,
       phases: orchestrationPhaseTree(run).map((group) => ({
@@ -391,6 +398,56 @@ export function combinedOrchestrationCounts(
     },
     { phases: 0, agentsDone: 0, agentsTotal: 0 },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Group visibility (#131) — "has rows" is not "should be on screen". A group
+// with only terminal rows stays up for a grace window after the newest end,
+// then leaves the dock so the composer regains the line.
+// ---------------------------------------------------------------------------
+
+export const DOCK_GROUP_GRACE_MS = 60_000;
+
+/** The part of a dock row group visibility depends on. */
+export interface DockGroupRow {
+  key: string;
+  endedAt: number | null;
+  running: boolean;
+}
+
+function newestEndedAt(rows: readonly DockGroupRow[]): number | null {
+  let newest: number | null = null;
+  for (const row of rows) {
+    if (row.endedAt !== null && (newest === null || row.endedAt > newest)) newest = row.endedAt;
+  }
+  return newest;
+}
+
+/** A row the wire never reported an end for — the session died first. There
+ *  is no instant to measure a window from, so the group keeps it. */
+function endUnreported(row: DockGroupRow): boolean {
+  return !row.running && row.endedAt === null;
+}
+
+/** All rows terminal with known ends, still inside the window. Also the dock
+ *  ticker's gate: this is the only state whose truth the clock alone flips. */
+export function dockGroupInGrace(rows: readonly DockGroupRow[], now: number): boolean {
+  if (rows.length === 0 || rows.some((r) => r.running || endUnreported(r))) return false;
+  const ended = newestEndedAt(rows);
+  return ended !== null && now - ended < DOCK_GROUP_GRACE_MS;
+}
+
+/** `pinnedKeys` are the dock cursor and the pane's `selectedView`: a row
+ *  under real focus never vanishes, however long ago its run ended. */
+export function dockGroupVisible(
+  rows: readonly DockGroupRow[],
+  now: number,
+  pinnedKeys: readonly (string | null)[] = [],
+): boolean {
+  if (rows.length === 0) return false;
+  if (rows.some((r) => r.running || endUnreported(r))) return true;
+  if (rows.some((r) => pinnedKeys.includes(r.key))) return true;
+  return dockGroupInGrace(rows, now);
 }
 
 // ---------------------------------------------------------------------------

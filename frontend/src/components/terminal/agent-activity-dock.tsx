@@ -24,7 +24,9 @@
  *    one row per orchestration run, running and finished alike: the most
  *    useful moment to read a sub-agent's or a run's result is right after it
  *    ends, so neither group empties itself the instant its last live entity
- *    finishes (#21). Rows are click targets that drive the pane's single
+ *    finishes (#21) — it stays for `DOCK_GROUP_GRACE_MS` and then leaves, so
+ *    a finished session does not keep a dead label above the composer for
+ *    ever (#131). Rows are click targets that drive the pane's single
  *    `selectedView` — the same state the composer's picker drives, passed in
  *    as a prop pair rather than owned here, so the dock and the picker can
  *    never point at two different things. The Workflows group nests each
@@ -109,6 +111,8 @@ import {
 import {
   combinedOrchestrationCounts,
   dockAgentRows,
+  dockGroupInGrace,
+  dockGroupVisible,
   dockHasContent,
   dockNavRows,
   dockWorkflowRows,
@@ -172,6 +176,8 @@ interface AgentActivityDockProps {
    *  holding) focus is no longer in the DOM. */
   onReturnFocus: () => void;
 }
+
+const readClock = (): number => Date.now();
 
 /** `dock-opt-${paneId}-${key}` — unique across panes and detached windows.
  *  Never used as a CSS selector, so the `:` inside a `sub:`/`wf:` key needs
@@ -446,17 +452,31 @@ export function AgentActivityDock({
   onHighlightChange,
   onReturnFocus,
 }: AgentActivityDockProps): ReactElement | null {
-  // One interval for the sub-agent/orchestration groups' elapsed figures,
-  // rather than a second interval per group. Gated on the session being alive
-  // rather than on a turn being in flight — deliberately looser than the
-  // metrics strip's own ticker, which times the turn (#40): an orchestration
-  // outlives the turn that launched it (see `activeOrchestrations`), so its row
-  // still has to count while the pane reads `idle`.
-  const ticking = state.startedAt !== null && state.status !== "exited";
-  const [, setTick] = useState(0);
+  // One interval for the sub-agent/orchestration groups' elapsed figures and
+  // for the #131 grace window, rather than a second interval per group. Not
+  // gated on a turn being in flight — deliberately looser than the metrics
+  // strip's own ticker, which times the turn (#40): an orchestration outlives
+  // the turn that launched it (see `activeOrchestrations`), so its row still
+  // has to count while the pane reads `idle`.
+  //
+  // `now` is state, not a `Date.now()` read in render (`react-hooks/purity`),
+  // and this interval is the only thing that advances it — which is what makes
+  // the #131 window close by itself: the tick that crosses the boundary flips
+  // `inGrace`, that render drops the groups, and `ticking` goes false in the
+  // same commit so the effect's cleanup stops the interval. `now` then freezes,
+  // harmlessly: with nothing live and no window open, no visibility depends on
+  // the clock until the next run starts and `ticking` turns back on.
+  const [now, setNow] = useState(readClock);
+  const agentRows = dockAgentRows(state);
+  const workflowRows = dockWorkflowRows(state);
+  const toolRun = liveToolRun(state);
+  const inGrace = dockGroupInGrace(agentRows, now) || dockGroupInGrace(workflowRows, now);
+  const anythingLive =
+    toolRun.length > 0 || agentRows.some((r) => r.running) || workflowRows.some((r) => r.running);
+  const ticking = state.startedAt !== null && (anythingLive || inGrace);
   useEffect(() => {
     if (!ticking) return;
-    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    const id = setInterval(() => setNow(readClock()), 1000);
     return () => clearInterval(id);
   }, [ticking]);
 
@@ -483,9 +503,18 @@ export function AgentActivityDock({
   // --- Keyboard-cursor derivations (#22) — hoisted above the early return
   // below because the two effects that follow need them, and every one of
   // these is a pure read of props/state (no hook rules to keep straight). ---
-  const navRows = dockNavRows(state);
-  const cursorGroup = navRows.find((r) => r.key === highlightedKey)?.group ?? null;
   const selectedKey = viewKey(selectedView);
+  // #131: a group is on screen while anything in it is live, for the grace
+  // window after the last end, and for as long as it holds the cursor or the
+  // pane's selection. A hidden group's rows leave `navRows` too, so the
+  // cursor can never land on a row that is not in the DOM.
+  const pinnedKeys = [highlightedKey, selectedKey];
+  const agentsVisible = dockGroupVisible(agentRows, now, pinnedKeys);
+  const workflowsVisible = dockGroupVisible(workflowRows, now, pinnedKeys);
+  const navRows = dockNavRows(state).filter((r) =>
+    r.group === "agents" ? agentsVisible : workflowsVisible,
+  );
+  const cursorGroup = navRows.find((r) => r.key === highlightedKey)?.group ?? null;
   // D5: a group holding the cursor renders expanded, derived — never
   // `setState`d from an effect (`react-hooks/set-state-in-effect` forbids
   // it), and both groups default collapsed, so without this a fresh pane's
@@ -612,17 +641,10 @@ export function AgentActivityDock({
   // an element on others without breaking React's hook-order contract.
   if (!dockHasContent(state)) return null;
 
-  // Hoisted here (rather than computed inline where each group used to build
-  // itself) because the derivations above already need them — moved, not
-  // duplicated.
-  const agentRows = dockAgentRows(state);
-  const workflowRows = dockWorkflowRows(state);
-
   const groups: ReactElement[] = [];
 
   // Tools — the live grouped run, exactly as the transcript would group it
   // (`liveToolRun` already folds in the exited-session honesty rule).
-  const toolRun = liveToolRun(state);
   if (toolRun.length > 0) {
     const runElapsedMs = toolRunElapsedMs(toolRun);
     const elapsed =
@@ -658,7 +680,7 @@ export function AgentActivityDock({
   // disappear.
   const runningAgents = agentRows.filter((r) => r.running);
   const oldestRunningAgent = runningAgents[0] ?? null;
-  if (agentRows.length > 0) {
+  if (agentsVisible) {
     const single = agentRows.length === 1 ? agentRows[0] ?? null : null;
     groups.push(
       <DockGroup
@@ -721,7 +743,7 @@ export function AgentActivityDock({
   // *live* run, same reasoning as the Agents header above.
   const liveRuns = activeOrchestrations(state);
   const oldestLiveRun = liveRuns[0] ?? null;
-  if (workflowRows.length > 0) {
+  if (workflowsVisible) {
     const single = workflowRows.length === 1 ? workflowRows[0] ?? null : null;
     const countsLabel = orchestrationCountsLabel(combinedOrchestrationCounts(state.orchestrations));
     groups.push(

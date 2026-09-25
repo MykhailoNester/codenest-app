@@ -18,7 +18,7 @@
 // finished entity keeps its row. "The group stays open and re-targets the
 // next live call/run" becomes "…and both stay listed…" for the same reason.
 
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { AgentActivityDock } from "../agent-activity-dock";
@@ -28,6 +28,7 @@ import {
   type ConversationState,
 } from "../../../lib/agent-conversation";
 import { MAIN_VIEW, viewKey, type AgentViewId } from "../../../lib/agent-views";
+import { DOCK_GROUP_GRACE_MS } from "../../../lib/agent-dock";
 import { agentStopTask } from "../../../lib/ipc";
 import type { AgentFrame, AgentFrameKind } from "../../../lib/ipc";
 
@@ -174,6 +175,16 @@ function dock(
     />
   );
 }
+
+// Fixture wire times are single-digit seconds from epoch, so every case runs
+// on a clock pinned just past them: without this, #131's grace window has
+// long expired by `Date.now()` and every finished group is off screen.
+const WIRE_NOW = 20_000;
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(WIRE_NOW);
+});
 
 afterEach(() => {
   cleanup();
@@ -1324,5 +1335,72 @@ describe("AgentActivityDock — keyboard navigation (#22)", () => {
     expect(onHighlightChange).toHaveBeenCalledWith(null);
     expect(onReturnFocus).not.toHaveBeenCalled();
     decoy.remove();
+  });
+});
+
+// #131 — a group has rows for the whole session, but is only on screen while
+// something is live and for `DOCK_GROUP_GRACE_MS` after the last end.
+describe("AgentActivityDock — grace window (#131)", () => {
+  /** One finished delegation and one completed run, both ending at 2_000. */
+  function finishedState(): ConversationState {
+    let state = taskState("planner-agent", "d", 1_000);
+    state = applyFrame(state, toolResultFrame("toolu_sub", false), 2_000);
+    state = applyFrame(state, orchestrationTaskStartedFrame("wf1"), 1_000);
+    return applyFrame(state, orchestrationTerminalFrame("wf1", "completed"), 2_000);
+  }
+
+  const AFTER_GRACE = 2_000 + DOCK_GROUP_GRACE_MS + 1;
+
+  it("both groups leave the dock once the window expires, and the metrics line stays", () => {
+    render(dock(finishedState()));
+    expect(screen.getByTestId("dock-group-agents")).not.toBeNull();
+    expect(screen.getByTestId("dock-group-workflows")).not.toBeNull();
+
+    act(() => void vi.advanceTimersByTime(AFTER_GRACE - WIRE_NOW));
+    expect(screen.queryByTestId("dock-group-agents")).toBeNull();
+    expect(screen.queryByTestId("dock-group-workflows")).toBeNull();
+    expect(screen.queryByTestId("dock-agent-rows")).toBeNull();
+    expect(screen.queryByTestId("dock-workflow-rows")).toBeNull();
+    expect(screen.getByTestId("agent-session-hud")).not.toBeNull();
+  });
+
+  it("one terminal run alongside a live one keeps the group and both rows", () => {
+    let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
+    state = applyFrame(state, orchestrationTaskStartedFrame("wf2"), 1_000);
+    state = applyFrame(state, orchestrationTerminalFrame("wf1", "completed"), 2_000);
+
+    vi.setSystemTime(AFTER_GRACE);
+    render(dock(state));
+    fireEvent.click(
+      screen.getByTestId("dock-group-workflows").querySelector("button") as HTMLButtonElement,
+    );
+    expect(screen.getAllByTestId("dock-workflow-row")).toHaveLength(2);
+  });
+
+  it("the dock drops the groups on its own clock and then stops ticking", () => {
+    render(dock(finishedState()));
+
+    act(() => void vi.advanceTimersByTime(AFTER_GRACE - WIRE_NOW - 1_000));
+    expect(screen.getByTestId("dock-group-workflows")).not.toBeNull();
+
+    act(() => void vi.advanceTimersByTime(2_000));
+    expect(screen.queryByTestId("dock-group-workflows")).toBeNull();
+    expect(screen.queryByTestId("dock-group-agents")).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a finished row under the dock cursor survives the window", () => {
+    vi.setSystemTime(AFTER_GRACE);
+    render(dock(finishedState(), { highlightedKey: viewKey({ kind: "subagent", id: "toolu_sub" }) }));
+    expect(screen.getByTestId("dock-group-agents")).not.toBeNull();
+    expect(screen.getByTestId("dock-agent-row")).not.toBeNull();
+    expect(screen.queryByTestId("dock-group-workflows")).toBeNull();
+  });
+
+  it("a finished run that is the pane's selection survives the window", () => {
+    vi.setSystemTime(AFTER_GRACE);
+    render(dock(finishedState(), { selectedView: { kind: "workflow", taskId: "wf1" } }));
+    expect(screen.getByTestId("dock-group-workflows")).not.toBeNull();
+    expect(screen.queryByTestId("dock-group-agents")).toBeNull();
   });
 });
