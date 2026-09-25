@@ -40,21 +40,26 @@ import {
   addTaskBlocker,
   addTaskLabel,
   changeTaskStatus,
+  createSubtask,
+  deleteSubtask,
   deleteTask,
   removeTaskBlocker,
   removeTaskLabel,
+  updateSubtask,
   updateTask,
   useLookups,
   useProjects,
   useTask,
   useTaskActivity,
   useTaskRuns,
+  useTaskSubtasks,
   useTasks,
   useTaxonomy,
   useTeamMembers,
   type ActivityEntry,
   type AgentRun,
   type Project,
+  type Subtask,
   type Task,
   type Taxonomy,
   type TeamMember,
@@ -69,6 +74,7 @@ import { hashHue, initialsOf } from "../components/task-detail/avatar";
 import { PropertiesCard } from "../components/task-detail/properties-card";
 import { TaskRunReplay } from "../components/task-detail/run-replay";
 import { RunsCard } from "../components/task-detail/runs-card";
+import { SubtasksCard } from "../components/task-detail/subtasks-card";
 import { TdPopover } from "../components/task-detail/td-popover";
 
 // Module-level sentinels so a not-yet-resolved query never hands a fresh
@@ -81,6 +87,7 @@ const NO_TAXONOMY: Taxonomy[] = [];
 const NO_STATUS_COLORS: Record<string, string> = {};
 const NO_ACTIVITY: ActivityEntry[] = [];
 const NO_RUNS: AgentRun[] = [];
+const NO_SUBTASKS: Subtask[] = [];
 
 const AVATAR_PX = 20;
 const AVATAR_FONT_PX = 9;
@@ -119,6 +126,12 @@ export function TaskDetailPage(): ReactElement {
     isError: runsError,
     refetch: refetchRuns,
   } = useTaskRuns(taskId);
+  const {
+    data: subtasks = NO_SUBTASKS,
+    isLoading: subtasksLoading,
+    isError: subtasksError,
+    refetch: refetchSubtasks,
+  } = useTaskSubtasks(taskId);
 
   const priorityVocab = lookups?.workflow_task_priorities ?? NO_VOCAB;
 
@@ -243,6 +256,57 @@ export function TaskDetailPage(): ReactElement {
       );
     },
     [runWrite, taskId],
+  );
+
+  // ── Subtasks ────────────────────────────────────────────────────────────
+  // The refetch is awaited before the promise settles, so the card's
+  // optimistic checkbox only drops its overlay once the stored row is in
+  // hand. `handleToggleSubtask` rethrows on purpose — that rejection is what
+  // reverts the checkbox.
+  const writeSubtask = useCallback(
+    async (fn: () => Promise<unknown>): Promise<void> => {
+      await fn();
+      await qc.invalidateQueries({ queryKey: ["task-subtasks", taskId] });
+    },
+    [qc, taskId],
+  );
+
+  const handleAddSubtask = useCallback(
+    (title: string) => {
+      void writeSubtask(() => createSubtask(taskId, title)).catch((err) =>
+        toast.error(`Failed to add subtask: ${(err as Error).message}`),
+      );
+    },
+    [taskId, writeSubtask],
+  );
+  const handleRenameSubtask = useCallback(
+    (subtaskId: number, title: string) => {
+      void writeSubtask(() =>
+        updateSubtask(taskId, subtaskId, { title }),
+      ).catch((err) =>
+        toast.error(`Failed to rename subtask: ${(err as Error).message}`),
+      );
+    },
+    [taskId, writeSubtask],
+  );
+  const handleDeleteSubtask = useCallback(
+    (subtaskId: number) => {
+      void writeSubtask(() => deleteSubtask(taskId, subtaskId)).catch((err) =>
+        toast.error(`Failed to delete subtask: ${(err as Error).message}`),
+      );
+    },
+    [taskId, writeSubtask],
+  );
+  const handleToggleSubtask = useCallback(
+    async (subtaskId: number, done: boolean): Promise<void> => {
+      try {
+        await writeSubtask(() => updateSubtask(taskId, subtaskId, { done }));
+      } catch (err) {
+        toast.error(`Failed to update subtask: ${(err as Error).message}`);
+        throw err;
+      }
+    },
+    [taskId, writeSubtask],
   );
 
   // ── Title — inline edit, Enter commits, Escape cancels ──────────────────
@@ -576,6 +640,17 @@ export function TaskDetailPage(): ReactElement {
                 </div>
               )}
             </div>
+
+            <SubtasksCard
+              subtasks={subtasks}
+              isLoading={subtasksLoading}
+              isError={subtasksError}
+              onRetry={() => void refetchSubtasks()}
+              onAdd={handleAddSubtask}
+              onRename={handleRenameSubtask}
+              onToggle={handleToggleSubtask}
+              onDelete={handleDeleteSubtask}
+            />
 
             <ActivityCard
               entries={activity}

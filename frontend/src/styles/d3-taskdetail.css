@@ -18,9 +18,8 @@
  *
  * Deliberate deviations from the source file:
  *
- * - NOT PORTED — the design file also styles four sections this app does not
+ * - NOT PORTED — the design file also styles sections this app does not
  *   build yet, all needing schema or data this app does not have:
- *   `.td-prog`, `.td-subs`, `.td-check`, `.td-addsub` (subtasks),
  *   `.td-files`/`.td-file*` (changed files), `.td-branch*` (branch card),
  *   `.td-comment`/`.td-para` (comments/rich description body). `.td-tabs`
  *   (section tabs), `.td-feed*` (activity feed) and `.td-runs`/`.td-run*`
@@ -66,7 +65,12 @@
  *   styling to port) and `.td-run__body` (the source has no class for the
  *   run row's column-2 wrapper, and the grid track needs `min-width: 0` for
  *   `.td-run__top span`'s ellipsis to work) are new, grouped at the end of
- *   this file.
+ *   this file. The subtasks block (`.td-subs`, `.td-check`, `.td-addsub`,
+ *   `.td-prog`) joined them when #27 gave the checklist a table to read:
+ *   the fetched copy of the design file no longer exists, so these four
+ *   could not be transcribed and were written instead against the same
+ *   tokens and the same idioms as their neighbours here. If the source is
+ *   ever refetched, this is the one block to diff against it.
  */
 
 .td-main {
@@ -719,4 +723,130 @@
 
 .td-run__body {
   min-width: 0;
+}
+
+/* Subtasks — see the ADDITIONS note in the header comment. */
+
+.td-prog {
+  width: 84px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  flex: none;
+}
+.td-prog i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ok);
+  transition: width 0.18s ease;
+}
+
+.td-subs {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.td-subs li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 6px 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.td-subs li:last-child {
+  border-bottom: none;
+}
+
+.td-check {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  border: 1px solid var(--line-3);
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.td-check:hover {
+  border-color: var(--accent-line);
+}
+.td-check:checked {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.td-check:checked::after {
+  content: "✓";
+  font-size: 10px;
+  line-height: 1;
+  color: var(--bg-0);
+}
+
+.td-sub__title {
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 6px;
+  color: var(--fg-1);
+  font-size: 12.5px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+.td-sub__title:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--line-1);
+}
+.td-subs li.is-done .td-sub__title {
+  color: var(--fg-4);
+  text-decoration: line-through;
+}
+
+.td-sub__edit {
+  min-width: 0;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  padding: 2px 6px;
+  color: var(--fg-0);
+  font-size: 12.5px;
+  font-family: inherit;
+  outline: none;
+}
+
+.td-addsub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px 0;
+  color: var(--fg-4);
+  font-size: 12.5px;
+}
+.td-addsub input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 6px;
+  color: var(--fg-1);
+  font-size: 12.5px;
+  font-family: inherit;
+  outline: none;
+}
+.td-addsub input::placeholder {
+  color: var(--fg-4);
+}
+.td-addsub input:focus {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--accent-line);
 }

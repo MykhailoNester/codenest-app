@@ -487,6 +487,7 @@ async def factory_reset() -> dict:
         "attachments",
         "insight_runs",
         "task_label_assignments",
+        "task_subtasks",
         "tasks",
         "workflow_items",
         "documents",

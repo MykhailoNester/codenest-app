@@ -9,17 +9,21 @@ from app.services.task_service import (
     add_blocker,
     add_task_label,
     change_task_status,
+    create_subtask,
     create_task,
+    delete_subtask,
     delete_task,
     get_all_tasks,
     get_task,
     get_task_blockers,
+    list_subtasks,
     list_task_activity,
     list_task_labels,
     list_task_runs,
     remove_blocker,
     remove_task_label,
     set_task_labels,
+    update_subtask,
     update_task,
 )
 
@@ -199,4 +203,48 @@ async def api_add_task_label(task_id: int, request: Request):
 async def api_remove_task_label(task_id: int, label_id: int):
     db = await get_db()
     await remove_task_label(db, task_id, label_id)
+    return JSONResponse({"ok": True})
+
+
+# --- Subtasks ---
+#
+# Every route carries the owning task id so a subtask is only ever reachable
+# through its task; the service scopes each statement by both ids.
+
+
+@router.get("/api/v1/tasks/{task_id}/subtasks")
+async def api_list_subtasks(task_id: int):
+    db = await get_db()
+    return JSONResponse(await list_subtasks(db, task_id))
+
+
+@router.post("/api/v1/tasks/{task_id}/subtasks")
+async def api_create_subtask(task_id: int, request: Request):
+    db = await get_db()
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
+    subtask = await create_subtask(db, task_id, data.get("title"))
+    return JSONResponse(subtask, status_code=201)
+
+
+@router.patch("/api/v1/tasks/{task_id}/subtasks/{subtask_id}")
+async def api_update_subtask(task_id: int, subtask_id: int, request: Request):
+    db = await get_db()
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "invalid json body"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
+    return JSONResponse(await update_subtask(db, task_id, subtask_id, data))
+
+
+@router.delete("/api/v1/tasks/{task_id}/subtasks/{subtask_id}")
+async def api_delete_subtask(task_id: int, subtask_id: int):
+    db = await get_db()
+    await delete_subtask(db, task_id, subtask_id)
     return JSONResponse({"ok": True})

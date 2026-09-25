@@ -522,3 +522,114 @@ async def set_task_labels(
         project_id=await _task_project_id(db, task_id),
     )
     return labels
+
+
+# --- Task subtasks (checklist rows owned by one task) ----------------------
+#
+# Cascade on task deletion is the FK (task_subtasks.task_id ON DELETE CASCADE,
+# migration 020), not an explicit DELETE here — same as labels and blockers
+# above. Every read and write is scoped by task_id as well as subtask id, so a
+# subtask can only ever be reached through the task that owns it.
+
+
+def _subtask_row(row: aiosqlite.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "task_id": row["task_id"],
+        "title": row["title"],
+        "done": bool(row["done"]),
+        "sort_order": row["sort_order"],
+        "created_at": row["created_at"],
+    }
+
+
+def _clean_subtask_title(title: object) -> str:
+    if not isinstance(title, str) or not title.strip():
+        raise HTTPException(status_code=400, detail="title must be a non-empty string")
+    return title.strip()
+
+
+async def list_subtasks(db: aiosqlite.Connection, task_id: int) -> list[dict[str, Any]]:
+    await _assert_task(db, task_id)
+    async with db.execute(
+        "SELECT * FROM task_subtasks WHERE task_id = ? ORDER BY sort_order, id",
+        (task_id,),
+    ) as cur:
+        return [_subtask_row(r) for r in await cur.fetchall()]
+
+
+async def _get_subtask(
+    db: aiosqlite.Connection, task_id: int, subtask_id: int
+) -> dict[str, Any]:
+    async with db.execute(
+        "SELECT * FROM task_subtasks WHERE id = ? AND task_id = ?",
+        (subtask_id, task_id),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="subtask not found")
+    return _subtask_row(row)
+
+
+async def create_subtask(
+    db: aiosqlite.Connection, task_id: int, title: object
+) -> dict[str, Any]:
+    await _assert_task(db, task_id)
+    clean = _clean_subtask_title(title)
+    async with db.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM task_subtasks "
+        "WHERE task_id = ?",
+        (task_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    next_order = row["next"] if row else 0
+    cursor = await db.execute(
+        "INSERT INTO task_subtasks (task_id, title, sort_order) VALUES (?, ?, ?)",
+        (task_id, clean, next_order),
+    )
+    await db.commit()
+    subtask_id = cursor.lastrowid
+    assert subtask_id is not None
+    return await _get_subtask(db, task_id, subtask_id)
+
+
+async def update_subtask(
+    db: aiosqlite.Connection, task_id: int, subtask_id: int, data: dict
+) -> dict[str, Any]:
+    """Rename and/or toggle one subtask. Returns the stored row, which is what
+    the optimistic checkbox reconciles against."""
+    await _assert_task(db, task_id)
+    await _get_subtask(db, task_id, subtask_id)
+
+    fields: list[str] = []
+    params: list[Any] = []
+    if "title" in data:
+        fields.append("title = ?")
+        params.append(_clean_subtask_title(data["title"]))
+    if "done" in data:
+        if not isinstance(data["done"], bool):
+            raise HTTPException(status_code=400, detail="done must be a boolean")
+        fields.append("done = ?")
+        params.append(1 if data["done"] else 0)
+    if not fields:
+        raise HTTPException(status_code=400, detail="nothing to update")
+
+    params.extend([subtask_id, task_id])
+    await db.execute(
+        f"UPDATE task_subtasks SET {', '.join(fields)} WHERE id = ? AND task_id = ?",
+        params,
+    )
+    await db.commit()
+    return await _get_subtask(db, task_id, subtask_id)
+
+
+async def delete_subtask(
+    db: aiosqlite.Connection, task_id: int, subtask_id: int
+) -> None:
+    await _assert_task(db, task_id)
+    await _get_subtask(db, task_id, subtask_id)
+    await db.execute(
+        "DELETE FROM task_subtasks WHERE id = ? AND task_id = ?",
+        (subtask_id, task_id),
+    )
+    await db.commit()
