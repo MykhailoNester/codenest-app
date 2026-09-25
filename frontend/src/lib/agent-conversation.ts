@@ -1239,6 +1239,69 @@ export function permissionInputSummary(toolName: string, input: unknown): string
   }
 }
 
+export const ASK_USER_QUESTION_TOOL = "AskUserQuestion";
+
+export interface AgentQuestionOption {
+  label: string;
+  description: string | null;
+}
+
+export interface AgentQuestion {
+  question: string;
+  header: string | null;
+  multiSelect: boolean;
+  options: AgentQuestionOption[];
+}
+
+/** `AskUserQuestion`'s input → the questions to render, or `null` for any shape
+ *  this does not recognise so the caller falls back to the generic permission
+ *  dialog rather than to an empty box. */
+export function parseAgentQuestions(input: unknown): AgentQuestion[] | null {
+  const rec = asRecord(input);
+  if (!rec) return null;
+  const raw = asArray(rec["questions"]);
+  if (!raw || raw.length === 0) return null;
+
+  const questions: AgentQuestion[] = [];
+  for (const entry of raw) {
+    const q = asRecord(entry);
+    if (!q) return null;
+    const question = asString(q["question"]);
+    if (question === undefined || question.length === 0) return null;
+    const rawOptions = asArray(q["options"]);
+    if (!rawOptions || rawOptions.length === 0) return null;
+
+    const options: AgentQuestionOption[] = [];
+    for (const item of rawOptions) {
+      const o = asRecord(item);
+      if (!o) return null;
+      const label = asString(o["label"]);
+      if (label === undefined || label.length === 0) return null;
+      options.push({ label, description: asString(o["description"]) ?? null });
+    }
+
+    questions.push({
+      question,
+      header: asString(q["header"]) ?? null,
+      multiSelect: asBool(q["multiSelect"]) ?? false,
+      options,
+    });
+  }
+  return questions;
+}
+
+/** The `updatedInput` an answered `AskUserQuestion` allow carries: the original
+ *  input with an `answers` map keyed by question text. A single-select answer is
+ *  a string, a multi-select one an array; free text sits in the same slot as a
+ *  label, which is what makes "Other…" a real answer rather than a label the
+ *  user never picked. */
+export function askUserQuestionInput(
+  input: unknown,
+  answers: Record<string, string | string[]>,
+): Record<string, unknown> {
+  return { ...(asRecord(input) ?? {}), answers };
+}
+
 /** `task_updated.patch.status` / `task_notification.status` → the Codenest
  *  status this side tracks. `null` for anything else, meaning "leave the run's
  *  status unchanged" — never a placeholder terminal state. */

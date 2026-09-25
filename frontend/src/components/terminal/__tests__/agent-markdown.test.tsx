@@ -166,6 +166,7 @@ describe("conversation text blocks", () => {
         onAllowPermission={noop}
         onAllowPermissionSession={noop}
         onDenyPermission={noop}
+        onAnswerQuestion={noop}
         onOpenSubagent={noop}
       />,
     );
@@ -184,6 +185,7 @@ describe("conversation text blocks", () => {
         onAllowPermission={noop}
         onAllowPermissionSession={noop}
         onDenyPermission={noop}
+        onAnswerQuestion={noop}
         onOpenSubagent={noop}
       />,
     );
