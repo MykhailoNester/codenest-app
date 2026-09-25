@@ -36,6 +36,15 @@
  *   hardcodes those classes) stays visually consistent with its neighbours.
  *   `.td-ghost` IS ported — it is a distinct, borderless affordance with no
  *   `d3-` equivalent.
+ * - BLUR — the source's `backdrop-filter: blur(20px)` on `.td-bar` and
+ *   `.td-card` is NOT ported. It is the same rule d3-creative.css removed from
+ *   every full-size panel: WebKit re-samples and re-blurs a panel's whole
+ *   footprint whenever anything behind or above it repaints, and that drove the
+ *   Graphics and Media subprocess to ~5 cores. `.td-card` is every card on this
+ *   page, so the cost scales with how much the page carries — it got worse when
+ *   the subtasks (#27) and comments (#28) cards landed, the latter repainting on
+ *   every keystroke in its textarea. Both backgrounds go opaque-ish instead, the
+ *   same substitution and the same alpha d3-creative.css used.
  * - COLOUR — the source's two opaque hex literals are replaced with the
  *   nearest existing token so this file, like `d3-taskboard.css`, carries no
  *   raw hex at all: the dark-navy popover background (`.td-pop__menu`,
@@ -99,8 +108,7 @@
   gap: 16px;
   padding: 12px 28px;
   border-bottom: 1px solid var(--line-1);
-  background: rgba(8, 10, 18, 0.72);
-  backdrop-filter: blur(20px);
+  background: rgba(8, 10, 18, 0.92);
   flex: none;
 }
 .td-bar__l {
@@ -263,11 +271,10 @@
 
 /* Cards */
 .td-card {
-  background: rgba(11, 14, 24, 0.55);
+  background: rgba(11, 14, 24, 0.92);
   border: 1px solid var(--line-1);
   border-radius: 14px;
   padding: 16px 18px;
-  backdrop-filter: blur(20px);
 }
 .td-card--props {
   padding: 13px 14px;
