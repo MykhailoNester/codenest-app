@@ -548,6 +548,23 @@ export interface Subtask {
   created_at: string;
 }
 
+/**
+ * One `task_comments` row. `author_kind` is the stored attribution, not a
+ * guess: `operator` is the person driving this install (no members row),
+ * `human` and `agent` are members rows. `author_name` is null for the
+ * operator and for a member that has since been removed.
+ */
+export interface TaskComment {
+  id: number;
+  task_id: number;
+  author_id: number | null;
+  author_kind: "operator" | "human" | "agent";
+  author_name: string | null;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -856,6 +873,57 @@ export function deleteSubtask(
 ): Promise<{ ok: true }> {
   return fetchSidecar<{ ok: true }>(
     `/api/v1/tasks/${taskId}/subtasks/${subtaskId}`,
+    { method: "DELETE" },
+  );
+}
+
+// ─── Task comments ───────────────────────────────────────────
+//
+// `createComment` omits `author_id`, so a comment posted from the UI is the
+// operator's. An agent posts the same route with its own members id.
+
+export function useTaskComments(
+  taskId: number,
+): UseQueryResult<TaskComment[], SidecarError> {
+  return useQuery<TaskComment[], SidecarError>({
+    queryKey: ["task-comments", taskId],
+    queryFn: () => fetchSidecar<TaskComment[]>(`/api/v1/tasks/${taskId}/comments`),
+    enabled: taskId > 0,
+  });
+}
+
+export function createComment(
+  taskId: number,
+  body: string,
+): Promise<TaskComment> {
+  return fetchSidecar<TaskComment>(`/api/v1/tasks/${taskId}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+}
+
+export function updateComment(
+  taskId: number,
+  commentId: number,
+  body: string,
+): Promise<TaskComment> {
+  return fetchSidecar<TaskComment>(
+    `/api/v1/tasks/${taskId}/comments/${commentId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    },
+  );
+}
+
+export function deleteComment(
+  taskId: number,
+  commentId: number,
+): Promise<{ ok: true }> {
+  return fetchSidecar<{ ok: true }>(
+    `/api/v1/tasks/${taskId}/comments/${commentId}`,
     { method: "DELETE" },
   );
 }

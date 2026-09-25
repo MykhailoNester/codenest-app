@@ -633,3 +633,120 @@ async def delete_subtask(
         (subtask_id, task_id),
     )
     await db.commit()
+
+
+# --- Task comments (free-form notes owned by one task) ---------------------
+#
+# Cascade on task deletion is the FK (task_comments.task_id ON DELETE CASCADE,
+# migration 021). Every read and write is scoped by task_id as well as comment
+# id, so a comment is only ever reachable through the task that owns it.
+#
+# `author_kind` is resolved from members.type at write time and stored, so a
+# comment stays attributed after its member row changes or goes away. A null
+# author is the operator, never a fabricated name.
+
+_OPERATOR = "operator"
+
+
+def _comment_row(row: aiosqlite.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "task_id": row["task_id"],
+        "author_id": row["author_id"],
+        "author_kind": row["author_kind"],
+        "author_name": row["author_name"],
+        "body": row["body"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _clean_comment_body(body: object) -> str:
+    if not isinstance(body, str) or not body.strip():
+        raise HTTPException(status_code=400, detail="body must be a non-empty string")
+    return body.strip()
+
+
+async def _resolve_comment_author(
+    db: aiosqlite.Connection, author_id: object
+) -> tuple[int | None, str]:
+    if author_id is None:
+        return None, _OPERATOR
+    if not isinstance(author_id, int) or isinstance(author_id, bool):
+        raise HTTPException(status_code=400, detail="author_id must be an integer")
+    async with db.execute("SELECT type FROM members WHERE id = ?", (author_id,)) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="author not found")
+    return author_id, row["type"]
+
+
+async def list_comments(db: aiosqlite.Connection, task_id: int) -> list[dict[str, Any]]:
+    await _assert_task(db, task_id)
+    async with db.execute(
+        "SELECT c.*, m.name AS author_name FROM task_comments c "
+        "LEFT JOIN members m ON m.id = c.author_id "
+        "WHERE c.task_id = ? ORDER BY c.created_at, c.id",
+        (task_id,),
+    ) as cur:
+        return [_comment_row(r) for r in await cur.fetchall()]
+
+
+async def _get_comment(
+    db: aiosqlite.Connection, task_id: int, comment_id: int
+) -> dict[str, Any]:
+    async with db.execute(
+        "SELECT c.*, m.name AS author_name FROM task_comments c "
+        "LEFT JOIN members m ON m.id = c.author_id "
+        "WHERE c.id = ? AND c.task_id = ?",
+        (comment_id, task_id),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="comment not found")
+    return _comment_row(row)
+
+
+async def create_comment(
+    db: aiosqlite.Connection, task_id: int, body: object, author_id: object = None
+) -> dict[str, Any]:
+    await _assert_task(db, task_id)
+    clean = _clean_comment_body(body)
+    resolved_id, kind = await _resolve_comment_author(db, author_id)
+    cursor = await db.execute(
+        "INSERT INTO task_comments (task_id, author_id, author_kind, body) "
+        "VALUES (?, ?, ?, ?)",
+        (task_id, resolved_id, kind, clean),
+    )
+    await db.commit()
+    comment_id = cursor.lastrowid
+    assert comment_id is not None
+    return await _get_comment(db, task_id, comment_id)
+
+
+async def update_comment(
+    db: aiosqlite.Connection, task_id: int, comment_id: int, data: dict
+) -> dict[str, Any]:
+    await _assert_task(db, task_id)
+    await _get_comment(db, task_id, comment_id)
+    if "body" not in data:
+        raise HTTPException(status_code=400, detail="nothing to update")
+    await db.execute(
+        "UPDATE task_comments SET body = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND task_id = ?",
+        (_clean_comment_body(data["body"]), comment_id, task_id),
+    )
+    await db.commit()
+    return await _get_comment(db, task_id, comment_id)
+
+
+async def delete_comment(
+    db: aiosqlite.Connection, task_id: int, comment_id: int
+) -> None:
+    await _assert_task(db, task_id)
+    await _get_comment(db, task_id, comment_id)
+    await db.execute(
+        "DELETE FROM task_comments WHERE id = ? AND task_id = ?",
+        (comment_id, task_id),
+    )
+    await db.commit()

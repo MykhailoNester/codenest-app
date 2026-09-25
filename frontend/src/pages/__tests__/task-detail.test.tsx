@@ -30,6 +30,7 @@ const {
   mockUseTaskActivity,
   mockUseTaskRuns,
   mockUseTaskSubtasks,
+  mockUseTaskComments,
   mockUseSessionReplay,
   mockUseProfiles,
   mockUpdateTask,
@@ -51,6 +52,7 @@ const {
   mockUseTaskActivity: vi.fn(),
   mockUseTaskRuns: vi.fn(),
   mockUseTaskSubtasks: vi.fn(),
+  mockUseTaskComments: vi.fn(),
   mockUseSessionReplay: vi.fn(),
   mockUseProfiles: vi.fn(),
   mockUpdateTask: vi.fn(),
@@ -74,6 +76,7 @@ vi.mock("../../lib/api", () => ({
   useTaskActivity: (...args: unknown[]) => mockUseTaskActivity(...args),
   useTaskRuns: (...args: unknown[]) => mockUseTaskRuns(...args),
   useTaskSubtasks: (...args: unknown[]) => mockUseTaskSubtasks(...args),
+  useTaskComments: (...args: unknown[]) => mockUseTaskComments(...args),
   useSessionReplay: (...args: unknown[]) => mockUseSessionReplay(...args),
   useProfiles: (...args: unknown[]) => mockUseProfiles(...args),
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
@@ -86,6 +89,9 @@ vi.mock("../../lib/api", () => ({
   createSubtask: vi.fn(),
   updateSubtask: vi.fn(),
   deleteSubtask: vi.fn(),
+  createComment: vi.fn(),
+  updateComment: vi.fn(),
+  deleteComment: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -250,6 +256,12 @@ function setupMocks(
     refetch: vi.fn(),
   });
   mockUseTaskSubtasks.mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  });
+  mockUseTaskComments.mockReturnValue({
     data: [],
     isLoading: false,
     isError: false,
@@ -523,6 +535,12 @@ describe("TaskDetailPage", () => {
       refetch: vi.fn(),
     });
     mockUseTaskSubtasks.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockUseTaskComments.mockReturnValue({
       data: [],
       isLoading: false,
       isError: false,

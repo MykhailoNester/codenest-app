@@ -40,11 +40,14 @@ import {
   addTaskBlocker,
   addTaskLabel,
   changeTaskStatus,
+  createComment,
   createSubtask,
+  deleteComment,
   deleteSubtask,
   deleteTask,
   removeTaskBlocker,
   removeTaskLabel,
+  updateComment,
   updateSubtask,
   updateTask,
   useLookups,
@@ -52,6 +55,7 @@ import {
   useTask,
   useTaskActivity,
   useTaskRuns,
+  useTaskComments,
   useTaskSubtasks,
   useTasks,
   useTaxonomy,
@@ -60,6 +64,7 @@ import {
   type AgentRun,
   type Project,
   type Subtask,
+  type TaskComment,
   type Task,
   type Taxonomy,
   type TeamMember,
@@ -75,6 +80,7 @@ import { PropertiesCard } from "../components/task-detail/properties-card";
 import { TaskRunReplay } from "../components/task-detail/run-replay";
 import { RunsCard } from "../components/task-detail/runs-card";
 import { SubtasksCard } from "../components/task-detail/subtasks-card";
+import { CommentsCard } from "../components/task-detail/comments-card";
 import { TdPopover } from "../components/task-detail/td-popover";
 
 // Module-level sentinels so a not-yet-resolved query never hands a fresh
@@ -88,6 +94,7 @@ const NO_STATUS_COLORS: Record<string, string> = {};
 const NO_ACTIVITY: ActivityEntry[] = [];
 const NO_RUNS: AgentRun[] = [];
 const NO_SUBTASKS: Subtask[] = [];
+const NO_COMMENTS: TaskComment[] = [];
 
 const AVATAR_PX = 20;
 const AVATAR_FONT_PX = 9;
@@ -132,6 +139,12 @@ export function TaskDetailPage(): ReactElement {
     isError: subtasksError,
     refetch: refetchSubtasks,
   } = useTaskSubtasks(taskId);
+  const {
+    data: comments = NO_COMMENTS,
+    isLoading: commentsLoading,
+    isError: commentsError,
+    refetch: refetchComments,
+  } = useTaskComments(taskId);
 
   const priorityVocab = lookups?.workflow_task_priorities ?? NO_VOCAB;
 
@@ -307,6 +320,48 @@ export function TaskDetailPage(): ReactElement {
       }
     },
     [taskId, writeSubtask],
+  );
+
+  // ── Comments ────────────────────────────────────────────────────────────
+  // Post and edit rethrow on purpose: the card only clears its draft once the
+  // promise resolves, so a rejection is what keeps the typed text on screen.
+  const writeComment = useCallback(
+    async (fn: () => Promise<unknown>): Promise<void> => {
+      await fn();
+      await qc.invalidateQueries({ queryKey: ["task-comments", taskId] });
+    },
+    [qc, taskId],
+  );
+
+  const handlePostComment = useCallback(
+    async (body: string): Promise<void> => {
+      try {
+        await writeComment(() => createComment(taskId, body));
+      } catch (err) {
+        toast.error(`Failed to post comment: ${(err as Error).message}`);
+        throw err;
+      }
+    },
+    [taskId, writeComment],
+  );
+  const handleEditComment = useCallback(
+    async (commentId: number, body: string): Promise<void> => {
+      try {
+        await writeComment(() => updateComment(taskId, commentId, body));
+      } catch (err) {
+        toast.error(`Failed to edit comment: ${(err as Error).message}`);
+        throw err;
+      }
+    },
+    [taskId, writeComment],
+  );
+  const handleDeleteComment = useCallback(
+    (commentId: number) => {
+      void writeComment(() => deleteComment(taskId, commentId)).catch((err) =>
+        toast.error(`Failed to delete comment: ${(err as Error).message}`),
+      );
+    },
+    [taskId, writeComment],
   );
 
   // ── Title — inline edit, Enter commits, Escape cancels ──────────────────
@@ -658,6 +713,17 @@ export function TaskDetailPage(): ReactElement {
               isError={activityError}
               onRetry={() => void refetchActivity()}
               statusLabels={statusLabels}
+              comments={
+                <CommentsCard
+                  comments={comments}
+                  isLoading={commentsLoading}
+                  isError={commentsError}
+                  onRetry={() => void refetchComments()}
+                  onPost={handlePostComment}
+                  onSaveEdit={handleEditComment}
+                  onDelete={handleDeleteComment}
+                />
+              }
             />
 
             <RunsCard

@@ -1072,3 +1072,104 @@ async def test_020_applies_to_an_existing_db(tmp_path) -> None:
         assert row["cnt"] == 0, "020 must seed no rows"
     finally:
         await conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Migration 021 — task comments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_task_comments_table_schema(migrated_db) -> None:
+    """task_comments must have exactly the documented columns."""
+    cur = await migrated_db.execute("PRAGMA table_info(task_comments)")
+    rows = await cur.fetchall()
+    col_names = {r["name"] for r in rows}
+    assert col_names == {
+        "id",
+        "task_id",
+        "author_id",
+        "author_kind",
+        "body",
+        "created_at",
+        "updated_at",
+    }
+
+
+@pytest.mark.asyncio
+async def test_task_comment_fk_cascade(migrated_db) -> None:
+    """Deleting a task must cascade-delete its comment rows."""
+    cur = await migrated_db.execute(
+        "INSERT INTO projects (name, description, tech_stack, status) VALUES (?, ?, ?, ?)",
+        ("CommentCascadeProj", None, None, "active"),
+    )
+    await migrated_db.commit()
+    cur = await migrated_db.execute(
+        "SELECT id FROM projects WHERE name='CommentCascadeProj'"
+    )
+    proj = await cur.fetchone()
+    assert proj is not None
+
+    cur = await migrated_db.execute(
+        "INSERT INTO tasks (title, project_id) VALUES (?, ?)",
+        ("Comment cascade task", proj["id"]),
+    )
+    await migrated_db.commit()
+    task_id = cur.lastrowid
+    assert task_id is not None
+
+    await migrated_db.execute(
+        "INSERT INTO task_comments (task_id, body) VALUES (?, ?)",
+        (task_id, "note"),
+    )
+    await migrated_db.commit()
+
+    await migrated_db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    await migrated_db.commit()
+
+    cur = await migrated_db.execute(
+        "SELECT COUNT(*) AS cnt FROM task_comments WHERE task_id = ?", (task_id,)
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    assert row["cnt"] == 0, "comment should have been cascade-deleted"
+
+
+@pytest.mark.asyncio
+async def test_021_applies_to_an_existing_db(tmp_path) -> None:
+    """021 must apply to a DB that already carries 000..020, not only a fresh
+    one — the append-only runner never re-reads a recorded stem."""
+    import pathlib
+
+    import aiosqlite
+
+    from app.database import apply_migration_file
+
+    migrations = pathlib.Path(__file__).parents[2] / "migrations"
+    files = sorted(migrations.glob("*.sql"))
+    target = next(f for f in files if f.stem.startswith("021_"))
+
+    conn = await aiosqlite.connect(str(tmp_path / "existing.db"))
+    conn.row_factory = aiosqlite.Row
+    try:
+        await conn.execute("PRAGMA foreign_keys=ON")
+        for migration_file in files:
+            if migration_file is target:
+                continue
+            await apply_migration_file(conn, migration_file)
+        await conn.commit()
+
+        cur = await conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='task_comments'"
+        )
+        assert await cur.fetchone() is None, "021 is the only source of this table"
+
+        await apply_migration_file(conn, target)
+        await conn.commit()
+
+        cur = await conn.execute("SELECT COUNT(*) AS cnt FROM task_comments")
+        row = await cur.fetchone()
+        assert row is not None
+        assert row["cnt"] == 0, "021 must seed no rows"
+    finally:
+        await conn.close()
