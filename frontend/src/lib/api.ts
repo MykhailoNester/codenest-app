@@ -534,6 +534,20 @@ export interface TaskBlocker {
   blocking_status: string;
 }
 
+/**
+ * One `task_subtasks` checklist row. A subtask is a line, not a task: it has
+ * no status, assignee or board presence, and is reachable only through the
+ * task that owns it.
+ */
+export interface Subtask {
+  id: number;
+  task_id: number;
+  title: string;
+  done: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -793,6 +807,55 @@ export function removeTaskLabel(
 ): Promise<{ ok: true }> {
   return fetchSidecar<{ ok: true }>(
     `/api/v1/tasks/${taskId}/labels/${labelId}`,
+    { method: "DELETE" },
+  );
+}
+
+// ─── Task subtasks ────────────────────────────────────────────────────────────
+//
+// `updateSubtask` returns the stored row: the checkbox flips optimistically
+// and reconciles against that response, so a rejected write lands back on the
+// value the sidecar actually holds.
+
+export function useTaskSubtasks(
+  taskId: number,
+): UseQueryResult<Subtask[], SidecarError> {
+  return useQuery<Subtask[], SidecarError>({
+    queryKey: ["task-subtasks", taskId],
+    queryFn: () => fetchSidecar<Subtask[]>(`/api/v1/tasks/${taskId}/subtasks`),
+    enabled: taskId > 0,
+  });
+}
+
+export function createSubtask(taskId: number, title: string): Promise<Subtask> {
+  return fetchSidecar<Subtask>(`/api/v1/tasks/${taskId}/subtasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+}
+
+export function updateSubtask(
+  taskId: number,
+  subtaskId: number,
+  patch: { title?: string; done?: boolean },
+): Promise<Subtask> {
+  return fetchSidecar<Subtask>(
+    `/api/v1/tasks/${taskId}/subtasks/${subtaskId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export function deleteSubtask(
+  taskId: number,
+  subtaskId: number,
+): Promise<{ ok: true }> {
+  return fetchSidecar<{ ok: true }>(
+    `/api/v1/tasks/${taskId}/subtasks/${subtaskId}`,
     { method: "DELETE" },
   );
 }

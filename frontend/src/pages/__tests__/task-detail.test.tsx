@@ -29,6 +29,7 @@ const {
   mockUseTaxonomy,
   mockUseTaskActivity,
   mockUseTaskRuns,
+  mockUseTaskSubtasks,
   mockUseSessionReplay,
   mockUseProfiles,
   mockUpdateTask,
@@ -49,6 +50,7 @@ const {
   mockUseTaxonomy: vi.fn(),
   mockUseTaskActivity: vi.fn(),
   mockUseTaskRuns: vi.fn(),
+  mockUseTaskSubtasks: vi.fn(),
   mockUseSessionReplay: vi.fn(),
   mockUseProfiles: vi.fn(),
   mockUpdateTask: vi.fn(),
@@ -71,6 +73,7 @@ vi.mock("../../lib/api", () => ({
   useTaxonomy: (...args: unknown[]) => mockUseTaxonomy(...args),
   useTaskActivity: (...args: unknown[]) => mockUseTaskActivity(...args),
   useTaskRuns: (...args: unknown[]) => mockUseTaskRuns(...args),
+  useTaskSubtasks: (...args: unknown[]) => mockUseTaskSubtasks(...args),
   useSessionReplay: (...args: unknown[]) => mockUseSessionReplay(...args),
   useProfiles: (...args: unknown[]) => mockUseProfiles(...args),
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
@@ -80,6 +83,9 @@ vi.mock("../../lib/api", () => ({
   removeTaskBlocker: (...args: unknown[]) => mockRemoveTaskBlocker(...args),
   addTaskLabel: (...args: unknown[]) => mockAddTaskLabel(...args),
   removeTaskLabel: (...args: unknown[]) => mockRemoveTaskLabel(...args),
+  createSubtask: vi.fn(),
+  updateSubtask: vi.fn(),
+  deleteSubtask: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -239,6 +245,12 @@ function setupMocks(
   });
   mockUseTaskRuns.mockReturnValue({
     data: opts.runs ?? [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  });
+  mockUseTaskSubtasks.mockReturnValue({
+    data: [],
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
@@ -505,6 +517,12 @@ describe("TaskDetailPage", () => {
       refetch: vi.fn(),
     });
     mockUseTaskRuns.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockUseTaskSubtasks.mockReturnValue({
       data: [],
       isLoading: false,
       isError: false,

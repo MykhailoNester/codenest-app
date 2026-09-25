@@ -972,3 +972,103 @@ async def test_migration_009_stem_is_recorded_and_skipped_on_rerun(
         if db_module._db is not None:
             await db_module._db.close()
         db_module._db = None
+
+
+# ---------------------------------------------------------------------------
+# Migration 020 — task subtasks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_task_subtasks_table_schema(migrated_db) -> None:
+    """task_subtasks must have exactly the documented columns."""
+    cur = await migrated_db.execute("PRAGMA table_info(task_subtasks)")
+    rows = await cur.fetchall()
+    col_names = {r["name"] for r in rows}
+    assert col_names == {
+        "id",
+        "task_id",
+        "title",
+        "done",
+        "sort_order",
+        "created_at",
+    }
+
+
+@pytest.mark.asyncio
+async def test_task_subtask_fk_cascade(migrated_db) -> None:
+    """Deleting a task must cascade-delete its subtask rows."""
+    cur = await migrated_db.execute(
+        "INSERT INTO projects (name, description, tech_stack, status) VALUES (?, ?, ?, ?)",
+        ("SubtaskCascadeProj", None, None, "active"),
+    )
+    await migrated_db.commit()
+    cur = await migrated_db.execute(
+        "SELECT id FROM projects WHERE name='SubtaskCascadeProj'"
+    )
+    proj = await cur.fetchone()
+    assert proj is not None
+
+    cur = await migrated_db.execute(
+        "INSERT INTO tasks (title, project_id) VALUES (?, ?)",
+        ("Subtask cascade task", proj["id"]),
+    )
+    await migrated_db.commit()
+    task_id = cur.lastrowid
+    assert task_id is not None
+
+    await migrated_db.execute(
+        "INSERT INTO task_subtasks (task_id, title) VALUES (?, ?)",
+        (task_id, "child"),
+    )
+    await migrated_db.commit()
+
+    await migrated_db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    await migrated_db.commit()
+
+    cur = await migrated_db.execute(
+        "SELECT COUNT(*) AS cnt FROM task_subtasks WHERE task_id = ?", (task_id,)
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    assert row["cnt"] == 0, "subtask should have been cascade-deleted"
+
+
+@pytest.mark.asyncio
+async def test_020_applies_to_an_existing_db(tmp_path) -> None:
+    """020 must apply to a DB that already carries 000..019, not only a fresh
+    one — the append-only runner never re-reads a recorded stem."""
+    import pathlib
+
+    import aiosqlite
+
+    from app.database import apply_migration_file
+
+    migrations = pathlib.Path(__file__).parents[2] / "migrations"
+    files = sorted(migrations.glob("*.sql"))
+    target = next(f for f in files if f.stem.startswith("020_"))
+
+    conn = await aiosqlite.connect(str(tmp_path / "existing.db"))
+    conn.row_factory = aiosqlite.Row
+    try:
+        await conn.execute("PRAGMA foreign_keys=ON")
+        for migration_file in files:
+            if migration_file is target:
+                continue
+            await apply_migration_file(conn, migration_file)
+        await conn.commit()
+
+        cur = await conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='task_subtasks'"
+        )
+        assert await cur.fetchone() is None, "020 is the only source of this table"
+
+        await apply_migration_file(conn, target)
+        await conn.commit()
+
+        cur = await conn.execute("SELECT COUNT(*) AS cnt FROM task_subtasks")
+        row = await cur.fetchone()
+        assert row is not None
+        assert row["cnt"] == 0, "020 must seed no rows"
+    finally:
+        await conn.close()
