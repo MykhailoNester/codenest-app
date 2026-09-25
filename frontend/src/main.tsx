@@ -9,6 +9,7 @@ import "./styles/d3-launch.css";
 import "./index.css";
 
 import { App } from "./App";
+import { RootErrorBoundary } from "./components/root-error-boundary";
 import { installViewportLock } from "./lib/viewport-lock";
 
 const rootEl = document.getElementById("root");
@@ -22,6 +23,8 @@ installViewportLock(rootEl);
 
 createRoot(rootEl).render(
   <StrictMode>
-    <App />
+    <RootErrorBoundary>
+      <App />
+    </RootErrorBoundary>
   </StrictMode>,
 );
