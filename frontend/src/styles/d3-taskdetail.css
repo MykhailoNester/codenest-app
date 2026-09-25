@@ -20,14 +20,15 @@
  *
  * - NOT PORTED — the design file also styles sections this app does not
  *   build yet, all needing schema or data this app does not have:
- *   `.td-files`/`.td-file*` (changed files), `.td-branch*` (branch card),
- *   `.td-comment`/`.td-para` (comments/rich description body). `.td-tabs`
- *   (section tabs), `.td-feed*` (activity feed) and `.td-runs`/`.td-run*`
- *   (agent runs) are no longer on this list — they were ported (see below)
- *   once `GET /api/v1/tasks/{id}/activity` gave the Activity tab something
- *   to read and `GET /api/v1/tasks/{id}/runs` gave the runs card something
- *   to read; the tab strip still renders only that one tab, since Changed
- *   files and Comments still have no data source.
+ *   `.td-files`/`.td-file*` (changed files), `.td-branch*` (branch card).
+ *   `.td-tabs` (section tabs), `.td-feed*` (activity feed) and
+ *   `.td-runs`/`.td-run*` (agent runs) are no longer on this list — they
+ *   were ported (see below) once `GET /api/v1/tasks/{id}/activity` gave the
+ *   Activity tab something to read and `GET /api/v1/tasks/{id}/runs` gave
+ *   the runs card something to read. `.td-comment`/`.td-para` left the list
+ *   with #28, which gave Comments a table (`task_comments`, migration 021)
+ *   and therefore a second tab: the strip now renders Activity | Comments.
+ *   Changed files is still the one tab with no data source (#29).
  *   `.td-btn*` (including `.td-btn--sm`) is not ported either — the action
  *   bar reuses `.d3-btn`/`.d3-btn--primary`/`.d3-btn--ghost` from
  *   d3-creative.css, which already carry the same gradient/border/shadow
@@ -69,8 +70,15 @@
  *   `.td-prog`) joined them when #27 gave the checklist a table to read:
  *   the fetched copy of the design file no longer exists, so these four
  *   could not be transcribed and were written instead against the same
- *   tokens and the same idioms as their neighbours here. If the source is
- *   ever refetched, this is the one block to diff against it.
+ *   tokens and the same idioms as their neighbours here. The comments block
+ *   (`.td-thread`, `.td-comment*`, `.td-kind`, `.td-av--agent`, `.td-para`)
+ *   joined them the same way with #28 — also a WRITE, not a transcription,
+ *   for the same reason: the source was still unavailable. Its composer
+ *   textarea reuses `.td-desc__ta` (itself re-homed from the source's
+ *   `.td-comment textarea`) rather than restating those declarations.
+ *   `.td-kind`/`.td-av--agent` are the visible human-vs-agent distinction
+ *   #28 settled on; they read `--violet`/`--violet-soft` only. If the source
+ *   is ever refetched, these two blocks are what to diff against it.
  */
 
 .td-main {
@@ -849,4 +857,91 @@
 .td-addsub input:focus {
   background: rgba(255, 255, 255, 0.03);
   border-color: var(--accent-line);
+}
+
+.td-thread {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.td-comment {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 8px 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.td-thread li.td-comment:last-child {
+  border-bottom: none;
+}
+
+.td-comment__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.td-comment__ta {
+  resize: none;
+  overflow: hidden;
+  min-height: 46px;
+}
+
+.td-comment__who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+.td-comment__who b {
+  color: var(--fg-1);
+  font-weight: 600;
+}
+.td-comment__when {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+
+.td-comment__acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.td-kind {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--violet-soft);
+  border: 1px solid var(--violet);
+  color: var(--violet);
+}
+
+.td-av--agent {
+  border-radius: var(--r-2);
+  box-shadow: 0 0 0 1px var(--violet);
+}
+
+.td-para {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg-1);
+}
+.td-para > :first-child {
+  margin-top: 0;
+}
+.td-para > :last-child {
+  margin-bottom: 0;
 }
