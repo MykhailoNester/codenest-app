@@ -20,6 +20,10 @@ import {
   useSidecarSSE,
   type AgentSession,
 } from "../../../lib/api";
+import {
+  sessionFromDelta,
+  sessionIdFromDelta,
+} from "../../../lib/sse-session-envelope";
 import { formatUSD } from "../../../lib/format-helpers";
 import { KpiTile, KPI_UNAVAILABLE } from "../kpi-tile";
 import styles from "./kpi-stack.module.css";
@@ -34,7 +38,8 @@ function useLiveSessions(): AgentSession[] {
       const payload = data as { sessions?: AgentSession[] };
       setSessions(payload.sessions ?? []);
     } else if (eventName === "session_started" || eventName === "update") {
-      const s = data as AgentSession;
+      const s = sessionFromDelta(data);
+      if (!s) return;
       setSessions((prev) => {
         const idx = prev.findIndex((x) => x.session_id === s.session_id);
         if (idx >= 0) {
@@ -48,11 +53,9 @@ function useLiveSessions(): AgentSession[] {
       eventName === "session_ended" ||
       eventName === "session_removed"
     ) {
-      const payload = data as { session_id?: string };
-      if (payload.session_id) {
-        setSessions((prev) =>
-          prev.filter((x) => x.session_id !== payload.session_id),
-        );
+      const id = sessionIdFromDelta(data);
+      if (id) {
+        setSessions((prev) => prev.filter((x) => x.session_id !== id));
       }
     }
   }, []);
