@@ -14,14 +14,18 @@ import {
   formatDuration,
   secondsSince,
 } from "../../../lib/format-helpers";
+import {
+  sessionFromDelta,
+  sessionIdFromDelta,
+} from "../../../lib/sse-session-envelope";
 import styles from "./active-sessions.module.css";
 
 type FilterKind = "all" | "working" | "idle";
 
 // ─── Avatar gradient by provider hint ────────────────────────────────────────
 
-function avatarGradient(profile: string): string {
-  const p = profile.toLowerCase();
+function avatarGradient(profile: string | null | undefined): string {
+  const p = (profile ?? "").toLowerCase();
   if (p.includes("claude") || p.includes("anthropic")) {
     return "linear-gradient(135deg,#d28d4f,#b56b30)";
   }
@@ -32,15 +36,15 @@ function avatarGradient(profile: string): string {
   return "linear-gradient(135deg,#3b82f6,#6e7cff)";
 }
 
-function initials(profile: string): string {
-  const parts = profile
+function initials(profile: string | null | undefined): string {
+  const parts = (profile ?? "")
     .trim()
     .split(/[\s_-]+/)
     .filter(Boolean);
   if (parts.length >= 2) {
     return `${(parts[0]?.[0] ?? "").toUpperCase()}${(parts[1]?.[0] ?? "").toUpperCase()}`;
   }
-  return profile.slice(0, 2).toUpperCase();
+  return (profile ?? "").slice(0, 2).toUpperCase();
 }
 
 function statusClass(status: AgentSession["status"]): string {
@@ -84,7 +88,8 @@ export function ActiveSessions(): ReactElement {
       const payload = data as { sessions?: AgentSession[] };
       setSessions(payload.sessions ?? []);
     } else if (eventName === "session_started" || eventName === "update") {
-      const s = data as AgentSession;
+      const s = sessionFromDelta(data);
+      if (!s) return;
       setSessions((prev) => {
         const idx = prev.findIndex((x) => x.session_id === s.session_id);
         if (idx >= 0) {
@@ -98,11 +103,9 @@ export function ActiveSessions(): ReactElement {
       eventName === "session_ended" ||
       eventName === "session_removed"
     ) {
-      const payload = data as { session_id?: string };
-      if (payload.session_id) {
-        setSessions((prev) =>
-          prev.filter((x) => x.session_id !== payload.session_id),
-        );
+      const id = sessionIdFromDelta(data);
+      if (id) {
+        setSessions((prev) => prev.filter((x) => x.session_id !== id));
       }
     }
   }, []);
