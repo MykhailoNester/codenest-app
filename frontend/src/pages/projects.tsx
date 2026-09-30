@@ -18,7 +18,11 @@ import {
   type CostMetricsResponse,
 } from "../lib/api";
 import { isHiddenCatchAllProject } from "../lib/project-display";
-import { Shell } from "../components/layout/shell";
+import { DeckShell } from "../components/deck/deck-shell";
+import { DeckGrid, DeckHead, DeckLine } from "../components/deck/deck-grid";
+
+const COLS_PROJECT =
+  "14px minmax(0, 1fr) 130px 100px 150px 80px auto";
 import { ImportProjectsModal } from "../components/import-projects-modal";
 import {
   ProjectAgents,
@@ -27,18 +31,7 @@ import {
 import { LineChart, Line } from "recharts";
 import css from "./projects.module.css";
 
-const STATUS_COLORS: Record<string, string> = {
-  active: "#22c55e",
-  archived: "var(--fg-4)",
-  planned: "#60a5fa",
-};
 
-const TASK_STATUS_COLORS: Record<string, string> = {
-  todo: "#60a5fa",
-  "in-progress": "#f59e0b",
-  blocked: "#ef4444",
-  done: "#22c55e",
-};
 
 // ─── Edit modal ───────────────────────────────────────────────────────────────
 
@@ -206,7 +199,7 @@ function EditProjectModal({
 
         <div className={css.modalFooter}>
           <button
-            className="d3-btn d3-btn--primary"
+            className="dk-btn pri"
             type="button"
             onClick={() => void handleSubmit()}
             disabled={updateProject.isPending}
@@ -214,7 +207,7 @@ function EditProjectModal({
             {updateProject.isPending ? "Saving..." : "Save"}
           </button>
           <button
-            className="d3-btn d3-btn--ghost"
+            className="dk-btn"
             type="button"
             onClick={onClose}
           >
@@ -292,7 +285,7 @@ function AgentsPanelModal({
 
         <div className={css.modalFooter} style={{ justifyContent: "flex-end" }}>
           <button
-            className="d3-btn d3-btn--ghost"
+            className="dk-btn"
             type="button"
             onClick={onClose}
           >
@@ -453,11 +446,13 @@ export function ProjectsPage(): ReactElement {
   };
 
   return (
-    <Shell
+    <DeckShell
+      title="projects"
+      crumb="the agent-to-project binding"
       actions={
         <>
           <button
-            className="d3-btn d3-btn--ghost"
+            className="dk-btn"
             type="button"
             onClick={handleRegenerate}
             disabled={regenerate.isPending}
@@ -466,14 +461,14 @@ export function ProjectsPage(): ReactElement {
             {regenerate.isPending ? "Regenerating..." : "Regenerate workspace"}
           </button>
           <button
-            className="d3-btn d3-btn--ghost"
+            className="dk-btn"
             type="button"
             onClick={() => setShowImport(true)}
           >
             Import Projects
           </button>
           <button
-            className="d3-btn d3-btn--primary"
+            className="dk-btn pri"
             type="button"
             onClick={() => setShowForm(!showForm)}
           >
@@ -727,14 +722,14 @@ export function ProjectsPage(): ReactElement {
             )}
             <div style={{ display: "flex", gap: 8 }}>
               <button
-                className="d3-btn d3-btn--primary"
+                className="dk-btn pri"
                 type="button"
                 onClick={() => void handleCreate()}
               >
                 Create Project
               </button>
               <button
-                className="d3-btn d3-btn--ghost"
+                className="dk-btn"
                 type="button"
                 onClick={() => setShowForm(false)}
               >
@@ -756,363 +751,196 @@ export function ProjectsPage(): ReactElement {
             No projects yet.
           </div>
         ) : (
-          <div className={css.grid}>
-            {visibleProjects.map(({ p, idx }) => {
-              const isWorkspace = Boolean(p.is_workspace);
-              const costQuery = costQueries[idx];
-              const costData = costQuery?.data;
-              const hasCost =
-                costData !== undefined &&
-                (costData.grand_total.total_cost_usd > 0 ||
-                  costData.grand_total.run_count > 0);
-              const sparkData = costData?.groups ?? [];
+            <DeckGrid cols={COLS_PROJECT} label="projects">
+              <DeckHead
+                cells={["project", "stack", "status", "tasks", "r spend 30d", "r "]}
+              />
+              {visibleProjects.map(({ p, idx }) => {
+                const isWorkspace = Boolean(p.is_workspace);
+                const costData = costQueries[idx]?.data;
+                const hasCost =
+                  costData !== undefined &&
+                  (costData.grand_total.total_cost_usd > 0 ||
+                    costData.grand_total.run_count > 0);
+                const sparkData = costData?.groups ?? [];
+                const prov = providers.find(
+                  (pr: Provider) => pr.id === p.default_provider_id,
+                );
+                const prof = profiles.find((pr: ProfileOut) => pr.id === p.profile_id);
+                const open = (p.task_counts?.todo ?? 0) + (p.task_counts?.["in-progress"] ?? 0);
+                const blocked = p.task_counts?.blocked ?? 0;
 
-              const effectiveDescription =
-                p.description ||
-                (isWorkspace ? "All imported agents + org agents" : undefined);
-
-              return (
-                <div
-                  key={p.id}
-                  className={isWorkspace ? css.cardWorkspace : "d3-card"}
-                  style={isWorkspace ? undefined : { padding: "16px 20px" }}
-                >
-                  {/* Header row: title + badge + launch */}
-                  <div className={css.cardHeader}>
-                    <div className={css.cardTitleRow}>
-                      <span
-                        style={{
-                          fontSize: 15,
-                          fontWeight: 600,
-                          color: "var(--fg-0)",
-                        }}
-                      >
-                        {p.name}
-                      </span>
-                      {isWorkspace && (
-                        <span className={css.workspaceBadge}>Workspace</span>
-                      )}
-                    </div>
-
-                    <div className={css.cardActions}>
-                      {/* Cost badge */}
-                      {costQuery?.isPending ? (
-                        <span style={{ fontSize: 11, color: "var(--fg-4)" }}>
-                          —
-                        </span>
-                      ) : hasCost ? (
-                        <span
-                          style={{
-                            fontSize: 11,
-                            fontFamily: "monospace",
-                            color: "var(--fg-3)",
-                            padding: "1px 5px",
-                            borderRadius: 3,
-                            border: "1px solid var(--line-2)",
-                          }}
-                        >
-                          ${costData!.grand_total.total_cost_usd.toFixed(4)}
-                        </span>
-                      ) : null}
-
-                      {/* Status badge */}
-                      {!isWorkspace && (
-                        <span
-                          style={{
-                            fontSize: 11,
-                            padding: "2px 7px",
-                            borderRadius: 4,
-                            border: `1px solid ${STATUS_COLORS[p.status] ?? "var(--line-2)"}40`,
-                            color: STATUS_COLORS[p.status] ?? "var(--fg-3)",
-                          }}
-                        >
-                          {p.status}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Path row */}
-                  {(p.root_path ?? p.path) && (
-                    <p
-                      style={{
-                        fontSize: 11,
-                        fontFamily: "var(--font-mono)",
-                        color: "var(--fg-4)",
-                        marginBottom: 6,
-                        wordBreak: "break-all",
-                      }}
-                    >
-                      {isWorkspace ? "Workspace · " : ""}
-                      {p.root_path ?? p.path}
-                    </p>
-                  )}
-
-                  {/* Description */}
-                  {effectiveDescription && (
-                    <p
-                      style={{
-                        fontSize: 13,
-                        color: "var(--fg-3)",
-                        marginBottom: 8,
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      {effectiveDescription}
-                    </p>
-                  )}
-
-                  {/* Tech stack */}
-                  {p.tech_stack && !isWorkspace && (
-                    <p
-                      style={{
-                        fontSize: 11,
-                        color: "var(--fg-4)",
-                        marginBottom: 10,
-                      }}
-                    >
-                      {p.tech_stack}
-                    </p>
-                  )}
-
-                  {/* Default provider badge */}
-                  {!isWorkspace && p.default_provider_id != null && (() => {
-                    const prov = providers.find((pr: Provider) => pr.id === p.default_provider_id);
-                    return prov ? (
-                      <p style={{ fontSize: 11, color: "var(--fg-3)", marginBottom: 4 }}>
-                        Provider: {prov.display_name}
-                      </p>
-                    ) : null;
-                  })()}
-
-                  {/* Profile group chip — shown when more than one profile exists */}
-                  {!isWorkspace && showProfileSelector && (() => {
-                    const prof = profiles.find((pr: ProfileOut) => pr.id === p.profile_id);
-                    return prof ? (
-                      <p style={{ fontSize: 11, marginBottom: 8 }}>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 4,
-                            padding: "1px 7px",
-                            borderRadius: 10,
-                            background: `${prof.color}22`,
-                            border: `1px solid ${prof.color}55`,
-                            color: prof.color,
-                          }}
-                        >
-                          <span
-                            style={{
-                              width: 6,
-                              height: 6,
-                              borderRadius: "50%",
-                              background: prof.color,
-                              display: "inline-block",
-                            }}
-                          />
-                          {prof.name}
-                        </span>
-                      </p>
-                    ) : null;
-                  })()}
-
-                  {/* Task / inbox counts (non-workspace only) */}
-                  {!isWorkspace && (
-                    <>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 5,
-                          flexWrap: "wrap",
-                          marginBottom: 8,
-                        }}
-                      >
-                        {["todo", "in-progress", "blocked", "done"].map((s) => {
-                          const c = p.task_counts?.[s] ?? 0;
-                          return c > 0 ? (
-                            <span
-                              key={s}
-                              style={{
-                                fontSize: 10,
-                                padding: "1px 6px",
-                                borderRadius: 3,
-                                border: `1px solid ${TASK_STATUS_COLORS[s]}40`,
-                                color: TASK_STATUS_COLORS[s],
+                return (
+                  <DeckLine
+                    key={p.id}
+                    state={blocked > 0 ? "block" : isWorkspace ? "run" : open > 0 ? "todo" : "idle"}
+                    cells={[
+                      {
+                        v: (
+                          <>
+                            {p.name}
+                            {isWorkspace && (
+                              <>
+                                {" "}
+                                <span className="dk-tag" data-s="run">
+                                  workspace
+                                </span>
+                              </>
+                            )}
+                            {prof && (
+                              <>
+                                {" "}
+                                <span className="dk-tag">{prof.name}</span>
+                              </>
+                            )}
+                          </>
+                        ),
+                        cls: "sub",
+                        title: p.root_path ?? p.path ?? p.name,
+                      },
+                      {
+                        v: isWorkspace
+                          ? "All imported agents + org agents"
+                          : (p.tech_stack ?? p.description ?? ""),
+                      },
+                      {
+                        v: isWorkspace ? (
+                          ""
+                        ) : (
+                          <>
+                            {p.status}
+                            {prov && (
+                              <>
+                                {" "}
+                                <span className="dim">· {prov.display_name}</span>
+                              </>
+                            )}
+                          </>
+                        ),
+                      },
+                      {
+                        v: (
+                          <>
+                            {blocked > 0 && (
+                              <span className="dk-tag" data-s="block">
+                                {blocked} blocked
+                              </span>
+                            )}
+                            {blocked > 0 && " "}
+                            {open > 0 ? `${open} open` : null}
+                            {(p.inbox_count ?? 0) > 0 && (
+                              <span className="dim"> · {p.inbox_count} to triage</span>
+                            )}
+                            {(p.total_tasks ?? 0) === 0 &&
+                              (p.inbox_count ?? 0) === 0 &&
+                              "no tasks yet"}
+                          </>
+                        ),
+                      },
+                      {
+                        v: hasCost ? (
+                          <>
+                            {sparkData.length > 0 && (
+                              <LineChart width={54} height={14} data={sparkData}>
+                                <Line
+                                  type="monotone"
+                                  dataKey="total_cost_usd"
+                                  dot={false}
+                                  strokeWidth={1.25}
+                                  stroke="var(--fg-3)"
+                                />
+                              </LineChart>
+                            )}
+                            ${costData!.grand_total.total_cost_usd.toFixed(2)}
+                          </>
+                        ) : (
+                          "—"
+                        ),
+                        cls: "r",
+                      },
+                      {
+                        v: (
+                          <span className="acts" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className="dk-btn bare"
+                              onClick={() => void navigate(`/tasks?project_id=${p.id}`)}
+                            >
+                              work
+                            </button>
+                            <button
+                              type="button"
+                              className="dk-btn bare"
+                              onClick={() => void navigate(`/projects/${p.id}/context`)}
+                            >
+                              context
+                            </button>
+                            {p.path && (
+                              <button
+                                type="button"
+                                className="dk-btn bare"
+                                onClick={() =>
+                                  void navigate(`/editor?project_id=${p.id}&kind=claude`)
+                                }
+                              >
+                                CLAUDE.md
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="dk-btn bare"
+                              onClick={() => {
+                                setConfirmDeleteId(null);
+                                setEditingProject(p);
                               }}
                             >
-                              {s}: {c}
-                            </span>
-                          ) : null;
-                        })}
-                        {(p.inbox_count ?? 0) > 0 && (
-                          <span
-                            style={{
-                              fontSize: 10,
-                              padding: "1px 6px",
-                              borderRadius: 3,
-                              border: "1px solid rgba(59,130,246,0.3)",
-                              color: "#60a5fa",
-                            }}
-                          >
-                            to triage: {p.inbox_count}
+                              edit
+                            </button>
+                            <button
+                              type="button"
+                              className="dk-btn bare"
+                              onClick={() => setAgentsPanelProject(p)}
+                              title="Manage per-project agents and skills"
+                            >
+                              agents
+                            </button>
+                            <button
+                              type="button"
+                              className="dk-btn bare"
+                              onClick={() => handleRescan(p)}
+                              disabled={rescanningId === p.id}
+                              title="Re-scan this project for new/removed agents and skills"
+                            >
+                              {rescanningId === p.id ? "rescanning…" : "rescan"}
+                            </button>
+                            {confirmDeleteId === p.id && (
+                              <button
+                                type="button"
+                                className="dk-btn bare"
+                                onClick={() => setConfirmDeleteId(null)}
+                              >
+                                cancel
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className={confirmDeleteId === p.id ? "dk-btn" : "dk-btn bare"}
+                              onClick={() => void handleDelete(p)}
+                              disabled={deleteProject.isPending && confirmDeleteId === p.id}
+                            >
+                              {confirmDeleteId === p.id ? "confirm delete" : "delete"}
+                            </button>
                           </span>
-                        )}
-                        {(p.total_tasks ?? 0) === 0 &&
-                          (p.inbox_count ?? 0) === 0 && (
-                            <span
-                              style={{ fontSize: 11, color: "var(--fg-4)" }}
-                            >
-                              No tasks yet
-                            </span>
-                          )}
-                      </div>
-
-                      {/* 30d cost sparkline */}
-                      {hasCost && sparkData.length > 0 && (
-                        <div style={{ marginBottom: 10 }}>
-                          <LineChart width={80} height={24} data={sparkData}>
-                            <Line
-                              type="monotone"
-                              dataKey="total_cost_usd"
-                              dot={false}
-                              strokeWidth={1.5}
-                              stroke="var(--accent)"
-                            />
-                          </LineChart>
-                        </div>
-                      )}
-
-                      {/* Manage cluster: Edit / Agents / Rescan / Delete */}
-                      <div className={css.manageCluster}>
-                        <button
-                          className="d3-btn d3-btn--ghost"
-                          type="button"
-                          style={{ fontSize: 12 }}
-                          onClick={() => {
-                            setConfirmDeleteId(null);
-                            setEditingProject(p);
-                          }}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          className="d3-btn d3-btn--ghost"
-                          type="button"
-                          style={{ fontSize: 12 }}
-                          onClick={() => setAgentsPanelProject(p)}
-                          title="Manage per-project agents and skills"
-                        >
-                          Agents
-                        </button>
-                        <button
-                          className="d3-btn d3-btn--ghost"
-                          type="button"
-                          style={{ fontSize: 12 }}
-                          onClick={() => handleRescan(p)}
-                          disabled={rescanningId === p.id}
-                          title="Re-scan this project for new/removed agents and skills"
-                        >
-                          {rescanningId === p.id ? "Rescanning..." : "Rescan"}
-                        </button>
-                        {confirmDeleteId === p.id && (
-                          <button
-                            className="d3-btn d3-btn--ghost"
-                            type="button"
-                            style={{ fontSize: 12, color: "var(--fg-3)" }}
-                            onClick={() => setConfirmDeleteId(null)}
-                          >
-                            Cancel
-                          </button>
-                        )}
-                        <button
-                          className="d3-btn d3-btn--ghost"
-                          type="button"
-                          style={{
-                            fontSize: 12,
-                            color: "#ef4444",
-                            ...(confirmDeleteId === p.id
-                              ? {
-                                  background: "rgba(239,68,68,0.12)",
-                                  fontWeight: 600,
-                                }
-                              : {}),
-                          }}
-                          onClick={() => void handleDelete(p)}
-                          disabled={
-                            deleteProject.isPending && confirmDeleteId === p.id
-                          }
-                        >
-                          {confirmDeleteId === p.id
-                            ? "Confirm delete"
-                            : "Delete"}
-                        </button>
-                      </div>
-
-                      {/* Navigation links */}
-                      <div
-                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                      >
-                        {/* Single Work Board entry — "Tasks" and "Workboard"
-                            were duplicate links to the same surface (/inbox
-                            redirects to /tasks and dropped the project filter). */}
-                        <button
-                          className="d3-btn d3-btn--ghost"
-                          type="button"
-                          style={{ fontSize: 12 }}
-                          onClick={() =>
-                            void navigate(`/tasks?project_id=${p.id}`)
-                          }
-                        >
-                          Work Board
-                        </button>
-                        <button
-                          className="d3-btn d3-btn--ghost"
-                          type="button"
-                          style={{ fontSize: 12 }}
-                          onClick={() =>
-                            void navigate(`/projects/${p.id}/context`)
-                          }
-                        >
-                          Context Map
-                        </button>
-                        {p.path && (
-                          <>
-                            <button
-                              className="d3-btn d3-btn--ghost"
-                              type="button"
-                              style={{ fontSize: 12 }}
-                              onClick={() =>
-                                void navigate(
-                                  `/editor?project_id=${p.id}&kind=claude`,
-                                )
-                              }
-                            >
-                              CLAUDE.md
-                            </button>
-                            <button
-                              className="d3-btn d3-btn--ghost"
-                              type="button"
-                              style={{ fontSize: 12 }}
-                              onClick={() =>
-                                void navigate(
-                                  `/editor?project_id=${p.id}&kind=agents`,
-                                )
-                              }
-                            >
-                              AGENTS.md
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                        ),
+                        cls: "r",
+                      },
+                    ]}
+                  />
+                );
+              })}
+            </DeckGrid>
         )}
       </div>
-    </Shell>
+    </DeckShell>
   );
 }

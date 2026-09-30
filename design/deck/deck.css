@@ -97,6 +97,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .dk-line > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .dk-line .sub { color: var(--fg); }
 .dk-line .r { text-align: right; }
+.dk-line .acts { display: inline-flex; gap: 4px; justify-content: flex-end; align-items: center; }
 .dk-line .id { color: var(--fg-3); }
 /* The line truncates by design — that is what keeps a column scannable. Prose
    has to say so explicitly rather than quietly wrapping and breaking the grid. */
