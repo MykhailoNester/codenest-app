@@ -2,14 +2,13 @@ import { type ReactElement } from "react";
 import { MissionControlPage } from "./mission-control";
 
 /**
- * DashboardPage — entry point registered at route "/".
+ * DashboardPage — Mission Control, now at `/mission-control`.
  *
- * Delegates to Mission Control (#166), which replaced the Overview page this
- * file used to forward to. The indirection is kept rather than pointing the
- * route straight at `MissionControlPage`: `/` is the app's launch route and its
- * component name is referenced from `App.tsx`, so a page swap stays a one-line
- * change here instead of a route edit — which is exactly what made this swap
- * cheap.
+ * It held `/` until #282 put the Deck home screen there. The route it keeps is
+ * a comparison route, not a second home: the old surface has to stay reachable
+ * while Deck is reviewed, the same way `/deck` kept the shell reviewable beside
+ * the old one. Both it and `mission-control.tsx` go when the migration is
+ * signed off.
  */
 export function DashboardPage(): ReactElement {
   return <MissionControlPage />;
