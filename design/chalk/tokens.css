@@ -1,0 +1,180 @@
+/* Chalk for Codenest — the whole palette. Nothing outside this file names a colour.
+   Two grounds: the board (dark) and the paper (light). Emphasis is luminance,
+   never hue. One chromatic token, --signal, and it is switchable off. */
+
+:root {
+  --sans: "Manrope", "Inter Tight", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --space-xs: 4px;
+  --space-s: 8px;
+  --space-m: 12px;
+  --space-l: 16px;
+  --space-xl: 24px;
+  --space-xxl: 32px;
+  --gutter: 20px;
+
+  --r-field: 4px;
+  --r-badge: 6px;
+  --r-chip: 999px;
+  --r-card: 12px;
+  --r-pill: 999px;
+
+  /* Desktop dialect: chalk's phone controls are 40/56px. A dense tool window
+     runs two sizes tighter, and the ratios hold. */
+  --ctl-s: 24px;
+  --ctl-m: 28px;
+  --ctl-l: 34px;
+  --pad-card: var(--space-l);
+  --row-h: 46px;
+
+  --t-display: 600 34px/40px var(--sans);
+  --t-h1: 600 21px/28px var(--sans);
+  --t-h2: 600 15px/21px var(--sans);
+  --t-h3: 600 13px/18px var(--sans);
+  --t-body: 400 13px/19px var(--sans);
+  --t-small: 400 12px/17px var(--sans);
+  --t-label: 500 12px/16px var(--sans);
+  --t-kicker: 500 10px/14px var(--mono);
+
+  --n-hero: 500 40px/44px var(--mono);
+  --n-l: 500 20px/24px var(--mono);
+  --n-m: 500 15px/20px var(--mono);
+  --n-s: 400 12px/16px var(--mono);
+  --n-xs: 400 10px/14px var(--mono);
+
+  --ls-kicker: 1.4px;
+  --ls-num: -0.4px;
+
+  /* The board */
+  --ground: #0b0b0c;
+  --raised: #101012;
+  --raised-high: #151517;
+  --hairline: #1c1c1f;
+  --outline: #2b2b30;
+  --outline-strong: #3d3d43;
+
+  --text: #ededef;
+  --text-2: #b4b4ba;
+  --dim: #86868c;
+  --muted: #6a6a70;
+  --faint: #4a4a50;
+
+
+  /* ── The ramp ───────────────────────────────────────────────────────
+     Colour in this app means exactly one thing: how much this wants you.
+     Five steps, learned once, reused on every surface — task priority,
+     attention severity, run outcome, column temperature. Nothing else is
+     ever coloured: projects, agents, models, paths and counts stay mono.
+
+     Values are Chalk's own. Its semantic file says accent is "waiting on
+     you, at most once per screen" and negative is "never alarming", so
+     --u-critical is a clay, not a red. */
+  --u-critical: #d98c7f;
+  --u-active: #e0b252;
+  --u-normal: #8fa8c9;
+  --u-done: #7fc8a9;
+  --u-inert: #6a6a70;
+
+  --u-critical-bg: rgba(217, 140, 127, 0.13);
+  --u-active-bg: rgba(224, 178, 82, 0.13);
+  --u-normal-bg: rgba(143, 168, 201, 0.13);
+  --u-done-bg: rgba(127, 200, 169, 0.13);
+  --u-inert-bg: rgba(255, 255, 255, 0.05);
+
+  /* Identity, not urgency: project and agent marks when colour is Full.
+     Deliberately a different family from the ramp so the two never read as
+     the same statement. */
+  --cat-1: #b49bc4;
+  --cat-2: #6fb3c4;
+  --cat-3: #c99b8a;
+  --cat-4: #a9b98c;
+  --cat-5: #c4a0b4;
+
+  --signal: var(--u-critical);
+  --signal-ink: #0b0b0c;
+
+  --card-bg: transparent;
+
+  --sel: rgba(255, 255, 255, 0.07);
+  --sel-strong: rgba(255, 255, 255, 0.12);
+
+  --term-fg: #d8d8da;
+  --term-dim: #6a6a70;
+}
+
+[data-theme="light"] {
+  --ground: #f1f1ee;
+  --raised: #fbfbfa;
+  --raised-high: #ffffff;
+  --hairline: #e4e4de;
+  --outline: #dcdcd5;
+  --outline-strong: #b8b8b0;
+  --card-bg: var(--raised);
+
+  --text: #111112;
+  --text-2: #3d3d40;
+  --dim: #6e6e72;
+  --muted: #85858a;
+  --faint: #a8a8ad;
+
+  --u-critical: #a33b28;
+  --u-active: #8a6412;
+  --u-normal: #3e5c82;
+  --u-done: #2e7256;
+  --u-inert: #85858a;
+
+  --u-critical-bg: rgba(163, 59, 40, 0.1);
+  --u-active-bg: rgba(138, 100, 18, 0.1);
+  --u-normal-bg: rgba(62, 92, 130, 0.1);
+  --u-done-bg: rgba(46, 114, 86, 0.1);
+  --u-inert-bg: rgba(0, 0, 0, 0.05);
+
+  --cat-1: #5b3c96;
+  --cat-2: #1f6c7c;
+  --cat-3: #8a4f3c;
+  --cat-4: #5a6b32;
+  --cat-5: #8a3f66;
+
+  --signal: var(--u-critical);
+  --signal-ink: #fbfbfa;
+
+  --sel: rgba(0, 0, 0, 0.05);
+  --sel-strong: rgba(0, 0, 0, 0.09);
+
+  --term-fg: #2a2a2c;
+  --term-dim: #85858a;
+}
+
+/* How much colour. "minimal" is the default and the recommendation: the ramp
+   and nothing else. "full" additionally tints project and agent marks by
+   identity. "none" is strict monochrome — the honest control, because a ramp
+   that cannot beat it has not earned its place. */
+[data-colour="none"] {
+  --u-critical: var(--text);
+  --u-active: var(--text-2);
+  --u-normal: var(--dim);
+  --u-done: var(--muted);
+  --u-inert: var(--faint);
+  --u-critical-bg: var(--sel-strong);
+  --u-active-bg: var(--sel);
+  --u-normal-bg: var(--sel);
+  --u-done-bg: var(--sel);
+  --u-inert-bg: var(--sel);
+}
+[data-colour="none"] .ck-avatar[data-cat],
+[data-colour="minimal"] .ck-avatar[data-cat] { color: var(--text-2); border-color: var(--outline); }
+
+/* Compact. Outline-only cards need more padding to separate than filled ones,
+   which costs roughly a third of a screen against the old theme. This buys it
+   back for anyone who wants rows over air. */
+[data-density="compact"] {
+  --pad-card: var(--space-m);
+  --row-h: 36px;
+  --ctl-s: 22px;
+  --ctl-m: 26px;
+  --ctl-l: 30px;
+  --space-xl: 18px;
+  --space-xxl: 22px;
+  --gutter: 16px;
+}

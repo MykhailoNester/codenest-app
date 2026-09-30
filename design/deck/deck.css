@@ -1,0 +1,206 @@
+/* Deck — the whole component set.
+   Four rules:
+     1. One primitive. Sessions, tasks, agents, runs and alerts are all the
+        same line on the same grid. Learn the shape once.
+     2. Mono is structure. Columns only align if they are monospaced, and
+        alignment is what makes forty rows readable instead of forty boxes.
+     3. State is a character in column one, always. It reads as text, so it
+        survives in the terminal, in a log and with colour switched off.
+     4. Draw almost nothing — but separate everything. No card, no shadow, no
+        fill on a row. Structure comes from three things only: the rail sits on
+        its own ground, one hairline divides each section, and the gaps are
+        big. Cheap to draw, still legible at forty rows. */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 400 var(--fs)/var(--lh) var(--mono);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+button, input { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; }
+
+/* Every row is a button, so without this you can tab the whole app and never
+   see where you are. Inset so it is never clipped by an overflow:hidden cell. */
+:focus-visible { outline: 2px solid var(--run); outline-offset: -2px; border-radius: 2px; }
+.dk-line:focus-visible, .dk-nav:focus-visible { outline-offset: -2px; background: var(--sel); }
+.sans { font-family: var(--sans); }
+.dim { color: var(--fg-3); }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border: 3px solid var(--bg); border-radius: 99px; }
+
+/* ── Shell ───────────────────────────────────────────────────────────── */
+
+.dk-app { display: grid; grid-template-columns: 184px 1fr; height: 100vh; overflow: hidden; }
+
+.dk-rail { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--bg-1); }
+.dk-rail__top { display: flex; align-items: center; gap: var(--u2); height: 30px; padding: 0 var(--u3); flex: none; color: var(--fg-2); }
+.dk-rail__nav { flex: 1 1 auto; overflow-y: auto; padding: var(--u2) var(--u); min-height: 0; }
+.dk-rail__foot { flex: none; padding: var(--u3); border-top: 1px solid var(--line); }
+
+.dk-grp { margin-bottom: var(--u3); }
+.dk-grp + .dk-grp { border-top: 1px solid var(--line); padding-top: var(--u3); margin-top: var(--u3); }
+.dk-grp__h { display: block; width: 100%; text-align: left; padding: var(--u) var(--u2) var(--u); font-size: var(--fs-xs); letter-spacing: 1.2px; text-transform: uppercase; color: var(--fg-4); }
+
+.dk-nav { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: var(--u2);
+  width: 100%; height: var(--row); padding: 0 var(--u2); text-align: left; color: var(--fg-3); }
+.dk-nav:hover { background: var(--sel); color: var(--fg-2); }
+.dk-nav.on { color: var(--fg); background: var(--sel); }
+.dk-nav__g { color: var(--fg-4); }
+.dk-nav.on .dk-nav__g { color: var(--fg); }
+.dk-nav__n { font-size: var(--fs-s); color: var(--fg-3); }
+.dk-nav__n.warn { color: var(--warn); }
+
+/* ── Status line: what every glance starts with ──────────────────────── */
+
+.dk-status { display: flex; align-items: center; gap: var(--u3); flex: none;
+  height: 30px; padding: 0 var(--gut); border-bottom: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-s); }
+.dk-status b { font-weight: 400; color: var(--fg-2); }
+.dk-status .sep { color: var(--fg-4); }
+.dk-status .sp { margin-left: auto; }
+
+.dk-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.dk-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--u6) var(--gut) var(--u8); }
+.dk-page > * { max-width: var(--page-max); }
+.dk-page.flush { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.dk-page.flush > * { max-width: none; }
+
+.dk-title { display: flex; align-items: baseline; gap: var(--u3); padding: 0 var(--u3) var(--u4); margin-bottom: var(--u6); border-bottom: 1px solid var(--line); }
+.dk-title h1 { font: 400 15px/20px var(--mono); margin: 0; letter-spacing: -0.2px; }
+.dk-title .sub { color: var(--fg-3); font-size: var(--fs-s); }
+.dk-title .sp { margin-left: auto; }
+
+/* ── The line, and the grid it lives on ──────────────────────────────── */
+
+.dk-list { --cols: 14px minmax(0, 1fr) 100px 124px 58px 88px; display: block; }
+.dk-list.tasks  { --cols: 14px 50px minmax(0, 1fr) 100px 118px 52px 80px; }
+.dk-list.simple { --cols: 14px minmax(0, 1fr) 90px; }
+.dk-list.wide   { --cols: 14px minmax(0, 1fr) 118px 68px 80px 90px; }
+
+.dk-head, .dk-line {
+  display: grid; grid-template-columns: var(--cols); align-items: center;
+  gap: var(--u3); width: 100%; text-align: left; padding: 0 var(--u3);
+}
+.dk-head { height: 24px; font-size: var(--fs-xs); letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--fg-3); border-bottom: 1px solid var(--line); }
+.dk-line { height: var(--row); color: var(--fg-2); cursor: pointer; }
+/* Focused by the roving tabindex, which is keyboard-driven, so :focus is the
+   right hook here rather than :focus-visible. */
+.dk-line:focus { outline: 2px solid var(--run); outline-offset: -2px; background: var(--sel); }
+.dk-line:hover { background: var(--sel); color: var(--fg); }
+.dk-line.on { background: var(--sel-2); color: var(--fg); }
+.dk-line > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dk-line .sub { color: var(--fg); }
+.dk-line .r { text-align: right; }
+.dk-line .id { color: var(--fg-3); }
+/* The line truncates by design — that is what keeps a column scannable. Prose
+   has to say so explicitly rather than quietly wrapping and breaking the grid. */
+.dk-list.prose .dk-line { height: auto; align-items: start; padding-top: 6px; padding-bottom: 6px; }
+.dk-list.prose .dk-line > * { white-space: normal; overflow: visible; line-height: 1.55; }
+.dk-list.prose .dk-s { line-height: 1.55; }
+
+.dk-line.is-done .sub { color: var(--fg-4); text-decoration: line-through; text-decoration-color: var(--fg-4); }
+
+/* Column one. A character, not a dot — it reads in a log, in the terminal
+   pane and with colour off, and it is the same glyph in all three. */
+.dk-s { color: var(--fg-4); }
+.dk-s::before { content: "·"; }
+.dk-s[data-s="block"]::before { content: "!"; color: var(--err); }
+.dk-s[data-s="fail"]::before  { content: "×"; color: var(--err); }
+.dk-s[data-s="wait"]::before  { content: "?"; color: var(--warn); }
+.dk-s[data-s="stall"]::before { content: "="; color: var(--warn); }
+.dk-s[data-s="run"]::before   { content: "~"; color: var(--run); }
+.dk-s[data-s="done"]::before  { content: "✓"; color: var(--ok); }
+.dk-s[data-s="todo"]::before  { content: "▸"; color: var(--fg-3); }
+.dk-s[data-s="idle"]::before  { content: "·"; color: var(--fg-4); }
+
+/* Where you stopped reading. The one thing a supervision console owes you
+   that a dashboard never gives: not the state, but the change. */
+.dk-since { display: flex; align-items: center; gap: var(--u2); margin: var(--u3) 0; color: var(--mark); font-size: var(--fs-xs); letter-spacing: 1.1px; text-transform: uppercase; }
+.dk-since::before, .dk-since::after { content: ""; height: 1px; background: currentColor; opacity: 0.4; }
+.dk-since::before { width: var(--u6); flex: none; }
+.dk-since::after { flex: 1 1 auto; }
+.dk-line.is-new .id::after { content: "•"; color: var(--mark); margin-left: 4px; }
+
+/* ── Group ───────────────────────────────────────────────────────────── */
+
+.dk-group { margin-bottom: var(--group-gap); }
+.dk-group + .dk-group { border-top: 1px solid var(--line); padding-top: 26px; }
+.dk-group__h { margin: 0; font-weight: 400; display: flex; align-items: baseline; gap: var(--u2); margin-bottom: var(--u3); padding: 0 var(--u3);
+  font-size: 12px; letter-spacing: 1.3px; text-transform: uppercase; color: var(--fg-2); }
+.dk-group__h .n { color: var(--fg-3); }
+.dk-group__h .note { color: var(--fg-3); letter-spacing: 0; text-transform: none; font-size: var(--fs-s); }
+.dk-group__h .sp { margin-left: auto; }
+.dk-group__h[data-s="block"] { color: var(--err); }
+.dk-group__h[data-s="stall"] { color: var(--warn); }
+.dk-group__h[data-s="run"] { color: var(--run); }
+.dk-group__h[data-s="done"] { color: var(--ok); }
+
+/* ── Inline marks ────────────────────────────────────────────────────── */
+
+.dk-tag { display: inline-block; padding: 0 5px; font-size: var(--fs-xs); color: var(--fg-3); background: var(--sel); border-radius: 2px; }
+.dk-tag[data-s="block"], .dk-tag[data-s="fail"] { color: var(--err); background: var(--err-bg); }
+.dk-tag[data-s="wait"], .dk-tag[data-s="stall"] { color: var(--warn); background: var(--warn-bg); }
+.dk-tag[data-s="run"] { color: var(--run); background: var(--run-bg); }
+.dk-tag[data-s="done"] { color: var(--ok); background: var(--ok-bg); }
+
+.dk-bar { display: inline-block; vertical-align: middle; width: 46px; height: 3px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.dk-bar i { display: block; height: 100%; background: var(--fg-3); }
+.dk-bar.warn i { background: var(--warn); }
+.dk-bar.err i { background: var(--err); }
+
+/* ── Controls ────────────────────────────────────────────────────────── */
+
+.dk-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 var(--u2);
+  border: 1px solid var(--line-2); border-radius: 3px; color: var(--fg-2); font-size: var(--fs-s); white-space: nowrap; }
+.dk-btn:not(:disabled):hover { border-color: var(--fg-4); color: var(--fg); background: var(--sel); }
+.dk-btn.pri { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.dk-btn.pri:not(:disabled):hover { background: var(--fg-2); border-color: var(--fg-2); }
+.dk-btn.bare { border-color: transparent; }
+.dk-btn.bare:not(:disabled):hover { border-color: var(--line); }
+.dk-btn:disabled { color: var(--fg-4); border-color: var(--line); background: none; cursor: not-allowed; }
+
+.dk-seg { display: inline-flex; height: 26px; border: 1px solid var(--line-2); border-radius: 3px; overflow: hidden; }
+.dk-seg button { padding: 0 var(--u2); font-size: var(--fs-s); color: var(--fg-3); }
+.dk-seg button + button { border-left: 1px solid var(--line-2); }
+.dk-seg button:hover { color: var(--fg-2); background: var(--sel); }
+.dk-seg button.on { background: var(--fg); color: var(--bg); }
+
+.dk-field { display: flex; align-items: center; gap: var(--u2); height: 24px; padding: 0 var(--u2);
+  border: 1px solid var(--line-2); border-radius: 3px; color: var(--fg); min-width: 0; }
+.dk-field:focus-within { border-color: var(--fg-3); }
+.dk-field input { flex: 1 1 auto; border: 0; outline: 0; background: none; min-width: 0; }
+.dk-field input::placeholder { color: var(--fg-4); }
+
+.dk-bigs { display: flex; gap: 44px; flex-wrap: wrap; margin-bottom: var(--group-gap); padding: 0 var(--u3) var(--u6); border-bottom: 1px solid var(--line); }
+.dk-big .v { font: 400 26px/30px var(--mono); letter-spacing: -1px; }
+.dk-big .v.na { color: var(--fg-4); }
+.dk-big .l { font-size: var(--fs-xs); letter-spacing: 1.2px; text-transform: uppercase; color: var(--fg-3); margin-top: 2px; }
+.dk-big .l.warn { color: var(--warn); }
+
+/* ── Session pane ────────────────────────────────────────────────────── */
+
+.dk-term { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
+.dk-term__h { display: flex; align-items: center; gap: var(--u3); height: 26px; padding: 0 var(--u3); flex: none; border-bottom: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-s); }
+.dk-term__b { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--u3); font-size: var(--fs-s); line-height: 1.7; white-space: pre-wrap; color: var(--fg-2); }
+.dk-term__b .d { color: var(--fg-4); }
+.dk-term__b .u { color: var(--fg); }
+.dk-term__b .e { color: var(--err); }
+.dk-term__b .w { color: var(--warn); }
+.dk-term__f { flex: none; border-top: 1px solid var(--line); padding: var(--u3); }
+.dk-tabs { display: flex; flex: none; border-bottom: 1px solid var(--line); padding: 0 var(--u2); }
+.dk-tab { display: flex; align-items: center; gap: 5px; height: 26px; padding: 0 var(--u2); font-size: var(--fs-s); color: var(--fg-4); border-bottom: 1px solid transparent; margin-bottom: -1px; }
+.dk-tab:hover { color: var(--fg-2); }
+.dk-tab.on { color: var(--fg); border-bottom-color: var(--fg); }
+
+.dk-note { padding: var(--u3); color: var(--fg-3); font-size: var(--fs-s); line-height: 1.65; max-width: 80ch; }
+.dk-note.sans { font-family: var(--sans); font-size: 13px; max-width: 82ch; }
+.dk-rule { border: 0; border-top: 1px solid var(--line); margin: var(--u6) 0 var(--u4); }
+
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

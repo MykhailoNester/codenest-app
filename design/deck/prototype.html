@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-colour="on" data-density="tight">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Codenest · Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter+Tight:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="deck.css" />
+<style>
+  .pv { position: fixed; right: 14px; bottom: 14px; z-index: 50; display: flex; gap: 6px; align-items: center;
+        background: var(--bg); border: 1px solid var(--line-2); border-radius: 4px; padding: 5px 7px; }
+  .pv .l { font-size: var(--fs-xs); letter-spacing: 1.1px; text-transform: uppercase; color: var(--fg-4); padding: 0 2px; }
+</style>
+</head>
+<body>
+<div class="dk-app">
+  <aside class="dk-rail">
+    <div class="dk-rail__top"><span style="color:var(--fg)">codenest</span><span class="dim">deck</span></div>
+    <nav class="dk-rail__nav" id="nav"></nav>
+    <div class="dk-rail__foot">
+      <div style="display:flex;justify-content:space-between;font-size:var(--fs-s);color:var(--fg-3)"><span>today</span><span><b style="font-weight:400;color:var(--fg-2)">$12.40</b> / $40</span></div>
+      <div class="dk-bar" style="width:100%;margin-top:5px"><i style="width:31%"></i></div>
+      <div style="display:flex;justify-content:space-between;font-size:var(--fs-xs);color:var(--fg-4);margin-top:5px"><span>418K tok</span><span>runs out 16:12</span></div>
+    </div>
+  </aside>
+
+  <main class="dk-main">
+    <div class="dk-status">
+      <span><span class="dk-s" data-s="run" role="img" aria-label="running"></span> <b>3</b> running</span><span class="sep">·</span>
+      <span><span class="dk-s" data-s="block" role="img" aria-label="blocking"></span> <b>2</b> need you</span><span class="sep">·</span>
+      <span><span class="dk-s" data-s="stall" role="img" aria-label="stalled"></span> <b>1</b> stalled</span><span class="sep">·</span>
+      <span>$12.40 / $40</span>
+      <span class="sp"></span>
+      <span class="dim">last look 11:41</span><span class="sep">·</span><span>14:02</span>
+    </div>
+    <div class="dk-page" id="page" aria-live="polite"></div>
+  </main>
+</div>
+
+<div class="pv">
+  <span class="l">Theme</span>
+  <div class="dk-seg"><button id="tD" class="on">Dark</button><button id="tL">Light</button></div>
+  <span class="l">Colour</span>
+  <div class="dk-seg"><button id="cOn" class="on">On</button><button id="cOff">Off</button></div>
+  <span class="l">Rows</span>
+  <div class="dk-seg"><button id="dT" class="on">Tight</button><button id="dL">Loose</button></div>
+</div>
+
+<script>
+const E = (h) => { const d = document.createElement("div"); d.innerHTML = h.trim(); return d.firstChild; };
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+const STATE_WORD = { block: "blocking", fail: "failed", wait: "waiting",
+  stall: "stalled", run: "running", done: "done", todo: "queued", idle: "inert" };
+const stateCell = (s) => {
+  const k = s || "idle";
+  return `<span class="dk-s" role="gridcell" data-s="${k}" aria-label="${STATE_WORD[k] || k}"></span>`;
+};
+const plain = (h) => String(h).replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
+
+/* The whole app is this one function. Every session, task, agent, project,
+   run and alert below goes through it. */
+function line(cells, o = {}) {
+  const cls = ["dk-line", o.done && "is-done", o.fresh && "is-new", o.on && "on"].filter(Boolean).join(" ");
+  const body = cells.map((c) => {
+    if (c === null) return "<span></span>";
+    const [txt, kind] = Array.isArray(c) ? c : [c, ""];
+    const t = plain(txt);
+    const tip = t.length > 28 ? ` title="${esc(t)}"` : "";
+    return `<span class="${kind}" role="gridcell"${tip}>${txt}</span>`;
+  }).join("");
+  return `<div class="${cls}" role="row" tabindex="-1"${o.go ? ` data-go="${o.go}"` : ""}>${stateCell(o.s)}${body}</div>`;
+}
+const head = (cells, cls = "") =>
+  `<div class="dk-head" role="row"><span role="columnheader"><span class="sr">state</span></span>${cells
+    .map((c) => `<span class="${/^r /.test(c) ? "r" : ""}" role="columnheader">${c.replace(/^r /, "")}</span>`)
+    .join("")}</div>`;
+const group = (label, n, note, body, s) =>
+  `<div class="dk-group"><h2 class="dk-group__h"${s ? ` data-s="${s}"` : ""}><span>${label}</span><span class="n">${n}</span>${note ? `<span class="note">${note}</span>` : ""}</h2>${body}</div>`;
+
+/* ── Data ─────────────────────────────────────────────────────────── */
+
+const NEEDS = [
+  { s: "block", t: "Permission prompt — write <span class='dim'>src-tauri/tauri.conf.json</span>", who: "maks-it", w: "codenest-app", age: "2h 04m", v: "jump", g: "block" },
+  { s: "block", t: "Task #218 blocked on #211", who: "—", w: "miragold", age: "51m", v: "open", g: "block" },
+  { s: "stall", t: "Session idle 23m with an unfinished turn", who: "serhii", w: "Networa", age: "23m", v: "jump", g: "stall" },
+  { s: "wait", t: "Inbox item ready to promote — “extraction timer drift”", who: "—", w: "RAID-2D", age: "12m", v: "promote", g: "wait" },
+];
+
+const RUNS = [
+  { s: "run", t: "serhii-godot-dev <span class='dim'>opus-5 · claude-code · 14 turns · compacted 1×</span>", w: "RAID-2D", age: "4:12", v: "$2.14" },
+  { s: "run", t: "maks-it <span class='dim'>sonnet-5.5 · desktop · 6 turns</span>", w: "codenest-app", age: "1:48", v: "$0.31" },
+  { s: "run", t: "oleg-researcher <span class='dim'>opus-5 · claude-code · 22 turns · compacted 2×</span>", w: "miragold", age: "9:03", v: "$5.80" },
+  { s: "idle", t: "tanya-android <span class='dim'>haiku-4.5 · idle 23m</span>", w: "DailyMotivation", age: "—", v: "$0.04" },
+];
+
+const TASKS = {
+  block: [
+    { id: 218, t: "Inventory reconciliation job", who: "oleg", w: "miragold", age: "51m", v: "on #211", s: "block" },
+    { id: 244, t: "Packaged DB migration 015", who: "maks-it", w: "codenest-app", age: "12m", v: "on #206", s: "block", fresh: 1 },
+  ],
+  run: [
+    { id: 224, t: "Chalk theme — rebuild the component layer", who: "maks-it", w: "codenest-app", age: "1:48", v: "P1", s: "run", go: "task" },
+    { id: 231, t: "Loot table rebalance — phase 9", who: "serhii", w: "RAID-2D", age: "4:12", v: "P2", s: "run" },
+  ],
+  todo: [
+    { id: 226, t: "Sidecar: expose session aggregate for 24h tile", who: "maks-it", w: "codenest-app", age: "2d", v: "P1", s: "todo" },
+    { id: 229, t: "Gold price feed retry + backoff", who: "oleg", w: "miragold", age: "3d", v: "P2", s: "todo" },
+    { id: 233, t: "Interview KB — coroutines chapter", who: "katia", w: "android-kb", age: "4d", v: "P3", s: "todo" },
+    { id: 240, t: "Garmin sync: handle 401 refresh", who: "—", w: "Readiness", age: "6d", v: "P3", s: "todo" },
+  ],
+  idle: [
+    { id: 245, t: "Extraction timer drift under 30fps", who: "—", w: "RAID-2D", age: "1d", v: "P2", s: "idle" },
+    { id: 246, t: "Net-worth CSV import", who: "—", w: "Networa", age: "2d", v: "P3", s: "idle" },
+  ],
+  done: [
+    { id: 211, t: "Org-agent rename + manifest sha256", who: "maks-it", w: "codenest-app", age: "2h", v: "done", s: "done" },
+    { id: 209, t: "Needs You page — severity grouping", who: "maks-it", w: "codenest-app", age: "1d", v: "done", s: "done" },
+    { id: 204, t: "AGPL release checklist", who: "oleg", w: "Networa", age: "3d", v: "done", s: "done" },
+  ],
+};
+
+const PROJECTS = [
+  { s: "run", t: "codenest-app <span class='dim'>Tauri 2 · React · FastAPI</span>", w: "shipping", a: "19", b: "41", v: "$62.10" },
+  { s: "run", t: "miragold <span class='dim'>Next.js 14 · Prisma</span>", w: "active", a: "7", b: "18", v: "$24.80" },
+  { s: "run", t: "RAID-2D <span class='dim'>Godot 4.4 · C#</span>", w: "post-mvp", a: "6", b: "22", v: "$31.40" },
+  { s: "idle", t: "Networa <span class='dim'>FastAPI · HTMX · SQLite</span>", w: "stable v1", a: "3", b: "6", v: "$4.20" },
+  { s: "idle", t: "Readiness <span class='dim'>Python · Click · Claude API</span>", w: "mvp", a: "2", b: "3", v: "$2.90" },
+  { s: "idle", t: "android-interview-kb <span class='dim'>Markdown · agents</span>", w: "33%", a: "2", b: "9", v: "$7.60" },
+  { s: "idle", t: "DailyMotivation <span class='dim'>Kotlin · Compose · Hilt</span>", w: "production", a: "0", b: "1", v: "$0.40" },
+];
+
+const AGENTS = [
+  { s: "run", t: "maks-it <span class='dim'>IT &amp; Workflow Operations</span>", who: "sonnet-5.5", w: "codenest-app", age: "1:48", v: "$18.20" },
+  { s: "run", t: "oleg-researcher <span class='dim'>Lead Researcher</span>", who: "opus-5", w: "miragold", age: "9:03", v: "$34.70" },
+  { s: "stall", t: "serhii-godot-dev <span class='dim'>Godot 4.4 / C# — RAID-2D</span>", who: "opus-5", w: "Networa", age: "23m", v: "$31.40" },
+  { s: "idle", t: "igor-recruiter <span class='dim'>Recruiting &amp; Team Architect</span>", who: "opus-5", w: "—", age: "2d", v: "$5.10" },
+  { s: "idle", t: "tanya-android <span class='dim'>Senior Android — DailyMotivation</span>", who: "haiku-4.5", w: "—", age: "6d", v: "$0.40" },
+];
+
+/* ── Screens ──────────────────────────────────────────────────────── */
+
+const L = (rows, map) => `<div class="dk-list">${rows.map(map).join("")}</div>`;
+
+const needLine = (n) => line([[n.t, "sub"], n.who, n.w, [n.age, "r"], [`<span class="dk-tag" data-s="${n.s}">${n.v}</span>`, "r"]], { s: n.s });
+const runLine = (r) => line([[r.t, "sub"], "", r.w, [r.age, "r"], [r.v, "r"]], { s: r.s });
+const taskLine = (t) => line([[`#${t.id}`, "id"], [t.t, "sub"], t.who, t.w, [t.age, "r"], [t.v, "r"]],
+  { s: t.s, done: t.s === "done", fresh: t.fresh, go: t.go });
+
+const SCREENS = {
+  deck: () => `
+    <div class="dk-title"><h1>deck</h1><span class="sub">tuesday 14:02 · you were last here 2h 21m ago</span></div>
+    <div class="dk-bigs">
+      <div class="dk-big"><div class="v">2</div><div class="l warn">need you</div></div>
+      <div class="dk-big"><div class="v">3</div><div class="l">running</div></div>
+      <div class="dk-big"><div class="v">69%</div><div class="l">headroom · runs out 16:12</div></div>
+      <div class="dk-big"><div class="v">42m</div><div class="l">mean resolution</div></div>
+      <div class="dk-big"><div class="v na">—</div><div class="l">tool failures · no hooks lane</div></div>
+    </div>
+
+    ${group("needs you", NEEDS.length, "oldest 2h 04m", `<div class="dk-list">
+      ${head(["what", "who", "where", "r age", "r "])}
+      ${NEEDS.map(needLine).join("")}</div>`, "block")}
+
+    ${group("running", 3, "1 idle", `<div class="dk-list">
+      ${head(["session", "", "where", "r elapsed", "r cost"])}
+      ${RUNS.map(runLine).join("")}</div>`, "run")}
+
+    ${group("changed", 4, "", `<div class="dk-list tasks">
+      ${head(["", "what", "who", "where", "r when", "r "])}
+      ${taskLine(TASKS.block[1])}
+      ${taskLine({ id: 221, t: "Mission Control honest-tile audit", who: "maks-it", w: "codenest-app", age: "14:02", v: "done", s: "done", fresh: 1 })}
+      <div class="dk-since">since you last looked</div>
+      ${taskLine(TASKS.done[0])}
+      ${taskLine({ id: 205, t: "Budget crossed 25% of daily cap", who: "—", w: "workspace", age: "11:20", v: "noted", s: "wait" })}
+      </div>`)}
+
+    <hr class="dk-rule" />
+    <div class="dk-note sans">Every line on this page is the same component. So is every line on
+      Work, Agents, Projects and the session list — the grid is declared once per list and the
+      columns stay put, which is why your eye can run down “where” or “cost” without re-finding it.</div>`,
+
+  attention: () => `
+    <div class="dk-title"><h1>needs you</h1><span class="sub">4 open · 2 blocking · mean resolution 42m 10s</span>
+      <span class="sp"></span><div class="dk-seg"><button class="on">open</button><button>muted</button><button>resolved</button></div></div>
+    ${group("blocking", 2, "a session cannot continue", `<div class="dk-list">
+      ${head(["what", "who", "where", "r waiting", "r "])}
+      ${NEEDS.filter((n) => n.s === "block").map(needLine).join("")}</div>`, "block")}
+    ${group("stalled", 1, "nobody is blocked, nothing is moving", `<div class="dk-list">
+      ${head(["what", "who", "where", "r waiting", "r "])}
+      ${NEEDS.filter((n) => n.s === "stall").map(needLine).join("")}</div>`, "stall")}
+    ${group("queued", 1, "real work, not this minute", `<div class="dk-list">
+      ${head(["what", "who", "where", "r waiting", "r "])}
+      ${NEEDS.filter((n) => n.s === "wait").map(needLine).join("")}</div>`, "wait")}
+    <div class="dk-note sans">This queue re-checks every 30 seconds while the page is open. Stalled
+      sessions, failed runs, budget thresholds and blocked tasks appear on their own. Blocking
+      permission prompts arrive with the hooks lane.</div>`,
+
+  work: () => `
+    <div class="dk-title"><h1>work</h1><span class="sub">37 open across 7 projects</span><span class="sp"></span>
+      <div class="dk-field" style="width:180px"><input placeholder="filter" /></div>
+      <div class="dk-seg"><button class="on">status</button><button>project</button><button>agent</button></div>
+      <button class="dk-btn">+ task</button></div>
+    ${group("blocked", 2, "", `<div class="dk-list tasks">${head(["", "what", "who", "where", "r age", "r on"])}${TASKS.block.map(taskLine).join("")}</div>`, "block")}
+    ${group("in progress", 2, "", `<div class="dk-list tasks">${head(["", "what", "who", "where", "r elapsed", "r pri"])}${TASKS.run.map(taskLine).join("")}</div>`, "run")}
+    ${group("to do", 11, "4 shown", `<div class="dk-list tasks">${head(["", "what", "who", "where", "r age", "r pri"])}${TASKS.todo.map(taskLine).join("")}</div>`)}
+    ${group("idea", 6, "2 shown", `<div class="dk-list tasks">${head(["", "what", "who", "where", "r age", "r pri"])}${TASKS.idle.map(taskLine).join("")}</div>`)}
+    ${group("done", 14, "3 shown", `<div class="dk-list tasks">${head(["", "what", "who", "where", "r when", "r "])}${TASKS.done.map(taskLine).join("")}</div>`, "done")}`,
+
+  task: () => `
+    <div class="dk-title"><h1>#224 chalk theme — rebuild the component layer</h1><span class="sp"></span>
+      <button class="dk-btn pri">~ launch</button><button class="dk-btn">move</button><button class="dk-btn">assign</button></div>
+    <div class="dk-list simple" style="max-width:640px">
+      ${head(["field", "r value"])}
+      ${line([["status", "sub"], ["in progress", "r"]], { s: "run" })}
+      ${line([["priority", "sub"], ["P1", "r"]], { s: "block" })}
+      ${line([["assignee", "sub"], ["maks-it", "r"]], {})}
+      ${line([["project", "sub"], ["codenest-app", "r"]], {})}
+      ${line([["created", "sub"], ["2026-09-27", "r"]], {})}
+      ${line([["blockers", "sub"], ["none", "r"]], {})}
+    </div>
+    ${group("checklist", "3 / 7", "", `<div class="dk-list simple">
+      ${["Token file — one ground, one ramp", "Primitive set — line, head, group", "Shell — rail, status line, page"].map((t) => line([[t, "sub"], ""], { s: "done", done: 1 })).join("")}
+      ${["Session pane + composer", "xterm palette — terminal semantics", "Delete d3-creative.css", "Migrate the long tail"].map((t) => line([[t, "sub"], ""], { s: "todo" })).join("")}
+      </div>`)}
+    ${group("runs", 2, "", `<div class="dk-list">
+      ${head(["agent", "model", "where", "r elapsed", "r cost"])}
+      ${line([["maks-it", "sub"], "sonnet-5.5", "codenest-app", ["1:48", "r"], ["$0.31", "r"]], { s: "run" })}
+      ${line([["maks-it", "sub"], "opus-5", "codenest-app", ["6:22", "r"], ["$1.90", "r"]], { s: "done" })}
+      </div>`)}`,
+
+  projects: () => `
+    <div class="dk-title"><h1>projects</h1><span class="sub">7 tracked · $133.40 over 7 days</span><span class="sp"></span>
+      <div class="dk-field" style="width:180px"><input placeholder="filter" /></div><button class="dk-btn">+ project</button></div>
+    <div class="dk-list wide">
+      ${head(["project", "status", "r open", "r runs 7d", "r spend 7d"])}
+      ${PROJECTS.map((p) => line([[p.t, "sub"], p.w, [p.a, "r"], [p.b, "r"], [p.v, "r"]], { s: p.s })).join("")}
+    </div>`,
+
+  agents: () => `
+    <div class="dk-title"><h1>agents</h1><span class="sub">5 on the team · 2 running</span><span class="sp"></span>
+      <button class="dk-btn">+ recruit</button></div>
+    <div class="dk-list">
+      ${head(["agent", "model", "where", "r elapsed", "r spend 7d"])}
+      ${AGENTS.map((a) => line([[a.t, "sub"], a.who, a.w, [a.age, "r"], [a.v, "r"]], { s: a.s })).join("")}
+    </div>`,
+};
+
+SCREENS.session = () => `
+  <div style="display:grid;grid-template-columns:200px minmax(0,1fr);flex:1 1 auto;min-height:0">
+    <div style="display:flex;flex-direction:column;min-height:0">
+      <div class="dk-head" style="--cols:1fr;padding:0 var(--u3)"><span>workspace</span></div>
+      <div class="dk-list simple" style="--cols:14px 1fr;flex:1 1 auto;overflow-y:auto;padding:var(--u) var(--u2)">
+        ${line([["codenest-app", "sub"]], { s: "run", on: 1 })}
+        ${line([["&nbsp;&nbsp;frontend/src"]], {})}
+        ${line([["&nbsp;&nbsp;&nbsp;&nbsp;styles/tokens.css"]], {})}
+        ${line([["&nbsp;&nbsp;&nbsp;&nbsp;pages/mission-control.tsx"]], { on: 1 })}
+        ${line([["&nbsp;&nbsp;app/services"]], {})}
+        ${line([["&nbsp;&nbsp;CLAUDE.md"]], {})}
+        ${line([["miragold"]], { s: "run" })}
+        ${line([["RAID-2D"]], { s: "run" })}
+        ${line([["Networa"]], { s: "stall" })}
+      </div>
+      <div style="border-top:1px solid var(--line);padding:var(--u2)"><button class="dk-btn" style="width:100%;justify-content:center">+ pane</button></div>
+    </div>
+
+    <div class="dk-term">
+      <div class="dk-tabs">
+        <button class="dk-tab on"><span class="dk-s" data-s="run"></span> maks-it</button>
+        <button class="dk-tab"><span class="dk-s" data-s="run"></span> serhii</button>
+        <button class="dk-tab"><span class="dk-s" data-s="idle"></span> zsh</button>
+      </div>
+      <div class="dk-term__h">
+        <span>opus-5</span><span class="dim">·</span><span>codenest-app</span><span class="dim">·</span>
+        <span>14 turns</span><span class="dim">·</span><span>compacted 1×</span>
+        <span style="margin-left:auto">118K ctx · $2.14</span><button class="dk-btn" style="height:18px">stop</button>
+      </div>
+      <div class="dk-term__b">
+<span class="d">~ read</span>  frontend/src/styles/tokens.css
+<span class="d">~ read</span>  frontend/src/styles/d3-creative.css
+<span class="d">~ grep</span>  "gradient|box-shadow|backdrop-filter" → 104 hits in 13 files
+
+<span class="u">Three sources carry almost all of the old theme's noise:</span>
+
+  d3-creative.css      9 gradients, 41 shadows, the two background orbs
+  onboarding-page      19 gradients
+  screenshot-ring      13 gradients
+
+<span class="u">The orbs and the grid overlay are drawn by Shell itself, not by a
+stylesheet, so removing them is a change to shell.tsx as well.</span>
+
+<span class="d">~ edit</span>  frontend/src/components/layout/shell.tsx
+<span class="d">  ⎿</span> removed 3 lines
+<span class="d">~ bash</span> pnpm --filter frontend typecheck
+<span class="d">  ⎿</span> tsc -b --noEmit <span class="ok" style="color:var(--ok)">→ 0 errors</span>
+
+<span class="w">? waiting for permission — write frontend/src/styles/tokens.css</span>
+      </div>
+      <div class="dk-term__f">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:var(--u2)">
+          <div class="dk-seg"><button class="on">conversation</button><button>shell</button></div>
+          <button class="dk-btn bare">profile <span class="dim">Home&nbsp;Base</span> ▾</button>
+          <button class="dk-btn bare">provider <span class="dim">Anthropic</span> ▾</button>
+          <button class="dk-btn bare">model <span class="dim">opus-5</span> ▾</button>
+          <button class="dk-btn bare">mode <span class="dim">plan</span> ▾</button>
+          <span style="margin-left:auto"><button class="dk-btn bare">+ pane</button></span>
+        </div>
+
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:var(--u2)">
+          <span class="dk-tag" data-s="run">@ styles/tokens.css</span>
+          <span class="dk-tag" data-s="run">@ shell.tsx</span>
+          <span class="dk-tag" data-s="done">✦ code-review</span>
+          <span class="dk-tag">~ maks-it</span>
+          <span class="dk-tag">CLAUDE.md</span>
+          <button class="dk-btn bare" style="height:18px">+ context</button>
+        </div>
+
+        <div class="dk-field" style="height:auto;min-height:46px;align-items:flex-start;padding-top:6px">
+          <span class="dim">ask, paste a task, or drop a file…</span>
+        </div>
+
+        <div style="display:flex;gap:6px;margin-top:var(--u2);flex-wrap:wrap;align-items:center">
+          <button class="dk-btn bare">@ mention</button>
+          <button class="dk-btn bare">/ commands</button>
+          <button class="dk-btn bare">✦ skills</button>
+          <button class="dk-btn bare">~ agents</button>
+          <button class="dk-btn bare">esc interrupt</button>
+          <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+            <span class="dim" style="font-size:var(--fs-xs)">? permission waiting</span>
+            <button class="dk-btn">allow once</button>
+            <button class="dk-btn pri">allow &amp; continue</button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+SCREENS.system = () => `
+  <div class="dk-title"><h1>deck — the system</h1><span class="sub">184 lines of css · 4 components</span></div>
+  ${group("the four rules", "", "", `<div class="dk-list simple prose" style="--cols:14px 1fr">
+    ${line([["<b style='font-weight:500'>One primitive.</b> Sessions, tasks, agents, runs and alerts are all the same line on the same grid.", "sub"]], { s: "done" })}
+    ${line([["<b style='font-weight:500'>Mono is structure.</b> Columns only align if they are monospaced, and alignment is what makes forty rows readable instead of forty boxes.", "sub"]], { s: "done" })}
+    ${line([["<b style='font-weight:500'>State is a character in column one.</b> It reads as text, so it survives in the terminal, in a log and with colour off.", "sub"]], { s: "done" })}
+    ${line([["<b style='font-weight:500'>Draw almost nothing.</b> No card, no border, no shadow — a rule appears only under a header and where you stopped reading.", "sub"]], { s: "done" })}
+    </div>`)}
+
+  ${group("the glyph column", 8, "colour reinforces, never carries", `<div class="dk-list" style="--cols:14px 96px minmax(0,1fr)">
+    ${head(["glyph", "where it shows up"])}
+    ${[["block", "! blocking", "a session cannot continue · task blocked on another", "err"],
+       ["fail", "× failed", "run exited non-zero · hook rejected", "err"],
+       ["wait", "? waiting", "permission prompt · inbox item ready", "warn"],
+       ["stall", "= stalled", "idle with an unfinished turn", "warn"],
+       ["run", "~ running", "live session · task in progress", "run"],
+       ["done", "✓ done", "resolved · merged · passed", "ok"],
+       ["todo", "▸ queued", "to do · scheduled", "dim"],
+       ["idle", "· inert", "backlog · idle agent · unmeasured", "dim"]]
+      .map(([s, g, w]) => line([[g, "sub"], w], { s })).join("")}
+    </div>`)}
+
+  ${group("controls", "", "everything the app needs", `<div style="padding:var(--u3) var(--u2);display:flex;flex-wrap:wrap;gap:var(--u3);align-items:center">
+    <button class="dk-btn pri">primary</button><button class="dk-btn">default</button><button class="dk-btn bare">bare</button>
+    <button class="dk-btn" disabled>disabled</button>
+    <div class="dk-seg"><button class="on">status</button><button>project</button><button>agent</button></div>
+    <div class="dk-field" style="width:150px"><input placeholder="filter" /></div>
+    <span class="dk-tag" data-s="block">on #211</span><span class="dk-tag" data-s="run">P1</span>
+    <span class="dk-tag" data-s="done">done</span><span class="dk-tag">label</span>
+    <span class="dk-bar"><i style="width:31%"></i></span>
+    </div>`)}
+
+  <div class="dk-note sans">Switch <b>Colour → Off</b> bottom right. The glyph column keeps every
+    state distinguishable on its own, which is the test: colour is reinforcement here, never the
+    only carrier. Switch <b>Rows → Loose</b> if 26px is too tight to hit with a mouse.</div>`;
+
+SCREENS.plan = () => `
+  <div class="dk-title"><h1>what it takes</h1><span class="sub">deck vs. today</span></div>
+  <div class="dk-bigs">
+    <div class="dk-big"><div class="v">184</div><div class="l">lines of css · today 12,857</div></div>
+    <div class="dk-big"><div class="v">4</div><div class="l">components · today 56 modules</div></div>
+    <div class="dk-big"><div class="v">7</div><div class="l">colours · today 24 + 774 literals</div></div>
+    <div class="dk-big"><div class="v">1</div><div class="l">row primitive</div></div>
+  </div>
+
+  ${group("phases", 7, "each ships on its own", `<div class="dk-list" style="--cols:14px 26px 1fr 300px 46px">
+    ${head(["", "phase", "what lands", "r size"])}
+    ${[["done", "0", "Approve the concept", "this prototype · nothing in the app changes", "—"],
+       ["todo", "1", "Land tokens + deck.css", "both systems coexist; nothing consumes deck yet", "S"],
+       ["todo", "2", "Strip the noise", "orbs, grid, glows, gradients — visible win, revertible", "S"],
+       ["todo", "3", "Build the line", "one component + the grid templates; unit-tested once", "M"],
+       ["todo", "4", "Shell: rail + status line", "every page sits in deck chrome, bodies still old", "M"],
+       ["todo", "5", "Convert the lists", "Needs You, Work, Agents, Projects, Sessions — they are all the same list", "M"],
+       ["todo", "6", "Delete the old theme", "−12,857 lines · irreversible only here", "M"]]
+      .map(([s, n, t, w, sz]) => line([[n, "id"], [t, "sub"], w, [sz, "r"]], { s })).join("")}
+    </div>`)}
+
+  ${group("what deck kills", 4, "", `<div class="dk-list simple prose" style="--cols:14px 1fr">
+    ${line([["<b style='font-weight:500'>The kanban board.</b> Drag-and-drop across five columns is replaced by status groups on one list. Faster to scan at 200 tasks, but you lose dragging a card between columns — the status change becomes a menu or a keystroke.", "sub"]], { s: "block" })}
+    ${line([["<b style='font-weight:500'>Cards everywhere.</b> Mission Control's tiles, the agent cards, the project cards. All become lines.", "sub"]], { s: "wait" })}
+    ${line([["<b style='font-weight:500'>Sans-first typography.</b> Mono at 12px is denser and aligns, but it is less comfortable for long prose. Descriptions stay sans.", "sub"]], { s: "wait" })}
+    ${line([["<b style='font-weight:500'>Icons.</b> The rail loses its glyph set for text. Cheaper and clearer, but less scannable for people who navigate by shape.", "sub"]], { s: "wait" })}
+    </div>`)}
+
+  ${group("decisions", 3, "", `<div class="dk-list simple prose" style="--cols:14px 1fr">
+    ${line([["<b style='font-weight:500'>Is losing drag-and-drop acceptable?</b> This is the real cost of the concept and the one thing I would not decide for you.", "sub"]], { s: "wait" })}
+    ${line([["<b style='font-weight:500'>Row height 26px or 30px?</b> Tight fits ~22 rows per screen, loose ~19 and is easier to click. Toggle bottom right.", "sub"]], { s: "wait" })}
+    ${line([["<b style='font-weight:500'>Does “since you last looked” need a real last-seen timestamp?</b> It is the strongest idea here and the only one needing new sidecar state.", "sub"]], { s: "wait" })}
+    </div>`)}`;
+
+SCREENS.stub = () => `
+  <div class="dk-title"><h1 id="stubT">not in this prototype</h1></div>
+  <div class="dk-note sans">This page keeps its route, its data and its behaviour. It is not drawn
+    here because the screens that carry the argument are Deck, Needs You, Work, Sessions, Projects
+    and Agents — and every one of them is the same list, which is the point.
+    <br /><br />Phase 5 converts it, one page per commit.</div>`;
+
+SCREENS.schedules = () => `
+  <div class="dk-title"><h1>schedules</h1><span class="sub">0 defined — the cron that turns a prioritised task into a session</span>
+    <span class="sp"></span><button class="dk-btn pri">+ schedule</button></div>
+
+  <div class="dk-note sans" style="border-left:2px solid var(--warn);margin-bottom:var(--u6)">
+    <b>This is the spine, and it has never fired.</b> The table already carries a full launch spec —
+    <code>agent_name, prompt, project_id, provider_id, model, run_mode, result_kind</code> — but there
+    are zero rows in the database. Ticket #268. The lines below are what one looks like once it exists.
+  </div>
+
+  ${group("would run", 3, "proposed, not real", `<div class="dk-list wide">
+    ${head(["schedule", "agent · model", "r next", "r last", "r cost 7d"])}
+    ${line([["nightly roadmap sweep <span class='dim'>cron 0 2 * * * · codenest-app</span>", "sub"], "maks-it · sonnet-5.5", ["02:00", "r"], ["—", "r"], ["—", "r"]], { s: "wait" })}
+    ${line([["top-priority task, hourly <span class='dim'>interval 1h · any project</span>", "sub"], "from task · from task", ["15:00", "r"], ["—", "r"], ["—", "r"]], { s: "wait" })}
+    ${line([["stalled-session nudge <span class='dim'>event session.stalled</span>", "sub"], "maks-it · haiku-4.5", ["on event", "r"], ["—", "r"], ["—", "r"]], { s: "wait" })}
+    </div>`, "stall")}
+
+  ${group("the shape of one", "", "", `<div class="dk-list simple" style="--cols:14px 150px minmax(0,1fr)">
+    ${head(["field", "value"])}
+    ${line([["trigger", "sub"], "cron <code>0 2 * * *</code> · or interval · or event"], { s: "done" })}
+    ${line([["project", "sub"], "codenest-app"], { s: "done" })}
+    ${line([["agent", "sub"], "maks-it — or taken from the task's assignee"], { s: "done" })}
+    ${line([["model", "sub"], "sonnet-5.5 — or the agent's saved default"], { s: "done" })}
+    ${line([["prompt", "sub"], "the task body, or a fixed instruction"], { s: "done" })}
+    ${line([["run mode", "sub"], "background · windowed"], { s: "done" })}
+    ${line([["result", "sub"], "transcript · artifact · summary · notification"], { s: "done" })}
+    ${line([["opens", "sub"], "<b style='font-weight:500'>an in-app session</b> — not an external process"], { s: "block" })}
+    </div>`)}`;
+
+SCREENS.budgets = () => `
+  <div class="dk-title"><h1>budgets</h1><span class="sub">what this is costing me</span>
+    <span class="sp"></span><button class="dk-btn bare">+ budget</button></div>
+  <div class="dk-bigs">
+    <div class="dk-big"><div class="v">$12.40</div><div class="l">today · of $40</div></div>
+    <div class="dk-big"><div class="v">69%</div><div class="l">headroom · runs out 16:12</div></div>
+    <div class="dk-big"><div class="v">$1.70</div><div class="l">per hour, last 3h</div></div>
+    <div class="dk-big"><div class="v">$133</div><div class="l">7 days</div></div>
+    <div class="dk-big"><div class="v na">—</div><div class="l warn">per task · ticket #267</div></div>
+  </div>
+
+  ${group("by project", 7, "7 days", `<div class="dk-list wide">
+    ${head(["project", "share", "r runs", "r tokens", "r spend"])}
+    ${[["run","codenest-app","47%","41","1.8M","$62.10"],
+       ["run","RAID-2D","24%","22","0.9M","$31.40"],
+       ["run","miragold","19%","18","0.7M","$24.80"],
+       ["idle","android-interview-kb","6%","9","0.3M","$7.60"],
+       ["idle","Networa","3%","6","0.1M","$4.20"],
+       ["idle","Readiness","2%","3","0.1M","$2.90"],
+       ["idle","DailyMotivation","0%","1","0.0M","$0.40"]]
+      .map(([st,n,share,runs,tok,sp]) => line([[n, "sub"], `<span class="dk-bar"><i style="width:${share}"></i></span> ${share}`, [runs, "r"], [tok, "r"], [sp, "r"]], { s: st })).join("")}
+    </div>`)}
+
+  ${group("by agent", 5, "7 days", `<div class="dk-list wide">
+    ${head(["agent", "default model", "r runs", "r tokens", "r spend"])}
+    ${[["run","oleg-researcher","opus-5","11","1.1M","$34.70"],
+       ["stall","serhii-godot-dev","opus-5","22","0.9M","$31.40"],
+       ["run","maks-it","sonnet-5.5","24","1.4M","$18.20"],
+       ["idle","igor-recruiter","opus-5","3","0.2M","$5.10"],
+       ["idle","tanya-android","haiku-4.5","1","0.0M","$0.40"]]
+      .map(([st,n,m,runs,tok,sp]) => line([[n, "sub"], m, [runs, "r"], [tok, "r"], [sp, "r"]], { s: st })).join("")}
+    </div>`)}
+
+  ${group("thresholds", 3, "", `<div class="dk-list simple" style="--cols:14px minmax(0,1fr) 110px">
+    ${line([["daily cap — notify at 80%, stop at 100%", "sub"], ["$40", "r"]], { s: "done" })}
+    ${line([["crossed 25% today at 11:20 — surfaced in Needs You", "sub"], ["✓", "r"]], { s: "wait" })}
+    ${line([["per-session ceiling", "sub"], ["not set", "r"]], { s: "idle" })}
+    </div>`)}`;
+
+SCREENS.settings = () => `
+  <div class="dk-title"><h1>settings</h1><span class="sub">providers, models, and the little that is left</span></div>
+
+  ${group("providers", 2, "model selection depends on these", `<div class="dk-list wide">
+    ${head(["provider", "auth", "r models", "r default", "r "])}
+    ${line([["Anthropic <span class='dim'>claude-work</span>", "sub"], "oauth", ["4", "r"], ["opus-5", "r"], ["<span class='dk-tag' data-s='done'>ok</span>", "r"]], { s: "run" })}
+    ${line([["Unknown <span class='dim'>unregistered models</span>", "sub"], "—", ["16", "r"], ["—", "r"], ["<span class='dk-tag' data-s='wait'>unmapped</span>", "r"]], { s: "wait" })}
+    </div>`)}
+
+  ${group("models", 4, "what the composer can offer", `<div class="dk-list wide">
+    ${head(["model", "id", "r in / Mtok", "r out / Mtok", "r "])}
+    ${[["claude-opus-5","opus-5","$15","$75","default"],
+       ["claude-sonnet-5-5","sonnet-5.5","$3","$15",""],
+       ["claude-fable-5-1","fable-5.1","$3","$15",""],
+       ["claude-haiku-4-5","haiku-4.5","$1","$5",""]]
+      .map(([n,id,i,ou,tag]) => line([[n, "sub"], id, [i, "r"], [ou, "r"], [tag ? `<span class="dk-tag" data-s="done">${tag}</span>` : "", "r"]], { s: "done" })).join("")}
+    </div>`)}
+
+  ${group("workspace", 4, "", `<div class="dk-list simple" style="--cols:14px minmax(0,1fr) 160px">
+    ${line([["profiles", "sub"], ["Home Base · claude", "r"]], { s: "done" })}
+    ${line([["workflow labels &amp; categories", "sub"], ["taxonomies", "r"]], { s: "done" })}
+    ${line([["terminal — shell, font, scrollback", "sub"], ["zsh · 13px", "r"]], { s: "done" })}
+    ${line([["notifications — native tray", "sub"], ["on", "r"]], { s: "done" })}
+    </div>`)}
+
+  <div class="dk-note sans">The Features tab is gone with the cut: it existed to hide the seven surfaces
+    that shipped switched off, and after ticket #274 there is nothing left to gate.</div>`;
+
+SCREENS.hooks = () => `
+  <div class="dk-title"><h1>hooks</h1><span class="sub">the lane Needs You depends on</span></div>
+  <div class="dk-note sans" style="margin-bottom:var(--u6)">Kept, but shrunk. Every <i>blocking</i> item in
+    Needs You arrives through here — a permission prompt is a hook firing. The page only has to answer
+    one question: is the hook installed and is it passing decisions through?</div>
+  ${group("status", 4, "", `<div class="dk-list simple" style="--cols:14px minmax(0,1fr) 130px">
+    ${line([["<code>PreToolUse</code> — permission decisions reach the app", "sub"], ["<span class='dk-tag' data-s='done'>passing</span>", "r"]], { s: "done" })}
+    ${line([["<code>Notification</code> — blocking prompts reach Needs You", "sub"], ["<span class='dk-tag' data-s='done'>passing</span>", "r"]], { s: "done" })}
+    ${line([["<code>Stop</code> — session end recorded", "sub"], ["<span class='dk-tag' data-s='done'>passing</span>", "r"]], { s: "done" })}
+    ${line([["installed at <code>~/.claude/settings.json</code>", "sub"], ["verify", "r"]], { s: "todo" })}
+    </div>`)}`;
+
+/* ── Nav + wiring ─────────────────────────────────────────────────── */
+
+const NAV = [
+  { g: "now", items: [
+    { k: "deck", l: "deck", s: "run", n: "" },
+    { k: "attention", l: "needs you", s: "block", n: "4", warn: 1 },
+    { k: "work", l: "work", s: "todo", n: "37" },
+    { k: "session", l: "sessions", s: "run", n: "3" },
+  ]},
+  { g: "record", items: [
+    { k: "projects", l: "projects", s: "idle", n: "7" },
+    { k: "agents", l: "agents", s: "idle", n: "5" },
+  ]},
+  { g: "automate", items: [
+    { k: "schedules", l: "schedules", s: "wait", n: "0" },
+  ]},
+  { g: "system", items: [
+    { k: "budgets", l: "budgets", s: "idle", n: "" },
+    { k: "hooks", l: "hooks", s: "idle", n: "" },
+    { k: "settings", l: "settings", s: "idle", n: "" },
+  ]},
+  { g: "prototype", items: [
+    { k: "system", l: "the system", s: "done", n: "" },
+    { k: "plan", l: "what it takes", s: "done", n: "" },
+  ]},
+];
+
+const nav = document.getElementById("nav");
+nav.innerHTML = NAV.map((g) =>
+  `<div class="dk-grp"><div class="dk-grp__h">${g.g}</div>` +
+  g.items.map((i) =>
+    `<button class="dk-nav" data-k="${i.k}" data-l="${i.l}">
+       <span class="dk-s dk-nav__g" data-s="${i.s}" role="img" aria-label="${STATE_WORD[i.s] || i.s}"></span>
+       <span class="trunc">${i.l}</span>
+       <span class="dk-nav__n${i.warn ? " warn" : ""}">${i.n}</span>
+     </button>`).join("") + "</div>").join("");
+
+/* Gives every list its grid semantics and one keyboard model: Up/Down move,
+   Home/End jump, Enter/Space activate. A console should be drivable without
+   the mouse, and this is also what makes the columns legible to a screen
+   reader — a flat run of buttons told it nothing. */
+function enhanceGrids(root) {
+  for (const list of root.querySelectorAll(".dk-list")) {
+    list.setAttribute("role", "grid");
+    const label = list.closest(".dk-group")?.querySelector(".dk-group__h");
+    if (label) list.setAttribute("aria-label", plain(label.textContent));
+
+    const rows = [...list.querySelectorAll(".dk-line")];
+    list.setAttribute("aria-rowcount", String(rows.length));
+    rows.forEach((r, i) => {
+      r.setAttribute("aria-rowindex", String(i + 1));
+      r.tabIndex = i === 0 ? 0 : -1;
+    });
+
+    list.addEventListener("keydown", (e) => {
+      const rs = [...list.querySelectorAll(".dk-line")];
+      const at = rs.indexOf(document.activeElement);
+      if (at < 0) return;
+      let to = -1;
+      if (e.key === "ArrowDown") to = Math.min(at + 1, rs.length - 1);
+      else if (e.key === "ArrowUp") to = Math.max(at - 1, 0);
+      else if (e.key === "Home") to = 0;
+      else if (e.key === "End") to = rs.length - 1;
+      else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        rs[at].click();
+        return;
+      } else return;
+      e.preventDefault();
+      rs[at].tabIndex = -1;
+      rs[to].tabIndex = 0;
+      rs[to].focus();
+    });
+  }
+}
+
+const page = document.getElementById("page");
+
+function show(k, label) {
+  const render = SCREENS[k] || SCREENS.stub;
+  page.className = "dk-page" + (k === "session" ? " flush" : "");
+  page.innerHTML = render();
+  if (!SCREENS[k]) {
+    const t = document.getElementById("stubT");
+    if (t) t.textContent = (label || k) + " — not in this prototype";
+  }
+  for (const b of nav.querySelectorAll(".dk-nav")) b.classList.toggle("on", b.dataset.k === k);
+  for (const b of page.querySelectorAll("[data-go]")) b.onclick = () => show(b.dataset.go);
+  enhanceGrids(page);
+  page.scrollTop = 0;
+}
+
+for (const b of nav.querySelectorAll(".dk-nav")) b.onclick = () => show(b.dataset.k, b.dataset.l);
+
+const root = document.documentElement;
+const pair = (aId, bId, attr, aVal, bVal) => {
+  const a = document.getElementById(aId), b = document.getElementById(bId);
+  a.onclick = () => { root.dataset[attr] = aVal; a.classList.add("on"); b.classList.remove("on"); };
+  b.onclick = () => { root.dataset[attr] = bVal; b.classList.add("on"); a.classList.remove("on"); };
+};
+pair("tD", "tL", "theme", "dark", "light");
+pair("cOn", "cOff", "colour", "on", "off");
+pair("dT", "dL", "density", "tight", "loose");
+
+show("deck", "deck");
+</script>
+</body>
+</html>

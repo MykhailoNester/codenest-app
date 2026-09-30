@@ -1,0 +1,1065 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-colour="minimal" data-density="comfortable">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Codenest · Chalk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="chalk.css" />
+<style>
+  /* Prototype chrome only — never ships. */
+  .pv { position: fixed; right: 16px; bottom: 16px; z-index: 50; display: flex; gap: 6px; align-items: center;
+        background: var(--ground); border: 1px solid var(--outline); border-radius: var(--r-pill); padding: 5px 7px; }
+  .pv .lbl { font: var(--t-kicker); letter-spacing: var(--ls-kicker); text-transform: uppercase; color: var(--faint); padding: 0 4px; }
+  .scr { display: none; }
+  .scr.on { display: block; }
+  .scr.on.flex { display: flex; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<g id="i" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter"></g>
+<symbol id="ic-dashboard" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="2" width="5" height="5"/><rect x="9" y="2" width="5" height="5"/><rect x="2" y="9" width="5" height="5"/><rect x="9" y="9" width="5" height="5"/></g></symbol>
+<symbol id="ic-review" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 2v12l5-3 5 3V2z"/></g></symbol>
+<symbol id="ic-tasks" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="3" width="4" height="10"/><rect x="8" y="3" width="4" height="6"/><path d="M14 3v4"/></g></symbol>
+<symbol id="ic-projects" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 4h4l1.5 2H14v7H2z"/></g></symbol>
+<symbol id="ic-bell" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4 11V7a4 4 0 118 0v4l1 2H3z"/><path d="M6.5 13.5h3"/></g></symbol>
+<symbol id="ic-command" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 5l3 3-3 3"/><path d="M8 11h5"/></g></symbol>
+<symbol id="ic-team" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6" cy="6" r="2.4"/><path d="M2 13c0-2.2 1.8-3.5 4-3.5s4 1.3 4 3.5"/><path d="M11 5.2a2.2 2.2 0 010 4.2M12 13c0-1.6-.5-2.6-1.3-3.2"/></g></symbol>
+<symbol id="ic-schedules" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.6"/><path d="M8 4.6V8l2.4 1.6"/></g></symbol>
+<symbol id="ic-terminal" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="3" width="12" height="10"/><path d="M4.6 6.4L6.6 8l-2 1.6M8.4 10.2h3"/></g></symbol>
+<symbol id="ic-docs" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3.5 2h6l3 3v9h-9z"/><path d="M9.5 2v3h3M5.6 8h5M5.6 10.6h5"/></g></symbol>
+<symbol id="ic-library" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4 2h8v12l-4-2.6L4 14z"/></g></symbol>
+<symbol id="ic-marketplace" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="2" width="12" height="12"/><path d="M2 6h12M6 6v8"/></g></symbol>
+<symbol id="ic-feed" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 12.8a1 1 0 100-2 1 1 0 000 2M3 8.4A4.4 4.4 0 017.4 13M3 4.2A8.6 8.6 0 0111.6 13"/></g></symbol>
+<symbol id="ic-preview" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.6 8S4 4 8 4s6.4 4 6.4 4-2.4 4-6.4 4-6.4-4-6.4-4z"/><circle cx="8" cy="8" r="1.8"/></g></symbol>
+<symbol id="ic-mcp" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="4" cy="4" r="1.8"/><circle cx="12" cy="4" r="1.8"/><circle cx="8" cy="12" r="1.8"/><path d="M4.8 5.6L7.4 10.4M11.2 5.6L8.6 10.4"/></g></symbol>
+<symbol id="ic-integration" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M6.6 9.4a2.8 2.8 0 010-4l1.8-1.8a2.8 2.8 0 014 4L11 9"/><path d="M9.4 6.6a2.8 2.8 0 010 4l-1.8 1.8a2.8 2.8 0 01-4-4L5 7"/></g></symbol>
+<symbol id="ic-plugin" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 3h4v2.2a1.4 1.4 0 102.8 0V3H13v10H3z"/></g></symbol>
+<symbol id="ic-zap" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M9 1.6L3.6 9H8l-1 5.4L12.4 7H8z"/></g></symbol>
+<symbol id="ic-sprint" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2.4 12a6 6 0 1111.2 0"/><path d="M8 12l3-3.4"/></g></symbol>
+<symbol id="ic-sync" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13 7a5 5 0 00-9.2-2.2M3 9a5 5 0 009.2 2.2"/><path d="M3.4 2v3h3M12.6 14v-3h-3"/></g></symbol>
+<symbol id="ic-budget" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.6v6.8M6.2 6.2h3.2M6.6 9.8h3.2"/></g></symbol>
+<symbol id="ic-settings" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M12.4 3.6L11 5M5 11l-1.4 1.4"/></g></symbol>
+<symbol id="ic-chev" viewBox="0 0 16 16"><path d="M6 3.5L10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="ic-search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="7" cy="7" r="4.4"/><path d="M10.2 10.2L14 14"/></g></symbol>
+<symbol id="ic-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="ic-popout" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><path d="M7 3H3v10h10V9"/><path d="M9.6 2.4H14v4.4M14 2.4L8.4 8"/></g></symbol>
+<symbol id="ic-arrow" viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+</defs></svg>
+
+<div class="ck-app">
+
+  <!-- ══ Rail ══════════════════════════════════════════════════════ -->
+  <aside class="ck-rail">
+    <div class="ck-rail__brand">
+      <span class="ck-rail__mark">CN</span>
+      <span class="ck-rail__name">Codenest</span>
+    </div>
+
+    <nav class="ck-rail__nav" id="nav"></nav>
+
+    <div class="ck-rail__foot">
+      <div class="ck-meter">
+        <div class="ck-meter__row"><span>Today</span><b>$12.40 / $40</b></div>
+        <div class="ck-meter__bar"><i style="width:31%"></i></div>
+        <div class="ck-meter__row"><span>418K tokens</span><span class="mono" style="font-size:10px">310K in / 108K out</span></div>
+      </div>
+      <div class="ck-user">
+        <span class="ck-avatar">MN</span>
+        <div style="min-width:0">
+          <div class="ck-user__n trunc">Mykhailo Nester</div>
+          <div class="ck-user__r">Owner</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══ Main ══════════════════════════════════════════════════════ -->
+  <main class="ck-main">
+    <div class="ck-omni">
+      <div class="ck-omni__in">
+        <svg width="13" height="13"><use href="#ic-search"/></svg>
+        <span>Search, run a command, jump to a project</span>
+        <kbd>⌘K</kbd>
+      </div>
+      <button class="ck-btn ghost sm" title="Notifications"><svg width="14" height="14"><use href="#ic-bell"/></svg></button>
+      <button class="ck-btn sm"><svg width="12" height="12"><use href="#ic-zap"/></svg> Launch</button>
+    </div>
+
+    <div class="ck-top">
+      <div>
+        <div class="ck-top__crumb" id="crumb">Attention ·</div>
+        <h1 class="ck-top__title" id="title">Mission Control</h1>
+      </div>
+      <div class="ck-top__acts" id="acts"></div>
+    </div>
+
+    <div class="ck-page" id="page">
+
+<!-- ═══ MISSION CONTROL ═══════════════════════════════════════════ -->
+<section class="scr on" data-scr="mission">
+
+  <div class="ck-split">
+    <div class="ck-card pad-0 is-signal">
+      <div class="ck-head" style="padding:var(--space-l) var(--space-l) 0;margin-bottom:var(--space-s)">
+        <span class="ck-kicker" data-u="critical">Needs you</span>
+        <span class="ck-kicker" style="color:var(--faint)">4 open · oldest 2h ago</span>
+      </div>
+      <div class="ck-rows">
+        <button class="ck-row">
+          <span class="ck-mark block"></span>
+          <span class="ck-row__b">
+            <span class="ck-row__t">Permission prompt — write to <span class="mono">src-tauri/tauri.conf.json</span></span>
+            <span class="ck-row__m">codenest-app · session 4f2a · 2h ago</span>
+          </span>
+          <span class="ck-badge">Open</span>
+        </button>
+        <button class="ck-row">
+          <span class="ck-mark block"></span>
+          <span class="ck-row__b">
+            <span class="ck-row__t">Task #218 blocked on <span class="mono">#211</span></span>
+            <span class="ck-row__m">miragold · blocker unresolved · 51m ago</span>
+          </span>
+          <span class="ck-badge">Open</span>
+        </button>
+        <button class="ck-row">
+          <span class="ck-mark stall"></span>
+          <span class="ck-row__b">
+            <span class="ck-row__t">Session idle 23m with an unfinished turn</span>
+            <span class="ck-row__m">Networa · serhii-godot-dev · 23m ago</span>
+          </span>
+          <span class="ck-badge">Open</span>
+        </button>
+        <button class="ck-row">
+          <span class="ck-mark queue"></span>
+          <span class="ck-row__b">
+            <span class="ck-row__t">Inbox item ready to promote</span>
+            <span class="ck-row__m">RAID-2D · “extraction timer drift” · 12m ago</span>
+          </span>
+          <span class="ck-badge">Open</span>
+        </button>
+      </div>
+      <div style="padding:var(--space-m) var(--space-l);border-top:1px solid var(--hairline)">
+        <button class="ck-btn ghost sm" data-go="attention">All 4 in Needs You <svg width="12" height="12"><use href="#ic-arrow"/></svg></button>
+      </div>
+    </div>
+
+    <div class="ck-card ck-hero">
+      <span class="ck-kicker">Plan headroom</span>
+      <span class="v">69%</span>
+      <span class="cap">$27.60 of $40 left today · resets 00:00</span>
+      <div class="ck-meter__bar" style="margin-top:var(--space-m)"><i style="width:31%"></i></div>
+      <div style="margin-top:var(--space-l)">
+        <div class="ck-kv"><span>Burn rate</span><b>$1.70 / h</b></div>
+        <div class="ck-kv"><span>Runs out</span><b>16:12</b></div>
+        <div class="ck-kv"><span>7-day mean</span><b>$18.30</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker">Live</span><span class="ck-kicker" style="color:var(--faint)">3 running · 1 idle</span></div>
+  <div class="ck-card pad-0">
+    <div class="ck-rows">
+      <button class="ck-row">
+        <span class="ck-mark live"></span>
+        <span class="ck-row__b">
+          <span class="ck-row__t">serhii-godot-dev <span class="mono" style="color:var(--muted)">· opus-5</span></span>
+          <span class="ck-row__m">RAID-2D · claude-code · 14 turns · compacted 1×</span>
+        </span>
+        <span class="ck-row__v">4:12<small>elapsed</small></span>
+        <span class="ck-row__v">$2.14<small>cost</small></span>
+      </button>
+      <button class="ck-row">
+        <span class="ck-mark live"></span>
+        <span class="ck-row__b">
+          <span class="ck-row__t">maks-it <span class="mono" style="color:var(--muted)">· sonnet-5.5</span></span>
+          <span class="ck-row__m">codenest-app · desktop · 6 turns</span>
+        </span>
+        <span class="ck-row__v">1:48<small>elapsed</small></span>
+        <span class="ck-row__v">$0.31<small>cost</small></span>
+      </button>
+      <button class="ck-row">
+        <span class="ck-mark live"></span>
+        <span class="ck-row__b">
+          <span class="ck-row__t">oleg-researcher <span class="mono" style="color:var(--muted)">· opus-5</span></span>
+          <span class="ck-row__m">miragold · claude-code · 22 turns · compacted 2×</span>
+        </span>
+        <span class="ck-row__v">9:03<small>elapsed</small></span>
+        <span class="ck-row__v">$5.80<small>cost</small></span>
+      </button>
+      <button class="ck-row">
+        <span class="ck-mark idle"></span>
+        <span class="ck-row__b">
+          <span class="ck-row__t" style="color:var(--dim)">tanya-android <span class="mono">· haiku-4.5</span></span>
+          <span class="ck-row__m">DailyMotivation · idle 23m</span>
+        </span>
+        <span class="ck-row__v" style="color:var(--muted)">—<small>elapsed</small></span>
+        <span class="ck-row__v" style="color:var(--muted)">$0.04<small>cost</small></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker">Record</span><span class="ck-kicker" style="color:var(--faint)">last 14 days</span></div>
+  <div class="ck-grid c4">
+    <div class="ck-card ck-stat"><span class="l">Active tasks</span><span class="v">37</span><span class="sub"><span class="ck-delta up">6 this week</span></span></div>
+    <div class="ck-card ck-stat"><span class="l">Sessions · 14d</span><span class="v">128</span><span class="sub"><span class="ck-delta down">11 vs prior</span></span></div>
+    <div class="ck-card ck-stat"><span class="l">Tool failures</span><span class="v na">—</span><span class="sub">waiting on the hooks lane</span></div>
+    <div class="ck-card ck-stat"><span class="l">Mean resolution</span><span class="v">42m 10s</span><span class="sub">across 19 resolved</span></div>
+  </div>
+
+  <div class="ck-grid c3" style="margin-top:var(--space-m)">
+    <div class="ck-card">
+      <div class="ck-head"><span class="ck-kicker">Activity</span><span class="ck-kicker" style="color:var(--faint)">runs / day</span></div>
+      <div class="ck-bars">
+        <i style="height:24%"></i><i style="height:38%"></i><i style="height:31%"></i><i style="height:62%"></i>
+        <i style="height:48%"></i><i style="height:22%"></i><i style="height:12%"></i><i style="height:55%"></i>
+        <i style="height:71%"></i><i style="height:44%"></i><i style="height:58%"></i><i style="height:83%"></i>
+        <i class="on" style="height:66%"></i><i class="on" style="height:94%"></i>
+      </div>
+      <div class="ck-kv" style="border:0;padding-top:var(--space-m)"><span>Peak</span><b>14 runs · Fri</b></div>
+    </div>
+
+    <div class="ck-card">
+      <div class="ck-head"><span class="ck-kicker">Projects pulse</span><span class="ck-kicker" style="color:var(--faint)">8 tracked</span></div>
+      <div class="ck-kv"><span>codenest-app</span><b>19 open</b></div>
+      <div class="ck-kv"><span>miragold</span><b>7 open</b></div>
+      <div class="ck-kv"><span>RAID-2D</span><b>6 open</b></div>
+      <div class="ck-kv"><span>Networa</span><b>3 open</b></div>
+      <div class="ck-kv"><span>android-interview-kb</span><b>2 open</b></div>
+    </div>
+
+    <div class="ck-card">
+      <div class="ck-head"><span class="ck-kicker">Momentum</span><span class="ck-kicker" style="color:var(--faint)">today</span></div>
+      <div class="ck-time">
+        <div class="ck-time__i"><span class="ck-time__t">14:02</span><span class="ck-time__d"></span><span class="ck-time__x">Task <em>#221</em> moved to Done</span></div>
+        <div class="ck-time__i"><span class="ck-time__t">13:41</span><span class="ck-time__d"></span><span class="ck-time__x">Session ended · <em>oleg-researcher</em></span></div>
+        <div class="ck-time__i"><span class="ck-time__t">12:55</span><span class="ck-time__d"></span><span class="ck-time__x">Blocker on <em>#218</em> raised</span></div>
+        <div class="ck-time__i"><span class="ck-time__t">11:20</span><span class="ck-time__d"></span><span class="ck-time__x">Budget crossed <em>25%</em></span></div>
+        <div class="ck-time__i"><span class="ck-time__t">09:48</span><span class="ck-time__d"></span><span class="ck-time__x">3 tasks promoted from inbox</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ NEEDS YOU ═════════════════════════════════════════════════ -->
+<section class="scr" data-scr="attention">
+  <div class="ck-grid c3">
+    <div class="ck-card ck-stat"><span class="l">Open</span><span class="v">4</span><span class="sub">2 blocking</span></div>
+    <div class="ck-card ck-stat"><span class="l">Oldest waiting</span><span class="v">2h 04m</span><span class="sub">permission prompt · codenest-app</span></div>
+    <div class="ck-card ck-stat"><span class="l">Mean resolution</span><span class="v">42m 10s</span><span class="sub">average, not median — the sidecar sends a mean</span></div>
+  </div>
+
+  <div class="ck-sec">
+    <span class="ck-kicker" data-u="critical">Blocking <span style="color:var(--faint)">· a session cannot continue · 2</span></span>
+    <div class="ck-chips"><button class="ck-chip on">Open</button><button class="ck-chip">Muted</button><button class="ck-chip">Resolved</button></div>
+  </div>
+  <div class="ck-card pad-0 is-signal">
+    <div class="ck-rows">
+      <div class="ck-row">
+        <span class="ck-mark block"></span>
+        <span class="ck-row__b">
+          <span class="ck-row__t">Permission prompt — write to <span class="mono">src-tauri/tauri.conf.json</span></span>
+          <span class="ck-row__m">codenest-app · session 4f2a · maks-it · first seen 2h 04m ago</span>
+        </span>
+        <span class="ck-chips"><button class="ck-btn sm">Mute</button><button class="ck-btn filled sm">Jump to pane</button></span>
+      </div>
+      <div class="ck-row">
+        <span class="ck-mark block"></span>
+        <span class="ck-row__b">
+          <span class="ck-row__t">Task #218 blocked on <span class="mono">#211</span></span>
+          <span class="ck-row__m">miragold · blocker unresolved · first seen 51m ago</span>
+        </span>
+        <span class="ck-chips"><button class="ck-btn sm">Mute</button><button class="ck-btn filled sm">Open task</button></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker" data-u="active">Stalled <span style="color:var(--faint)">· nobody is blocked, nothing is moving · 1</span></span></div>
+  <div class="ck-card pad-0">
+    <div class="ck-rows">
+      <div class="ck-row">
+        <span class="ck-mark stall"></span>
+        <span class="ck-row__b">
+          <span class="ck-row__t">Session idle 23m with an unfinished turn</span>
+          <span class="ck-row__m">Networa · serhii-godot-dev · first seen 23m ago</span>
+        </span>
+        <span class="ck-chips"><button class="ck-btn sm">Mute</button><button class="ck-btn sm">Jump to pane</button></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker" data-u="normal">Queued <span style="color:var(--faint)">· real work, not this minute · 1</span></span></div>
+  <div class="ck-card pad-0">
+    <div class="ck-rows">
+      <div class="ck-row">
+        <span class="ck-mark queue"></span>
+        <span class="ck-row__b">
+          <span class="ck-row__t">Inbox item ready to promote</span>
+          <span class="ck-row__m">RAID-2D · “extraction timer drift” · first seen 12m ago</span>
+        </span>
+        <span class="ck-chips"><button class="ck-btn sm">Mute</button><button class="ck-btn sm">Promote</button></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="ck-note" style="margin-top:var(--space-xl)">
+    This queue re-checks every 30 seconds while the page is open. Stalled sessions, failed runs,
+    budget thresholds and blocked tasks appear here on their own. Blocking permission prompts
+    arrive with the hooks lane.
+  </div>
+</section>
+
+<!-- ═══ WORK BOARD ════════════════════════════════════════════════ -->
+<section class="scr" data-scr="tasks">
+  <div class="ck-head" style="margin-bottom:var(--space-l)">
+    <div class="ck-chips">
+      <div class="ck-seg"><button class="on">Board</button><button>Table</button><button>By project</button></div>
+      <button class="ck-chip">Project <svg width="10" height="10" style="transform:rotate(90deg)"><use href="#ic-chev"/></svg></button>
+      <button class="ck-chip on">Priority · High</button>
+      <button class="ck-chip">Assignee</button>
+      <button class="ck-chip">Label</button>
+    </div>
+    <div class="ck-chips">
+      <span class="ck-kicker">Sort</span>
+      <div class="ck-seg"><button class="on">Newest</button><button>Oldest</button><button>Priority</button></div>
+    </div>
+  </div>
+
+  <div class="ck-board">
+    <div class="ck-col" data-col="idea">
+      <div class="ck-col__h"><span class="ck-kicker">Idea</span><span class="ck-col__n">6</span><button class="ck-btn ghost sm"><svg width="11" height="11"><use href="#ic-plus"/></svg></button></div>
+      <div class="ck-col__b">
+        <button class="ck-tile" data-u="critical" data-go="task">
+          <span class="ck-tile__t">Chalk theme — rebuild the component layer</span>
+          <span class="ck-tile__f"><span class="ck-badge">codenest-app</span><span class="ck-badge" data-u="critical">P1</span><span class="sp"></span></span>
+        </button>
+        <button class="ck-tile">
+          <span class="ck-tile__t">Extraction timer drift under 30fps</span>
+          <span class="ck-tile__f"><span class="ck-badge">RAID-2D</span><span class="ck-badge" data-u="active">P2</span><span class="sp"></span></span>
+        </button>
+        <button class="ck-tile">
+          <span class="ck-tile__t">Net-worth CSV import</span>
+          <span class="ck-tile__f"><span class="ck-badge">Networa</span><span class="ck-badge" data-u="normal">P3</span><span class="sp"></span></span>
+        </button>
+      </div>
+    </div>
+
+    <div class="ck-col" data-col="todo">
+      <div class="ck-col__h"><span class="ck-kicker">To do</span><span class="ck-col__n">11</span><button class="ck-btn ghost sm"><svg width="11" height="11"><use href="#ic-plus"/></svg></button></div>
+      <div class="ck-col__b">
+        <button class="ck-tile" data-u="critical">
+          <span class="ck-tile__t">Sidecar: expose session aggregate for 24h tile</span>
+          <span class="ck-tile__f"><span class="ck-badge">codenest-app</span><span class="ck-badge" data-u="critical">P1</span><span class="sp"></span></span>
+        </button>
+        <button class="ck-tile">
+          <span class="ck-tile__t">Gold price feed retry + backoff</span>
+          <span class="ck-tile__f"><span class="ck-badge">miragold</span><span class="ck-badge" data-u="active">P2</span><span class="sp"></span></span>
+        </button>
+        <button class="ck-tile">
+          <span class="ck-tile__t">Interview KB — coroutines chapter</span>
+          <span class="ck-tile__f"><span class="ck-badge">android-kb</span><span class="ck-badge" data-u="normal">P3</span><span class="sp"></span></span>
+        </button>
+        <button class="ck-tile">
+          <span class="ck-tile__t">Garmin sync: handle 401 refresh</span>
+          <span class="ck-tile__f"><span class="ck-badge">Readiness</span><span class="ck-badge" data-u="normal">P3</span><span class="sp"></span></span>
+        </button>
+      </div>
+    </div>
+
+    <div class="ck-col" data-col="doing">
+      <div class="ck-col__h"><span class="ck-mark live" style="width:7px;height:7px"></span><span class="ck-kicker">In progress</span><span class="ck-col__n">4</span><button class="ck-btn ghost sm"><svg width="11" height="11"><use href="#ic-plus"/></svg></button></div>
+      <div class="ck-col__b">
+        <button class="ck-tile" data-u="critical">
+          <span class="ck-tile__t">Mission Control honest-tile audit</span>
+          <span class="ck-tile__f"><span class="ck-badge">codenest-app</span><span class="ck-badge" data-u="critical">P1</span><span class="sp"></span></span>
+        </button>
+        <button class="ck-tile">
+          <span class="ck-tile__t">Loot table rebalance — phase 9</span>
+          <span class="ck-tile__f"><span class="ck-badge">RAID-2D</span><span class="ck-badge" data-u="active">P2</span><span class="sp"></span></span>
+        </button>
+      </div>
+    </div>
+
+    <div class="ck-col" data-col="blocked">
+      <div class="ck-col__h"><span class="ck-mark block" style="width:7px;height:7px"></span><span class="ck-kicker">Blocked</span><span class="ck-col__n">2</span><button class="ck-btn ghost sm"><svg width="11" height="11"><use href="#ic-plus"/></svg></button></div>
+      <div class="ck-col__b">
+        <button class="ck-tile" data-u="critical">
+          <span class="ck-tile__t">Inventory reconciliation job</span>
+          <span class="ck-tile__f"><span class="ck-badge">miragold</span><span class="ck-badge" data-u="critical">P1</span><span class="ck-badge" data-u="critical">on #211</span><span class="sp"></span></span>
+        </button>
+        <button class="ck-tile">
+          <span class="ck-tile__t">Packaged DB migration 015</span>
+          <span class="ck-tile__f"><span class="ck-badge">codenest-app</span><span class="ck-badge" data-u="active">P2</span><span class="ck-badge" data-u="critical">on #206</span><span class="sp"></span></span>
+        </button>
+      </div>
+    </div>
+
+    <div class="ck-col" data-col="done">
+      <div class="ck-col__h"><span class="ck-kicker">Done</span><span class="ck-col__n">14</span><button class="ck-btn ghost sm"><svg width="11" height="11"><use href="#ic-plus"/></svg></button></div>
+      <div class="ck-col__b">
+        <button class="ck-tile is-done">
+          <span class="ck-tile__t">Needs You page — severity grouping</span>
+          <span class="ck-tile__f"><span class="ck-badge">codenest-app</span><span class="sp"></span></span>
+        </button>
+        <button class="ck-tile is-done">
+          <span class="ck-tile__t">Org-agent rename + manifest sha256</span>
+          <span class="ck-tile__f"><span class="ck-badge">codenest-app</span><span class="sp"></span></span>
+        </button>
+        <button class="ck-tile is-done">
+          <span class="ck-tile__t">AGPL release checklist</span>
+          <span class="ck-tile__f"><span class="ck-badge">Networa</span><span class="sp"></span></span>
+        </button>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══ TASK DETAIL ═══════════════════════════════════════════════ -->
+<section class="scr" data-scr="task">
+  <div class="ck-split">
+    <div>
+      <div class="ck-card">
+        <div class="ck-chips" style="margin-bottom:var(--space-m)">
+          <span class="ck-badge strong">#224</span>
+          <span class="ck-badge">codenest-app</span>
+          <span class="ck-badge">P1</span>
+          <span class="ck-badge">design</span>
+        </div>
+        <h2 style="font:var(--t-h1);margin:0 0 var(--space-s);letter-spacing:-.2px">Chalk theme — rebuild the component layer</h2>
+        <p style="font:var(--t-body);color:var(--text-2);margin:0 0 var(--space-l);max-width:70ch">
+          Replace the d3-* stylesheets with a token-only chalk layer. Components are rebuilt rather
+          than restyled: the current ones encode gradient, glow and colour-coded state in their
+          markup, so a theme swap alone would leave the noise in place.
+        </p>
+        <div class="ck-chips">
+          <button class="ck-btn filled"><svg width="12" height="12"><use href="#ic-zap"/></svg> Launch session</button>
+          <button class="ck-btn">Move to In progress</button>
+          <button class="ck-btn">Assign</button>
+          <button class="ck-btn ghost">···</button>
+        </div>
+      </div>
+
+      <div class="ck-sec"><span class="ck-kicker">Checklist</span><span class="ck-kicker" style="color:var(--faint)">3 of 7</span></div>
+      <div class="ck-card pad-0">
+        <div class="ck-rows">
+          <div class="ck-row"><span class="ck-mark" style="background:var(--text);border-color:var(--text)"></span><span class="ck-row__b"><span class="ck-row__t" style="color:var(--muted);text-decoration:line-through">Token file — one ground, one signal</span></span></div>
+          <div class="ck-row"><span class="ck-mark" style="background:var(--text);border-color:var(--text)"></span><span class="ck-row__b"><span class="ck-row__t" style="color:var(--muted);text-decoration:line-through">Primitive set — card, row, badge, chip, btn</span></span></div>
+          <div class="ck-row"><span class="ck-mark" style="background:var(--text);border-color:var(--text)"></span><span class="ck-row__b"><span class="ck-row__t" style="color:var(--muted);text-decoration:line-through">Shell — rail, omni, topbar</span></span></div>
+          <div class="ck-row"><span class="ck-mark"></span><span class="ck-row__b"><span class="ck-row__t">Board + tile</span></span></div>
+          <div class="ck-row"><span class="ck-mark"></span><span class="ck-row__b"><span class="ck-row__t">Session pane + composer</span></span></div>
+          <div class="ck-row"><span class="ck-mark"></span><span class="ck-row__b"><span class="ck-row__t">xterm ANSI palette — monochrome ramp</span></span></div>
+          <div class="ck-row"><span class="ck-mark"></span><span class="ck-row__b"><span class="ck-row__t">Delete d3-creative.css</span></span></div>
+        </div>
+      </div>
+
+      <div class="ck-sec"><span class="ck-kicker">Activity</span></div>
+      <div class="ck-card">
+        <div class="ck-time">
+          <div class="ck-time__i"><span class="ck-time__t">14:02</span><span class="ck-time__d"></span><span class="ck-time__x"><em>maks-it</em> moved this to In progress</span></div>
+          <div class="ck-time__i"><span class="ck-time__t">13:10</span><span class="ck-time__d"></span><span class="ck-time__x"><em>MN</em> raised priority to P1</span></div>
+          <div class="ck-time__i"><span class="ck-time__t">11:55</span><span class="ck-time__d"></span><span class="ck-time__x">Promoted from inbox</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="ck-card">
+        <span class="ck-kicker">Properties</span>
+        <div style="margin-top:var(--space-m)">
+          <div class="ck-kv"><span>Status</span><b>In progress</b></div>
+          <div class="ck-kv"><span>Priority</span><b>High</b></div>
+          <div class="ck-kv"><span>Assignee</span><b>maks-it</b></div>
+          <div class="ck-kv"><span>Project</span><b>codenest-app</b></div>
+          <div class="ck-kv"><span>Created</span><b>2026-09-27</b></div>
+          <div class="ck-kv"><span>Blockers</span><b>none</b></div>
+        </div>
+      </div>
+
+      <div class="ck-card" style="margin-top:var(--space-m)">
+        <span class="ck-kicker">Runs</span>
+        <div class="ck-rows" style="margin:var(--space-s) calc(var(--space-l) * -1) calc(var(--space-l) * -1)">
+          <div class="ck-row"><span class="ck-mark live"></span><span class="ck-row__b"><span class="ck-row__t">maks-it · sonnet-5.5</span><span class="ck-row__m">running · 1:48 · $0.31</span></span></div>
+          <div class="ck-row"><span class="ck-mark idle"></span><span class="ck-row__b"><span class="ck-row__t">maks-it · opus-5</span><span class="ck-row__m">ended · 6:22 · $1.90</span></span></div>
+        </div>
+      </div>
+
+      <div class="ck-note" style="margin-top:var(--space-m)">
+        Assigning does not start a session. The agent's saved provider and model become the
+        defaults when you launch this task.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ SESSIONS ══════════════════════════════════════════════════ -->
+<section class="scr" data-scr="terminal">
+  <div style="display:grid;grid-template-columns:210px minmax(0,1fr);gap:var(--space-m);height:calc(100vh - 176px)">
+    <div class="ck-card pad-0" style="display:flex;flex-direction:column;min-height:0">
+      <div style="padding:var(--space-m) var(--space-m) var(--space-s)"><span class="ck-kicker">Workspace</span></div>
+      <div class="ck-tree" style="flex:1 1 auto;overflow-y:auto;padding:0 var(--space-s) var(--space-m)">
+        <button class="on"><svg width="12" height="12"><use href="#ic-chev"/></svg> codenest-app</button>
+        <button class="in1"><svg width="12" height="12"><use href="#ic-projects"/></svg> frontend/src</button>
+        <button class="in2"><svg width="12" height="12"><use href="#ic-docs"/></svg> styles/tokens.css</button>
+        <button class="in2 on"><svg width="12" height="12"><use href="#ic-docs"/></svg> pages/mission-control.tsx</button>
+        <button class="in1"><svg width="12" height="12"><use href="#ic-projects"/></svg> app/services</button>
+        <button class="in1"><svg width="12" height="12"><use href="#ic-docs"/></svg> CLAUDE.md</button>
+        <button><svg width="12" height="12"><use href="#ic-chev"/></svg> miragold</button>
+        <button><svg width="12" height="12"><use href="#ic-chev"/></svg> RAID-2D</button>
+        <button><svg width="12" height="12"><use href="#ic-chev"/></svg> Networa</button>
+      </div>
+      <div style="border-top:1px solid var(--hairline);padding:var(--space-m)">
+        <button class="ck-btn sm" style="width:100%"><svg width="11" height="11"><use href="#ic-plus"/></svg> New pane</button>
+      </div>
+    </div>
+
+    <div class="ck-term">
+      <div class="ck-tabs" style="padding:0 var(--space-s)">
+        <button class="ck-tab on"><span class="ck-mark live" style="width:7px;height:7px"></span> maks-it · agent</button>
+        <button class="ck-tab"><span class="ck-mark live" style="width:7px;height:7px"></span> serhii · agent</button>
+        <button class="ck-tab"><svg width="11" height="11"><use href="#ic-terminal"/></svg> zsh</button>
+        <button class="ck-tab" style="margin-left:auto"><svg width="11" height="11"><use href="#ic-popout"/></svg></button>
+      </div>
+      <div class="ck-term__h">
+        <span class="ck-badge strong">opus-5</span>
+        <span class="ck-badge">codenest-app</span>
+        <span class="ck-badge">14 turns</span>
+        <span class="ck-badge">compacted 1×</span>
+        <span style="margin-left:auto" class="ck-chips">
+          <span class="ck-kicker">$2.14 · 118K ctx</span>
+          <button class="ck-btn sm">Stop</button>
+        </span>
+      </div>
+      <div class="ck-term__b">
+<span class="d">▸ read</span>  frontend/src/styles/tokens.css
+<span class="d">▸ read</span>  frontend/src/styles/d3-creative.css
+<span class="d">▸ grep</span>  "gradient|box-shadow|backdrop-filter" → 104 hits in 13 files
+
+<span class="u">I've mapped every place the old theme asserts itself. Three sources carry
+almost all of it:</span>
+
+  d3-creative.css      9 gradients, 41 shadows, the two background orbs
+  onboarding-page      19 gradients
+  screenshot-ring      13 gradients
+
+<span class="u">The orbs and the grid overlay are drawn by Shell itself, not by a
+stylesheet, so removing them is a change to shell.tsx as well.</span>
+
+<span class="d">▸ edit</span>  frontend/src/components/layout/shell.tsx
+<span class="d">  ⎿</span> removed 3 lines
+
+<span class="d">▸ bash</span> pnpm --filter frontend typecheck
+<span class="d">  ⎿</span> tsc -b --noEmit → 0 errors
+
+<span class="u">Shell is clean. Next is the token file — I'll swap it for the chalk set
+and leave every d3-* rule referencing the old names in place, so the
+first commit is reversible in one revert.</span>
+
+<span class="d">▸ waiting for permission —</span> write frontend/src/styles/tokens.css
+      </div>
+      <div class="ck-term__f">
+        <div class="ck-field" style="height:auto;min-height:40px;align-items:flex-start;padding-top:10px">
+          <span style="color:var(--faint)">Ask, or paste a task…</span>
+        </div>
+        <div class="ck-chips" style="margin-top:var(--space-s)">
+          <button class="ck-chip">@file</button>
+          <button class="ck-chip">/command</button>
+          <button class="ck-chip">Plan mode</button>
+          <span style="margin-left:auto" class="ck-chips">
+            <button class="ck-btn sm">Allow once</button>
+            <button class="ck-btn filled sm">Allow &amp; continue</button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PROJECTS ══════════════════════════════════════════════════ -->
+<section class="scr" data-scr="projects">
+  <div class="ck-head" style="margin-bottom:var(--space-l)">
+    <div class="ck-chips">
+      <div class="ck-field" style="width:260px;height:var(--ctl-m)"><svg width="12" height="12" style="color:var(--faint)"><use href="#ic-search"/></svg><input placeholder="Filter projects" /></div>
+      <button class="ck-chip on">Active</button><button class="ck-chip">All</button>
+    </div>
+    <button class="ck-btn"><svg width="11" height="11"><use href="#ic-plus"/></svg> New project</button>
+  </div>
+
+  <div class="ck-card pad-0">
+    <table class="ck-table">
+      <thead><tr><th style="width:34%">Project</th><th>Stack</th><th>Status</th><th style="text-align:right">Open</th><th style="text-align:right">Sessions 7d</th><th style="text-align:right">Spend 7d</th></tr></thead>
+      <tbody>
+        <tr><td><div class="ck-row__t">codenest-app</div><div class="ck-row__m mono">~/Work/CodeNest/codenest-app</div></td><td class="ck-row__m">Tauri 2 · React · FastAPI</td><td><span class="ck-badge strong">Shipping</span></td><td class="num">19</td><td class="num">41</td><td class="num">$62.10</td></tr>
+        <tr><td><div class="ck-row__t">miragold</div><div class="ck-row__m mono">~/Work/CodeNest/miragold</div></td><td class="ck-row__m">Next.js 14 · Prisma</td><td><span class="ck-badge">Active</span></td><td class="num">7</td><td class="num">18</td><td class="num">$24.80</td></tr>
+        <tr><td><div class="ck-row__t">RAID-2D</div><div class="ck-row__m mono">~/Work/CodeNest/GameDev/RAID-2D</div></td><td class="ck-row__m">Godot 4.4 · C#</td><td><span class="ck-badge">Post-MVP</span></td><td class="num">6</td><td class="num">22</td><td class="num">$31.40</td></tr>
+        <tr><td><div class="ck-row__t">Networa</div><div class="ck-row__m mono">~/Work/CodeNest/Networa</div></td><td class="ck-row__m">FastAPI · HTMX · SQLite</td><td><span class="ck-badge">Stable v1</span></td><td class="num">3</td><td class="num">6</td><td class="num">$4.20</td></tr>
+        <tr><td><div class="ck-row__t">Readiness</div><div class="ck-row__m mono">~/Work/CodeNest/Readiness</div></td><td class="ck-row__m">Python · Click · Claude API</td><td><span class="ck-badge">MVP</span></td><td class="num">2</td><td class="num">3</td><td class="num">$2.90</td></tr>
+        <tr><td><div class="ck-row__t">android-interview-kb</div><div class="ck-row__m mono">~/Work/CodeNest/android-interview-kb</div></td><td class="ck-row__m">Markdown · agents</td><td><span class="ck-badge">33%</span></td><td class="num">2</td><td class="num">9</td><td class="num">$7.60</td></tr>
+        <tr><td><div class="ck-row__t">DailyMotivation</div><div class="ck-row__m mono">~/Work/CodeNest/DailyMotivation</div></td><td class="ck-row__m">Kotlin · Compose · Hilt</td><td><span class="ck-badge">Production</span></td><td class="num">0</td><td class="num">1</td><td class="num">$0.40</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ AGENTS ════════════════════════════════════════════════════ -->
+<section class="scr" data-scr="team">
+  <div class="ck-grid c3">
+    <div class="ck-card">
+      <div class="ck-head" style="align-items:flex-start">
+        <div style="display:flex;gap:var(--space-m);min-width:0">
+          <span class="ck-avatar lg" data-cat="1">MI</span>
+          <div style="min-width:0">
+            <div style="font:var(--t-h3)">maks-it</div>
+            <div class="ck-row__m">IT &amp; Workflow Operations</div>
+          </div>
+        </div>
+        <span class="ck-mark live"></span>
+      </div>
+      <div class="ck-kv"><span>Default model</span><b>sonnet-5.5</b></div>
+      <div class="ck-kv"><span>Sessions 7d</span><b>24</b></div>
+      <div class="ck-kv"><span>Spend 7d</span><b>$18.20</b></div>
+      <div class="ck-chips" style="margin-top:var(--space-m)"><button class="ck-btn sm">Open</button><button class="ck-btn sm">Launch</button></div>
+    </div>
+
+    <div class="ck-card">
+      <div class="ck-head" style="align-items:flex-start">
+        <div style="display:flex;gap:var(--space-m);min-width:0">
+          <span class="ck-avatar lg" data-cat="2">OR</span>
+          <div style="min-width:0">
+            <div style="font:var(--t-h3)">oleg-researcher</div>
+            <div class="ck-row__m">Lead Researcher</div>
+          </div>
+        </div>
+        <span class="ck-mark live"></span>
+      </div>
+      <div class="ck-kv"><span>Default model</span><b>opus-5</b></div>
+      <div class="ck-kv"><span>Sessions 7d</span><b>11</b></div>
+      <div class="ck-kv"><span>Spend 7d</span><b>$34.70</b></div>
+      <div class="ck-chips" style="margin-top:var(--space-m)"><button class="ck-btn sm">Open</button><button class="ck-btn sm">Launch</button></div>
+    </div>
+
+    <div class="ck-card">
+      <div class="ck-head" style="align-items:flex-start">
+        <div style="display:flex;gap:var(--space-m);min-width:0">
+          <span class="ck-avatar lg" data-cat="3">IR</span>
+          <div style="min-width:0">
+            <div style="font:var(--t-h3)">igor-recruiter</div>
+            <div class="ck-row__m">Recruiting &amp; Team Architect</div>
+          </div>
+        </div>
+        <span class="ck-mark idle"></span>
+      </div>
+      <div class="ck-kv"><span>Default model</span><b>opus-5</b></div>
+      <div class="ck-kv"><span>Sessions 7d</span><b>3</b></div>
+      <div class="ck-kv"><span>Spend 7d</span><b>$5.10</b></div>
+      <div class="ck-chips" style="margin-top:var(--space-m)"><button class="ck-btn sm">Open</button><button class="ck-btn sm">Launch</button></div>
+    </div>
+
+    <div class="ck-card">
+      <div class="ck-head" style="align-items:flex-start">
+        <div style="display:flex;gap:var(--space-m);min-width:0">
+          <span class="ck-avatar lg" data-cat="4">SG</span>
+          <div style="min-width:0">
+            <div style="font:var(--t-h3)">serhii-godot-dev</div>
+            <div class="ck-row__m">Godot 4.4 / C# — RAID-2D</div>
+          </div>
+        </div>
+        <span class="ck-mark stall"></span>
+      </div>
+      <div class="ck-kv"><span>Default model</span><b>opus-5</b></div>
+      <div class="ck-kv"><span>Sessions 7d</span><b>22</b></div>
+      <div class="ck-kv"><span>Spend 7d</span><b>$31.40</b></div>
+      <div class="ck-chips" style="margin-top:var(--space-m)"><button class="ck-btn sm">Open</button><button class="ck-btn sm">Launch</button></div>
+    </div>
+
+    <div class="ck-card">
+      <div class="ck-head" style="align-items:flex-start">
+        <div style="display:flex;gap:var(--space-m);min-width:0">
+          <span class="ck-avatar lg" data-cat="5">TA</span>
+          <div style="min-width:0">
+            <div style="font:var(--t-h3)">tanya-android</div>
+            <div class="ck-row__m">Senior Android — DailyMotivation</div>
+          </div>
+        </div>
+        <span class="ck-mark idle"></span>
+      </div>
+      <div class="ck-kv"><span>Default model</span><b>haiku-4.5</b></div>
+      <div class="ck-kv"><span>Sessions 7d</span><b>1</b></div>
+      <div class="ck-kv"><span>Spend 7d</span><b>$0.40</b></div>
+      <div class="ck-chips" style="margin-top:var(--space-m)"><button class="ck-btn sm">Open</button><button class="ck-btn sm">Launch</button></div>
+    </div>
+
+    <button class="ck-card" style="border-style:dashed;display:grid;place-items:center;min-height:180px;color:var(--muted)">
+      <span style="display:grid;justify-items:center;gap:var(--space-s)">
+        <svg width="18" height="18"><use href="#ic-plus"/></svg>
+        <span class="ck-kicker">Recruit an agent</span>
+      </span>
+    </button>
+  </div>
+</section>
+
+<!-- ═══ DESIGN SYSTEM ═════════════════════════════════════════════ -->
+<section class="scr" data-scr="system">
+  <div class="ck-grid c2">
+    <div class="ck-card">
+      <span class="ck-kicker">The four rules</span>
+      <div style="margin-top:var(--space-m);display:grid;gap:var(--space-m)">
+        <div><div style="font:var(--t-h3)">1 · Borders, never fills</div><div class="ck-sub">On the board a surface is drawn by its outline. On paper an outline alone reads as a wireframe, so the card carries a tint there and the border steps back.</div></div>
+        <div><div style="font:var(--t-h3)">2 · One ground</div><div class="ck-sub">No shadow, no gradient, no blur, no glow. Depth is expressed by hairlines and spacing.</div></div>
+        <div><div style="font:var(--t-h3)">3 · Mono carries fact</div><div class="ck-sub">Numbers, ids, paths, models and time are mono. Prose is sans. You can tell data from label at a glance.</div></div>
+        <div><div style="font:var(--t-h3)">4 · Colour answers one question</div><div class="ck-sub">Colour means exactly one thing: how much this wants you. Five steps, reused on every surface. Everything else — projects, agents, models, paths, counts — stays mono.</div></div>
+      </div>
+    </div>
+
+    <div class="ck-card">
+      <span class="ck-kicker">Ink ramp</span>
+      <div style="margin-top:var(--space-m);display:grid;gap:1px;border:1px solid var(--outline);border-radius:var(--r-field);overflow:hidden">
+        <div style="background:var(--ground);padding:9px 12px;font:var(--n-s)">--ground</div>
+        <div style="background:var(--raised);padding:9px 12px;font:var(--n-s)">--raised</div>
+        <div style="background:var(--raised-high);padding:9px 12px;font:var(--n-s)">--raised-high</div>
+        <div style="background:var(--hairline);padding:9px 12px;font:var(--n-s)">--hairline</div>
+        <div style="background:var(--outline);padding:9px 12px;font:var(--n-s)">--outline</div>
+        <div style="background:var(--outline-strong);padding:9px 12px;font:var(--n-s)">--outline-strong</div>
+      </div>
+      <div style="margin-top:var(--space-m);display:flex;gap:var(--space-m);flex-wrap:wrap">
+        <span style="font:var(--n-s);color:var(--text)">--text</span>
+        <span style="font:var(--n-s);color:var(--text-2)">--text-2</span>
+        <span style="font:var(--n-s);color:var(--dim)">--dim</span>
+        <span style="font:var(--n-s);color:var(--muted)">--muted</span>
+        <span style="font:var(--n-s);color:var(--faint)">--faint</span>
+        <span style="font:var(--n-s);color:var(--u-critical)">--u-critical</span>
+        <span style="font:var(--n-s);color:var(--u-active)">--u-active</span>
+        <span style="font:var(--n-s);color:var(--u-normal)">--u-normal</span>
+        <span style="font:var(--n-s);color:var(--u-done)">--u-done</span>
+      </div>
+      <div class="ck-note" style="margin-top:var(--space-m)">
+        Eleven greys and a five-step ramp. The current theme carries 24 named colours plus 218
+        hardcoded hex literals and 556 rgba() calls across the stylesheets — and no rule
+        saying what any of them mean.
+      </div>
+    </div>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker">Type</span></div>
+  <div class="ck-card">
+    <div style="display:grid;gap:var(--space-m)">
+      <div><span class="ck-kicker" style="display:block;margin-bottom:4px">--n-hero · mono</span><span style="font:var(--n-hero);letter-spacing:-2px">$27.60</span></div>
+      <div><span class="ck-kicker" style="display:block;margin-bottom:4px">--t-h1 · sans</span><span style="font:var(--t-h1)">Mission Control</span></div>
+      <div><span class="ck-kicker" style="display:block;margin-bottom:4px">--t-h2 · sans</span><span style="font:var(--t-h2)">What is waiting on a human</span></div>
+      <div><span class="ck-kicker" style="display:block;margin-bottom:4px">--t-body · sans</span><span style="font:var(--t-body)">Every box below the Needs You panel is an existing component mounted as-is.</span></div>
+      <div><span class="ck-kicker" style="display:block;margin-bottom:4px">--n-m · mono</span><span style="font:var(--n-m)">4f2a · opus-5 · 118K ctx · 14:02</span></div>
+      <div><span class="ck-kicker" style="display:block;margin-bottom:4px">--t-kicker · mono, uppercase</span><span class="ck-kicker">Needs you · 4 open</span></div>
+    </div>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker">Controls</span></div>
+  <div class="ck-grid c2">
+    <div class="ck-card">
+      <span class="ck-kicker">Buttons &amp; segments</span>
+      <div class="ck-chips" style="margin-top:var(--space-m)">
+        <button class="ck-btn filled">Primary</button>
+        <button class="ck-btn">Default</button>
+        <button class="ck-btn ghost">Ghost</button>
+        <button class="ck-btn sm">Small</button>
+        <button class="ck-btn pill">Pill</button>
+      </div>
+      <div class="ck-chips" style="margin-top:var(--space-m)">
+        <div class="ck-seg"><button class="on">Board</button><button>Table</button><button>By project</button></div>
+      </div>
+      <div class="ck-chips" style="margin-top:var(--space-m)">
+        <button class="ck-chip on">Selected</button><button class="ck-chip">Filter</button><button class="ck-chip">Label</button>
+      </div>
+      <div class="ck-chips" style="margin-top:var(--space-m)">
+        <span class="ck-badge">default</span><span class="ck-badge strong">strong</span><span class="ck-badge solid">solid</span><span class="ck-badge signal">signal</span>
+      </div>
+      <div style="margin-top:var(--space-l)">
+        <span class="ck-lab">Field</span>
+        <div class="ck-field"><svg width="12" height="12" style="color:var(--faint)"><use href="#ic-search"/></svg><input placeholder="Filter projects" /></div>
+      </div>
+      <div style="margin-top:var(--space-m)">
+        <div class="ck-switchrow"><span>Show resolved items</span><span class="ck-switch on"></span></div>
+        <div class="ck-switchrow"><span>Notify on blocking</span><span class="ck-switch"></span></div>
+        <div class="ck-switchrow is-disabled"><span>Tray badge <span class="ck-sub">· needs the hooks lane</span></span><span class="ck-switch is-disabled"></span></div>
+      </div>
+      <hr class="ck-rule" style="margin:var(--space-l) 0" />
+      <span class="ck-kicker">Disabled</span>
+      <div class="ck-sub" style="margin-top:6px">With no fills, a dead control and a ghost button are the same picture. Disabled is stated: ink drops to <span class="mono">--faint</span>, the border goes to hairline, a filled button surrenders its fill, and nothing answers the pointer.</div>
+      <div class="ck-chips" style="margin-top:var(--space-m)">
+        <button class="ck-btn filled" disabled>Launch session</button>
+        <button class="ck-btn" disabled>Move to Done</button>
+        <button class="ck-btn ghost" disabled>Assign</button>
+        <button class="ck-chip" disabled>Label</button>
+      </div>
+    </div>
+
+    <div class="ck-card">
+      <span class="ck-kicker">The ramp</span>
+      <div class="ck-sub" style="margin-top:6px">Chalk's own semantic file says its accent is “waiting on you, at most once per screen” and its negative is “<b>never alarming</b>”. So the top of this ramp is a clay, not a red — it is the colour of something unfinished, not of an error dialog.</div>
+      <div style="margin-top:var(--space-m);display:grid;gap:var(--space-s)">
+        <div style="display:flex;align-items:center;gap:var(--space-m)"><span class="ck-mark block"></span><span class="ck-badge" data-u="critical">P1</span><div><div style="font:var(--t-body)">Critical</div><div class="ck-sub">blocking · P1 · failed run · over budget</div></div></div>
+        <div style="display:flex;align-items:center;gap:var(--space-m)"><span class="ck-mark stall"></span><span class="ck-badge" data-u="active">P2</span><div><div style="font:var(--t-body)">Active</div><div class="ck-sub">stalled · P2 · in progress · running hot</div></div></div>
+        <div style="display:flex;align-items:center;gap:var(--space-m)"><span class="ck-mark queue"></span><span class="ck-badge" data-u="normal">P3</span><div><div style="font:var(--t-body)">Normal</div><div class="ck-sub">queued · P3 · to do · healthy</div></div></div>
+        <div style="display:flex;align-items:center;gap:var(--space-m)"><span class="ck-mark ok"></span><span class="ck-badge" data-u="done">OK</span><div><div style="font:var(--t-body)">Done</div><div class="ck-sub">resolved · done · passed</div></div></div>
+        <div style="display:flex;align-items:center;gap:var(--space-m)"><span class="ck-mark idle"></span><span class="ck-badge" data-u="inert">—</span><div><div style="font:var(--t-body)">Inert</div><div class="ck-sub">backlog · idle · muted · unmeasured</div></div></div>
+      </div>
+      <div class="ck-note" style="margin-top:var(--space-m)">
+        Shape carries the same information as colour — filled square, half, ring, dot —
+        so <b>None</b> is not a degraded mode, it is the same app with the reinforcement
+        removed. That is the test: if Minimal does not beat None on the Work Board, the
+        ramp has not earned its place.
+      </div>
+
+      <hr class="ck-rule" style="margin:var(--space-l) 0" />
+      <span class="ck-kicker">Where colour is not allowed</span>
+      <div class="ck-sub" style="margin-top:6px">The old theme put six hues on every card, so colour stopped carrying information. The ramp is protected by a spend limit: it appears on a <b>mark</b>, a <b>badge</b>, a <b>column head rule</b>, and the <b>left edge of a P1 tile</b>. Nothing else. No card background, no chart series, no project badge, no avatar — those take <span class="mono">--cat-*</span> only in Full, and Full is offered so you can see that it is worse.</div>
+
+      <hr class="ck-rule" style="margin:var(--space-l) 0" />
+      <span class="ck-kicker">Board columns</span>
+      <div class="ck-sub" style="margin-top:6px">An earlier draft ranked the columns by rule weight. That was a code you had to learn, and colour-coded columns beat it. These are conventions you already have: <b>dashed</b> is provisional, the <b>live dot</b> is the same one the session rows use, <b>--u-critical</b> means blocked everywhere in the app, and <b>Done recedes</b> — finished work takes less ink. Hover it to bring it back.</div>
+      <div style="display:grid;grid-auto-flow:column;gap:8px;margin-top:var(--space-m)">
+        <div class="ck-col" data-col="idea"><div class="ck-col__h"><span class="ck-kicker">Idea</span></div></div>
+        <div class="ck-col" data-col="todo"><div class="ck-col__h"><span class="ck-kicker">To do</span></div></div>
+        <div class="ck-col" data-col="doing"><div class="ck-col__h"><span class="ck-mark live" style="width:7px;height:7px"></span><span class="ck-kicker">Doing</span></div></div>
+        <div class="ck-col" data-col="blocked"><div class="ck-col__h"><span class="ck-mark block" style="width:7px;height:7px"></span><span class="ck-kicker">Blocked</span></div></div>
+        <div class="ck-col" data-col="done"><div class="ck-col__h"><span class="ck-kicker">Done</span></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PLAN ══════════════════════════════════════════════════════ -->
+<section class="scr" data-scr="plan">
+  <div class="ck-grid c4">
+    <div class="ck-card ck-stat"><span class="l">CSS modules</span><span class="v">56</span><span class="sub">12,857 lines</span></div>
+    <div class="ck-card ck-stat"><span class="l">Hardcoded colours</span><span class="v">774</span><span class="sub">218 hex · 556 rgba()</span></div>
+    <div class="ck-card ck-stat"><span class="l">Noise rules</span><span class="v">202</span><span class="sub">104 gradient · 74 shadow · 24 blur</span></div>
+    <div class="ck-card ck-stat"><span class="l">Components</span><span class="v">130</span><span class="sub">76 carry inline style=</span></div>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker">Why restyling is not enough</span></div>
+  <div class="ck-card">
+    <p style="font:var(--t-body);color:var(--text-2);margin:0;max-width:78ch">
+      The brightness is not only in the token file. <span class="mono">Shell</span> paints two 520px
+      radial orbs and a grid overlay in its own JSX; <span class="mono">kpi-tile</span> owns a corner
+      glow; the sidebar avatar is a blue-to-violet gradient written inline; the kanban reads its
+      column colours from the sidecar's <span class="mono">status_colors</span> map. Swapping
+      <span class="mono">tokens.css</span> would leave every one of those in place. That is the
+      argument for rebuilding the primitives rather than repainting them — and the reason the
+      prototype's CSS is 314 lines against the current 12,857.
+    </p>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker">Phases</span><span class="ck-kicker" style="color:var(--faint)">each one ships on its own</span></div>
+  <div class="ck-card pad-0">
+    <table class="ck-table">
+      <thead><tr><th style="width:26px"></th><th>Phase</th><th>What lands</th><th style="text-align:right">Size</th><th style="text-align:right">Risk</th></tr></thead>
+      <tbody>
+        <tr><td class="num">0</td><td><div class="ck-row__t">Approve the look</div><div class="ck-sub">this prototype · pick the colour amount and the density</div></td><td class="ck-row__m">Nothing in the app changes</td><td class="num">—</td><td class="num">—</td></tr>
+        <tr><td class="num">1</td><td><div class="ck-row__t">Land the token file</div><div class="ck-row__m">chalk tokens.css + chalk.css into src/styles</div></td><td class="ck-row__m">Both themes exist side by side, nothing consumes chalk yet</td><td class="num">S</td><td class="num">low</td></tr>
+        <tr><td class="num">2</td><td><div class="ck-row__t">Strip the noise</div><div class="ck-row__m">orbs, grid, glows, gradients, backdrop-filter</div></td><td class="ck-row__m">The app goes quiet on the old palette — visible win, fully revertible</td><td class="num">S</td><td class="num">low</td></tr>
+        <tr><td class="num">3</td><td><div class="ck-row__t">Rebuild the shell</div><div class="ck-row__m">rail · omni · topbar · page frame</div></td><td class="ck-row__m">Every page sits inside chalk chrome; page bodies still old</td><td class="num">M</td><td class="num">low</td></tr>
+        <tr><td class="num">4</td><td><div class="ck-row__t">Rebuild the primitives</div><div class="ck-row__m">card · row · badge · chip · btn · field · table · mark</div></td><td class="ck-row__m">One import replaces 56 module stylesheets as pages migrate</td><td class="num">L</td><td class="num">med</td></tr>
+        <tr><td class="num">5</td><td><div class="ck-row__t">Migrate the five that matter</div><div class="ck-row__m">Mission Control · Needs You · Work Board · Task Detail · Sessions</div></td><td class="ck-row__m">The app you actually use is chalk end to end</td><td class="num">L</td><td class="num">med</td></tr>
+        <tr><td class="num">6</td><td><div class="ck-row__t">Migrate the long tail</div><div class="ck-row__m">Projects · Agents · Settings · the 30 gated pages</div></td><td class="ck-row__m">One page per commit, no coordination needed</td><td class="num">L</td><td class="num">low</td></tr>
+        <tr><td class="num">7</td><td><div class="ck-row__t">Delete the old theme</div><div class="ck-row__m">d3-*.css, the module files, the ANSI palette</div></td><td class="ck-row__m">−12,857 lines · the redesign is irreversible only here</td><td class="num">M</td><td class="num">low</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker">Decisions that want your answer</span></div>
+  <div class="ck-grid c2">
+    <div class="ck-card">
+      <div style="font:var(--t-h3);margin-bottom:6px">How much colour?</div>
+      <div class="ck-sub"><b>Minimal</b> is the recommendation — the five-step ramp and nothing else. <b>None</b> is the control: shape carries the same information, so if Minimal does not beat None on the Work Board the ramp has not earned its place. <b>Full</b> adds identity hues to project and agent marks, and is mostly there to show that a second colour system undoes the first.</div>
+    </div>
+    <div class="ck-card">
+      <div style="font:var(--t-h3);margin-bottom:6px">Manrope or Inter Tight?</div>
+      <div class="ck-sub">The prototype uses Manrope, which is what the original Chalk uses — adopting it makes the two products visibly one house. Inter Tight is what the app loads today and costs nothing to keep.</div>
+    </div>
+    <div class="ck-card">
+      <div style="font:var(--t-h3);margin-bottom:6px">Light mode: ship or defer?</div>
+      <div class="ck-sub">The token file carries paper as well as board and the prototype switches cleanly, but nothing in the app reads a theme attribute today — there is no switch, no persistence, no xterm re-theme. That is its own small phase.</div>
+    </div>
+    <div class="ck-card">
+      <div style="font:var(--t-h3);margin-bottom:6px">Which density ships as default?</div>
+      <div class="ck-sub">Outline cards need more padding to separate than filled ones, so comfortable costs roughly a third of a screen against today's theme. Compact buys it back. Toggle it on the Work Board — if compact is what you actually want, it should be the default rather than a setting.</div>
+    </div>
+    <div class="ck-card">
+      <div style="font:var(--t-h3);margin-bottom:6px">Sidecar status colours</div>
+      <div class="ck-sub">The board's column colours come from the DB's <span class="mono">status_colors</span> map — arbitrary per-row hex the ramp cannot honour. Either the frontend stops reading that field and maps each status to a ramp step, or the seed rows are rewritten to the ramp's five values.</div>
+    </div>
+  </div>
+
+  <div class="ck-sec"><span class="ck-kicker">What this prototype is not</span></div>
+  <div class="ck-note">
+    Static markup with invented numbers. No routing, no data, no drag, no virtualisation, no
+    xterm. The two stylesheets beside it — <span class="mono">tokens.css</span> and
+    <span class="mono">chalk.css</span> — are the real deliverable: they are written to be copied
+    into <span class="mono">frontend/src/styles/</span> unchanged.
+  </div>
+</section>
+
+<!-- ═══ STUB ══════════════════════════════════════════════════════ -->
+<section class="scr" data-scr="stub">
+  <div class="ck-card">
+    <div class="ck-empty">
+      <div class="ck-empty__t" id="stubTitle">Not in this prototype</div>
+      <div class="ck-empty__l">
+        This page exists in the app and keeps its route, its data and its behaviour. It is not
+        drawn here because the five screens that carry the redesign argument are Mission Control,
+        Needs You, the Work Board, Task Detail and Sessions — and a prototype that draws
+        thirty-eight screens is a prototype nobody reads to the end.
+      </div>
+      <div class="ck-empty__l">Phase 6 in the plan migrates it, one page per commit.</div>
+      <div class="ck-chips" style="margin-top:var(--space-m)">
+        <button class="ck-btn" data-go="plan">Read the plan</button>
+        <button class="ck-btn ghost" data-go="system">Design system</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+    </div><!-- /ck-page -->
+  </main>
+</div>
+
+<div class="pv">
+  <span class="lbl">Theme</span>
+  <div class="ck-seg" style="height:var(--ctl-s)"><button id="tDark" class="on">Board</button><button id="tLight">Paper</button></div>
+  <span class="lbl">Colour</span>
+  <div class="ck-seg" style="height:var(--ctl-s)"><button id="cFull">Full</button><button id="cMin" class="on">Minimal</button><button id="cNone">None</button></div>
+  <span class="lbl">Density</span>
+  <div class="ck-seg" style="height:var(--ctl-s)"><button id="dCom" class="on">Comfortable</button><button id="dCmp">Compact</button></div>
+</div>
+
+<script>
+const NAV = [
+  { id: "attention", label: "Attention", open: true, items: [
+    { slug: "mission",  label: "Mission Control", icon: "dashboard", scr: "mission", crumb: "Attention" },
+    { slug: "attention",label: "Needs You",       icon: "review",    scr: "attention", crumb: "Attention", count: 4, signal: true },
+    { slug: "tasks",    label: "Work Board",      icon: "tasks",     scr: "tasks", crumb: "Attention", count: 37 },
+  ]},
+  { id: "record", label: "Record", open: true, items: [
+    { slug: "projects",      label: "Projects",      icon: "projects", scr: "projects", crumb: "Record" },
+    { slug: "notifications", label: "Notifications", icon: "bell",     crumb: "Record", count: 2 },
+  ]},
+  { id: "agents", label: "Agents", open: true, items: [
+    { slug: "command",   label: "Command",       icon: "command",   crumb: "Agents" },
+    { slug: "team",      label: "Agents",        icon: "team",      scr: "team", crumb: "Agents" },
+    { slug: "schedules", label: "Schedules",     icon: "schedules", crumb: "Agents" },
+    { slug: "terminal",  label: "Run a session", icon: "terminal",  scr: "terminal", crumb: "Agents", count: 3 },
+  ]},
+  { id: "knowledge", label: "Knowledge", open: false, items: [
+    { slug: "docs",        label: "Knowledge", icon: "docs",        crumb: "Knowledge" },
+    { slug: "library",     label: "Snippets",  icon: "library",     crumb: "Knowledge" },
+    { slug: "marketplace", label: "Gallery",   icon: "marketplace", crumb: "Knowledge" },
+    { slug: "feed",        label: "Feed",      icon: "feed",        crumb: "Knowledge" },
+  ]},
+  { id: "tools", label: "Tools", open: false, items: [
+    { slug: "preview", label: "Preview", icon: "preview", crumb: "Tools" },
+  ]},
+  { id: "system", label: "System", open: false, items: [
+    { slug: "mcp",          label: "MCP",          icon: "mcp",         crumb: "System" },
+    { slug: "integrations", label: "Integrations", icon: "integration", crumb: "System" },
+    { slug: "plugins",      label: "Plugins",      icon: "plugin",      crumb: "System" },
+    { slug: "hooks",        label: "Hooks",        icon: "zap",         crumb: "System" },
+    { slug: "latency",      label: "Latency",      icon: "sprint",      crumb: "System" },
+    { slug: "sync",         label: "Sync",         icon: "sync",        crumb: "System" },
+    { slug: "budgets",      label: "Budgets",      icon: "budget",      crumb: "System" },
+    { slug: "settings",     label: "Settings",     icon: "settings",    crumb: "System" },
+  ]},
+  { id: "proto", label: "Prototype", open: true, items: [
+    { slug: "system-ds", label: "Design system", icon: "marketplace", scr: "system", crumb: "Prototype" },
+    { slug: "plan",      label: "Redesign plan", icon: "docs",        scr: "plan",   crumb: "Prototype" },
+  ]},
+];
+
+const TITLES = { task: ["Attention", "Chalk theme — rebuild the component layer"] };
+
+const nav = document.getElementById("nav");
+const bySlug = {};
+
+for (const g of NAV) {
+  const el = document.createElement("div");
+  el.className = "ck-group" + (g.open ? " is-open" : "");
+  const head = document.createElement("button");
+  head.className = "ck-group__head";
+  head.innerHTML = '<svg width="10" height="10"><use href="#ic-chev"/></svg><span>' + g.label + "</span>";
+  head.onclick = () => el.classList.toggle("is-open");
+  const box = document.createElement("div");
+  box.className = "ck-group__items";
+  for (const it of g.items) {
+    const b = document.createElement("button");
+    b.className = "ck-nav";
+    b.innerHTML =
+      '<svg width="14" height="14"><use href="#ic-' + it.icon + '"/></svg><span>' + it.label + "</span>" +
+      (it.count ? '<span class="ck-nav__count' + (it.signal ? " is-signal" : "") + '">' + it.count + "</span>" : "");
+    b.onclick = () => show(it.scr || "stub", it);
+    bySlug[it.slug] = b;
+    box.appendChild(b);
+  }
+  el.append(head, box);
+  nav.appendChild(el);
+}
+
+const page = document.getElementById("page");
+function show(scr, it) {
+  for (const s of document.querySelectorAll(".scr")) s.classList.toggle("on", s.dataset.scr === scr);
+  for (const b of document.querySelectorAll(".ck-nav")) b.classList.remove("is-active");
+  if (it) {
+    bySlug[it.slug]?.classList.add("is-active");
+    document.getElementById("crumb").textContent = it.crumb + " ·";
+    document.getElementById("title").textContent = it.label;
+    document.getElementById("stubTitle").textContent = it.label + " — not in this prototype";
+    bySlug[it.slug]?.closest(".ck-group")?.classList.add("is-open");
+  } else if (TITLES[scr]) {
+    document.getElementById("crumb").textContent = TITLES[scr][0] + " ·";
+    document.getElementById("title").textContent = TITLES[scr][1];
+  }
+  const acts = document.getElementById("acts");
+  acts.innerHTML =
+    scr === "tasks" ? '<button class="ck-btn"><svg width="11" height="11"><use href="#ic-plus"/></svg> New task</button>'
+    : scr === "projects" ? ""
+    : scr === "terminal" ? '<button class="ck-btn ghost"><svg width="12" height="12"><use href="#ic-popout"/></svg></button><button class="ck-btn"><svg width="11" height="11"><use href="#ic-plus"/></svg> New pane</button>'
+    : scr === "task" ? '<button class="ck-btn ghost" data-go="tasks">Back to board</button>'
+    : "";
+  bindGo(acts);
+  page.scrollTop = 0;
+}
+
+function bindGo(root) {
+  for (const b of root.querySelectorAll("[data-go]")) {
+    b.onclick = () => {
+      const target = b.dataset.go;
+      const it = NAV.flatMap((g) => g.items).find((x) => x.scr === target);
+      show(target, it);
+    };
+  }
+}
+bindGo(document);
+for (const t of document.querySelectorAll('[data-go="task"]')) t.onclick = () => show("task", null);
+
+const root = document.documentElement;
+const on = (id, fn) => (document.getElementById(id).onclick = fn);
+const seg = (a, b) => { document.getElementById(a).classList.add("on"); document.getElementById(b).classList.remove("on"); };
+on("tDark", () => { root.dataset.theme = "dark"; seg("tDark", "tLight"); });
+on("tLight", () => { root.dataset.theme = "light"; seg("tLight", "tDark"); });
+const colour = (mode, id) => () => {
+  root.dataset.colour = mode;
+  for (const x of ["cFull", "cMin", "cNone"]) document.getElementById(x).classList.toggle("on", x === id);
+};
+on("cFull", colour("full", "cFull"));
+on("cMin", colour("minimal", "cMin"));
+on("cNone", colour("none", "cNone"));
+on("dCom", () => { root.dataset.density = "comfortable"; seg("dCom", "dCmp"); });
+on("dCmp", () => { root.dataset.density = "compact"; seg("dCmp", "dCom"); });
+
+show("mission", NAV[0].items[0]);
+</script>
+</body>
+</html>

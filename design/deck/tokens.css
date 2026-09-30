@@ -1,0 +1,108 @@
+/* Deck — tokens.
+   A supervision console, not a dashboard. Everything here serves one job:
+   reading forty parallel things at a glance and knowing which one wants you. */
+
+:root {
+  /* Mono is the structural face: labels, ids, paths, states, times, values.
+     Sans appears only in long-form prose, and there is very little of it. */
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: "Inter Tight", system-ui, -apple-system, sans-serif;
+
+  --fs: 13px;          /* the grid's one size */
+  --fs-s: 12px;
+  --fs-xs: 11px;
+  --lh: 18px;
+  --row: 30px;         /* one line, everywhere */
+  --row-lg: 36px;
+
+  --u: 4px;
+  --u2: 8px;
+  --u3: 12px;
+  --u4: 16px;
+  --u6: 24px;
+  --u8: 32px;
+  --gut: 22px;
+  --page-max: 1200px;
+  --group-gap: 38px;
+
+  /* The ground. Four steps and no more: a console that needs five levels of
+     elevation is a console that has stopped being scannable. */
+  --bg: #0c0d0e;
+  --bg-1: #121315;
+  --bg-2: #17181b;
+  --line: #212327;
+  --line-2: #2e3136;
+
+  --fg: #e6e7e9;
+  --fg-2: #a8abaf;
+  --fg-3: #7f8388;
+  --fg-4: #6b6f74;
+
+  /* Terminal semantics, muted. These are the conventions already being read
+     all day in the pane next door, so they cost nothing to learn: red is
+     broken, amber wants you, green finished, blue is live. */
+  --err: #e0706a;
+  --warn: #d9a441;
+  --ok: #6fb98a;
+  --run: #6fa3c4;
+
+  --err-bg: rgba(224, 112, 106, 0.13);
+  --warn-bg: rgba(217, 164, 65, 0.13);
+  --ok-bg: rgba(111, 185, 138, 0.13);
+  --run-bg: rgba(111, 163, 196, 0.13);
+
+  --sel: rgba(255, 255, 255, 0.045);
+  --sel-2: rgba(255, 255, 255, 0.09);
+
+  /* The one thing no dashboard does: mark where you stopped reading. */
+  --mark: #d9a441;
+}
+
+[data-theme="light"] {
+  --bg: #fbfbfa;
+  --bg-1: #f4f4f2;
+  --bg-2: #eeeeec;
+  --line: #e2e2de;
+  --line-2: #cfcfc9;
+
+  --fg: #141516;
+  --fg-2: #4a4d51;
+  --fg-3: #696d72;
+  --fg-4: #8b8f94;
+
+  --err: #b23b34;
+  --warn: #8a6412;
+  --ok: #2c7a52;
+  --run: #2b6584;
+
+  --err-bg: rgba(178, 59, 52, 0.09);
+  --warn-bg: rgba(138, 100, 18, 0.09);
+  --ok-bg: rgba(44, 122, 82, 0.09);
+  --run-bg: rgba(43, 101, 132, 0.09);
+
+  --sel: rgba(0, 0, 0, 0.04);
+  --sel-2: rgba(0, 0, 0, 0.08);
+
+  --mark: #8a6412;
+}
+
+/* Strict monochrome, for checking that the glyph column is doing the work on
+   its own. If a state cannot be told apart here, the glyph is wrong — colour
+   is not allowed to be the only carrier. */
+[data-colour="off"] {
+  --err: var(--fg);
+  --warn: var(--fg);
+  --ok: var(--fg-3);
+  --run: var(--fg-2);
+  --err-bg: var(--sel-2);
+  --warn-bg: var(--sel);
+  --ok-bg: var(--sel);
+  --run-bg: var(--sel);
+  --mark: var(--fg-3);
+}
+
+[data-density="loose"] {
+  --row: 34px;
+  --row-lg: 40px;
+  --gut: 24px;
+}

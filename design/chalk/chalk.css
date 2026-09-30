@@ -1,0 +1,361 @@
+/* Chalk components. Built only on tokens.css.
+   Rules the whole system obeys:
+     1. Borders, not fills. On the board a surface is drawn by its outline.
+        On paper an outline alone reads as a wireframe, so --card-bg carries a
+        tint there and the border steps back. One rule, two grounds.
+     2. One ground. No shadow, no gradient, no blur, no glow.
+     3. Numbers, ids, paths and time are mono. Prose is sans.
+     4. Colour means one thing: how much this wants you. */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--ground);
+  color: var(--text);
+  font: var(--t-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; padding: 0; }
+a { color: inherit; }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--outline); border: 3px solid var(--ground); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--outline-strong); }
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.tnum { font-variant-numeric: tabular-nums; }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Shell ──────────────────────────────────────────────────────────── */
+
+.ck-app { display: grid; grid-template-columns: 216px 1fr; height: 100vh; overflow: hidden; }
+
+.ck-rail {
+  display: flex; flex-direction: column; min-height: 0;
+  border-right: 1px solid var(--hairline); background: var(--ground);
+}
+.ck-rail__brand {
+  display: flex; align-items: center; gap: var(--space-s);
+  height: 44px; padding: 0 var(--space-l); border-bottom: 1px solid var(--hairline); flex: none;
+}
+.ck-rail__mark {
+  width: 18px; height: 18px; border: 1.5px solid var(--text); border-radius: 3px;
+  display: grid; place-items: center; font: 700 9px/1 var(--mono); flex: none;
+}
+.ck-rail__name { font: var(--t-h3); letter-spacing: .2px; }
+.ck-rail__nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-m) var(--space-s); }
+.ck-rail__foot { flex: none; border-top: 1px solid var(--hairline); padding: var(--space-m) var(--space-l); }
+
+.ck-group { margin-bottom: var(--space-m); }
+.ck-group__head {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 4px var(--space-s) 6px; font: var(--t-kicker);
+  letter-spacing: var(--ls-kicker); text-transform: uppercase; color: var(--faint);
+}
+.ck-group__head svg { transition: transform .12s ease; }
+.ck-group.is-open .ck-group__head svg { transform: rotate(90deg); }
+.ck-group__items { display: none; }
+.ck-group.is-open .ck-group__items { display: block; }
+
+.ck-nav {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  height: var(--ctl-m); padding: 0 var(--space-s); border-radius: var(--r-field);
+  font: var(--t-body); color: var(--dim); text-align: left;
+  border-left: 2px solid transparent;
+}
+.ck-nav:not(:disabled):hover { background: var(--sel); color: var(--text-2); }
+.ck-nav svg { flex: none; opacity: .75; }
+.ck-nav span { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-nav.is-active { color: var(--text); background: var(--sel); border-left-color: var(--text); border-radius: 0 var(--r-field) var(--r-field) 0; }
+.ck-nav.is-active svg { opacity: 1; }
+.ck-nav__count {
+  flex: none; font: var(--n-xs); color: var(--dim);
+  border: 1px solid var(--outline); border-radius: var(--r-badge); padding: 0 5px; min-width: 18px; text-align: center;
+}
+.ck-nav__count.is-signal { color: var(--signal); border-color: var(--signal); }
+
+.ck-meter { display: grid; gap: 5px; }
+.ck-meter__row { display: flex; justify-content: space-between; align-items: baseline; font: var(--t-kicker); letter-spacing: .6px; color: var(--muted); }
+.ck-meter__row b { font: var(--n-s); color: var(--text-2); font-weight: 500; }
+.ck-meter__bar { height: 3px; background: var(--hairline); border-radius: 99px; overflow: hidden; }
+.ck-meter__bar i { display: block; height: 100%; background: var(--text-2); }
+.ck-meter__bar.is-hot i { background: var(--u-active); }
+.ck-meter__bar.is-over i { background: var(--u-critical); }
+
+.ck-user { display: flex; align-items: center; gap: var(--space-s); margin-top: var(--space-m); }
+.ck-avatar {
+  width: 26px; height: 26px; border-radius: var(--r-badge); flex: none;
+  display: grid; place-items: center; border: 1px solid var(--outline);
+  font: var(--n-xs); color: var(--text-2); text-transform: uppercase;
+}
+.ck-avatar.lg { width: 34px; height: 34px; font: var(--n-s); }
+.ck-avatar[data-cat="1"] { color: var(--cat-1); border-color: var(--cat-1); }
+.ck-avatar[data-cat="2"] { color: var(--cat-2); border-color: var(--cat-2); }
+.ck-avatar[data-cat="3"] { color: var(--cat-3); border-color: var(--cat-3); }
+.ck-avatar[data-cat="4"] { color: var(--cat-4); border-color: var(--cat-4); }
+.ck-avatar[data-cat="5"] { color: var(--cat-5); border-color: var(--cat-5); }
+.ck-user__n { font: var(--t-small); }
+.ck-user__r { font: var(--t-kicker); letter-spacing: .6px; color: var(--muted); text-transform: uppercase; }
+
+.ck-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ground); }
+
+.ck-omni {
+  display: flex; align-items: center; gap: var(--space-s); flex: none;
+  height: 44px; padding: 0 var(--gutter); border-bottom: 1px solid var(--hairline);
+}
+.ck-omni__in {
+  flex: 1 1 auto; display: flex; align-items: center; gap: var(--space-s);
+  height: var(--ctl-m); padding: 0 var(--space-m); border: 1px solid var(--outline);
+  border-radius: var(--r-field); color: var(--muted); font: var(--t-small); min-width: 0;
+}
+.ck-omni__in kbd {
+  margin-left: auto; font: var(--n-xs); border: 1px solid var(--hairline);
+  border-radius: 3px; padding: 1px 4px; color: var(--faint);
+}
+
+.ck-top { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-l); flex: none; padding: var(--space-l) var(--gutter) var(--space-m); }
+.ck-top__crumb { font: var(--t-kicker); letter-spacing: var(--ls-kicker); text-transform: uppercase; color: var(--faint); }
+.ck-top__title { font: var(--t-h1); letter-spacing: -.2px; margin-top: 2px; }
+.ck-top__acts { display: flex; align-items: center; gap: var(--space-s); }
+
+.ck-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 var(--gutter) var(--space-xxl); }
+.ck-page.flush { padding-bottom: 0; overflow: hidden; display: flex; flex-direction: column; }
+
+/* ── Surfaces ───────────────────────────────────────────────────────── */
+
+.ck-card { border: 1px solid var(--outline); border-radius: var(--r-card); padding: var(--pad-card); background: var(--card-bg); min-width: 0; }
+.ck-card.pad-0 { padding: 0; }
+.ck-card.is-signal { border-color: var(--signal); }
+.ck-note {
+  border: 1px solid var(--hairline); border-radius: var(--r-card); padding: var(--space-m); background: var(--card-bg);
+  font: var(--t-small); color: var(--muted);
+}
+
+.ck-sub { font: var(--t-small); color: var(--muted); }
+.ck-sub b { color: var(--text-2); font-weight: 400; }
+
+.ck-kicker { font: var(--t-kicker); letter-spacing: var(--ls-kicker); text-transform: uppercase; color: var(--muted); }
+.ck-sec { display: flex; align-items: center; justify-content: space-between; gap: var(--space-m); padding: var(--space-xl) 0 var(--space-m); }
+.ck-sec .ck-kicker { color: var(--dim); }
+.ck-kicker[data-u="critical"] { color: var(--u-critical); }
+.ck-kicker[data-u="active"] { color: var(--u-active); }
+.ck-kicker[data-u="normal"] { color: var(--u-normal); }
+.ck-kicker[data-u="done"] { color: var(--u-done); }
+.ck-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-m); margin-bottom: var(--space-m); }
+.ck-rule { border: 0; border-top: 1px solid var(--hairline); margin: 0; }
+
+.ck-grid { display: grid; gap: var(--space-m); }
+.ck-grid.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ck-grid.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ck-grid.c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ck-split { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: var(--space-m); }
+
+/* ── Numbers ────────────────────────────────────────────────────────── */
+
+.ck-hero .v { font: var(--n-hero); letter-spacing: -2px; display: block; margin-top: var(--space-s); }
+.ck-hero .cap { font: var(--t-small); color: var(--muted); margin-top: var(--space-xs); }
+
+.ck-stat { display: grid; gap: 6px; }
+.ck-stat .v { font: var(--n-l); letter-spacing: var(--ls-num); }
+.ck-stat .v.na { color: var(--faint); }
+.ck-stat .l { font: var(--t-kicker); letter-spacing: var(--ls-kicker); text-transform: uppercase; color: var(--muted); }
+.ck-stat .sub { font: var(--t-small); color: var(--faint); }
+
+.ck-kv { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-m); padding: 7px 0; font: var(--t-small); color: var(--muted); }
+.ck-kv + .ck-kv { border-top: 1px solid var(--hairline); }
+.ck-kv b { font: var(--n-s); font-weight: 500; color: var(--text-2); }
+
+.ck-delta { font: var(--n-s); color: var(--muted); }
+.ck-delta::before { content: "→ "; }
+.ck-delta.up::before { content: "↑ "; }
+.ck-delta.down::before { content: "↓ "; }
+.ck-delta.up { color: var(--text-2); }
+
+/* ── Rows ───────────────────────────────────────────────────────────── */
+
+.ck-rows > * + * { border-top: 1px solid var(--hairline); }
+.ck-row { display: flex; align-items: center; gap: var(--space-m); min-height: var(--row-h); padding: var(--space-s) var(--space-l); width: 100%; text-align: left; }
+.ck-row:not(:disabled):hover { background: var(--sel); }
+.ck-row__b { flex: 1 1 auto; min-width: 0; }
+.ck-row__t { font: var(--t-body); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-row__m { font: var(--t-small); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.ck-row__v { flex: none; font: var(--n-m); letter-spacing: var(--ls-num); text-align: right; }
+.ck-row__v small { display: block; font: var(--t-kicker); letter-spacing: .6px; color: var(--muted); text-transform: uppercase; }
+
+/* Shape carries severity and colour reinforces it, so the ramp can be switched
+   off without the marks becoming the same picture. Filled square outranks half,
+   outranks ring — in every colour mode. */
+.ck-mark { flex: none; width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid var(--outline-strong); }
+.ck-mark.block { background: var(--u-critical); border-color: var(--u-critical); border-radius: 1px; }
+.ck-mark.stall { background: linear-gradient(to right, var(--u-active) 50%, transparent 50%); border-color: var(--u-active); }
+.ck-mark.queue { border-radius: 50%; border-color: var(--u-normal); }
+.ck-mark.ok { border-radius: 50%; background: var(--u-done); border-color: var(--u-done); }
+.ck-mark.live { border-radius: 50%; background: var(--text); border-color: var(--text); animation: ck-pulse 2.4s ease-in-out infinite; }
+.ck-mark.idle { border-radius: 50%; border-color: var(--faint); }
+@keyframes ck-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .ck-mark.live { animation: none; } }
+
+/* ── Controls ───────────────────────────────────────────────────────── */
+
+.ck-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--ctl-m); padding: 0 var(--space-m); border-radius: var(--r-field);
+  border: 1px solid var(--outline); color: var(--text-2); font: var(--t-label); white-space: nowrap;
+}
+.ck-btn:not(:disabled):hover { border-color: var(--outline-strong); color: var(--text); background: var(--sel); }
+.ck-btn.filled { background: var(--text); border-color: var(--text); color: var(--ground); }
+.ck-btn.filled:not(:disabled):hover { background: var(--text-2); border-color: var(--text-2); }
+.ck-btn.ghost { border-color: transparent; }
+.ck-btn.ghost:not(:disabled):hover { border-color: var(--hairline); }
+.ck-btn.sm { height: var(--ctl-s); padding: 0 var(--space-s); font: var(--t-small); }
+.ck-btn.pill { border-radius: var(--r-pill); padding: 0 var(--space-l); }
+
+.ck-seg { display: inline-flex; height: var(--ctl-m); border: 1px solid var(--outline); border-radius: var(--r-field); overflow: hidden; }
+.ck-seg button { padding: 0 var(--space-m); font: var(--t-label); color: var(--muted); }
+.ck-seg button + button { border-left: 1px solid var(--outline); }
+.ck-seg button:not(:disabled):hover { color: var(--text-2); background: var(--sel); }
+.ck-seg button.on { background: var(--text); color: var(--ground); }
+
+.ck-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.ck-chip {
+  height: var(--ctl-s); display: inline-flex; align-items: center; gap: 5px; padding: 0 10px;
+  border: 1px solid var(--outline); border-radius: var(--r-chip); font: var(--t-small); color: var(--muted);
+}
+.ck-chip:not(:disabled):hover { color: var(--text-2); border-color: var(--outline-strong); }
+.ck-chip.on { background: var(--text); border-color: var(--text); color: var(--ground); }
+
+.ck-badge {
+  display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--outline);
+  border-radius: var(--r-badge); padding: 1px 6px; font: var(--n-xs); letter-spacing: .3px;
+  text-transform: uppercase; color: var(--muted);
+}
+.ck-badge.solid { background: var(--text); border-color: var(--text); color: var(--ground); }
+.ck-badge.strong { color: var(--text-2); border-color: var(--outline-strong); }
+.ck-badge.signal { color: var(--signal); border-color: var(--signal); }
+/* The only place colour is allowed to occupy area, and then at 13%. */
+.ck-badge[data-u] { border-color: transparent; }
+.ck-badge[data-u="critical"] { color: var(--u-critical); background: var(--u-critical-bg); }
+.ck-badge[data-u="active"] { color: var(--u-active); background: var(--u-active-bg); }
+.ck-badge[data-u="normal"] { color: var(--u-normal); background: var(--u-normal-bg); }
+.ck-badge[data-u="done"] { color: var(--u-done); background: var(--u-done-bg); }
+.ck-badge[data-u="inert"] { color: var(--u-inert); background: var(--u-inert-bg); }
+
+/* Without fills a dead control and a ghost button are the same picture, so
+   disabled is stated rather than implied: the ink drops, the border goes to
+   hairline, the fill is surrendered, and nothing answers the pointer. */
+.ck-btn:disabled, .ck-chip:disabled, .ck-seg button:disabled, .ck-nav:disabled, .ck-tile:disabled {
+  color: var(--faint); border-color: var(--hairline); background: none; cursor: not-allowed;
+}
+.ck-btn.filled:disabled { color: var(--faint); background: none; border-color: var(--hairline); }
+.ck-switch.is-disabled { opacity: 0.45; cursor: not-allowed; }
+.ck-switchrow.is-disabled { color: var(--faint); }
+
+.ck-field {
+  display: flex; align-items: center; gap: var(--space-s); height: var(--ctl-l);
+  border: 1px solid var(--outline); border-radius: var(--r-field); padding: 0 var(--space-m);
+  font: var(--t-body); color: var(--text); background: transparent; width: 100%;
+}
+.ck-field:focus-within { border-color: var(--text-2); }
+.ck-field input { flex: 1 1 auto; border: 0; outline: 0; background: none; min-width: 0; }
+.ck-field input::placeholder { color: var(--faint); }
+.ck-lab { font: var(--t-kicker); letter-spacing: var(--ls-kicker); text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 6px; }
+
+.ck-switch { width: 34px; height: 19px; border-radius: 99px; border: 1px solid var(--outline); position: relative; flex: none; }
+.ck-switch::after { content: ""; position: absolute; width: 11px; height: 11px; border-radius: 50%; background: var(--muted); top: 3px; left: 3px; transition: left .12s ease, background .12s ease; }
+.ck-switch.on { background: var(--text); border-color: var(--text); }
+.ck-switch.on::after { left: 18px; background: var(--ground); }
+.ck-switchrow { display: flex; align-items: center; justify-content: space-between; gap: var(--space-m); padding: 9px 0; font: var(--t-body); }
+.ck-switchrow + .ck-switchrow { border-top: 1px solid var(--hairline); }
+
+/* ── Board ──────────────────────────────────────────────────────────── */
+
+/* Five columns have a floor of 212px each; below ~1140px of content the board
+   scrolls sideways rather than crushing or clipping a column. */
+.ck-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(212px, 1fr); gap: var(--space-m); align-items: start; overflow-x: auto; padding-bottom: var(--space-s); }
+.ck-col { border: 1px solid var(--hairline); border-radius: var(--r-card); min-width: 0; background: var(--card-bg); }
+.ck-col__h { display: flex; align-items: center; gap: var(--space-s); padding: 10px var(--space-m); border-bottom: 1px solid var(--hairline); }
+.ck-col__h .ck-kicker { flex: 1 1 auto; color: var(--text-2); }
+.ck-col__n { font: var(--n-xs); color: var(--muted); }
+.ck-col__b { padding: var(--space-s); display: grid; gap: var(--space-s); }
+/* Ranking the columns by rule weight was a code you had to learn. These are
+   conventions you already know: dashed is provisional, the live dot is the
+   same one the session rows use, --signal means blocked everywhere in the app,
+   and finished work recedes because it takes less ink. Only the two columns
+   that want an eye carry a glyph. */
+.ck-col[data-col="idea"] .ck-col__h { border-bottom-style: dashed; }
+.ck-col[data-col="todo"] .ck-col__h { border-bottom-color: var(--u-normal); }
+.ck-col[data-col="doing"] .ck-col__h { border-bottom-color: var(--u-active); border-bottom-width: 2px; }
+.ck-col[data-col="blocked"] .ck-col__h { border-bottom-color: var(--u-critical); border-bottom-width: 2px; }
+.ck-col[data-col="done"] { opacity: 0.6; }
+.ck-col[data-col="done"]:hover { opacity: 1; }
+.ck-col[data-col="done"] .ck-col__h { border-bottom-style: solid; border-bottom-color: var(--u-done); }
+
+/* Only the top step of the ramp earns an edge. If every tile carried one the
+   board would be painted again and the edge would stop meaning anything. */
+.ck-tile { border: 1px solid var(--outline); border-radius: var(--r-chip); padding: 10px; display: grid; gap: 7px; text-align: left; width: 100%;
+  border-left: 2px solid var(--outline); }
+.ck-tile[data-u="critical"] { border-left-color: var(--u-critical); }
+.ck-tile:not(:disabled):hover { border-color: var(--outline-strong); background: var(--sel); }
+.ck-tile__t { font: var(--t-body); color: var(--text); }
+.ck-tile__f { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ck-tile__f .sp { margin-left: auto; }
+.ck-tile.is-done .ck-tile__t { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+
+/* ── Table ──────────────────────────────────────────────────────────── */
+
+.ck-table { width: 100%; border-collapse: collapse; }
+.ck-table th {
+  text-align: left; font: var(--t-kicker); letter-spacing: var(--ls-kicker); text-transform: uppercase;
+  color: var(--muted); padding: 0 var(--space-m) var(--space-s); border-bottom: 1px solid var(--outline); font-weight: 500;
+}
+.ck-table td { padding: 10px var(--space-m); border-bottom: 1px solid var(--hairline); font: var(--t-body); vertical-align: middle; }
+.ck-table tr:hover td { background: var(--sel); }
+.ck-table td.num { font: var(--n-s); color: var(--text-2); text-align: right; }
+
+/* ── Terminal / session ─────────────────────────────────────────────── */
+
+.ck-term { border: 1px solid var(--outline); border-radius: var(--r-card); background: var(--card-bg); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.ck-term__h { display: flex; align-items: center; gap: var(--space-s); padding: 8px var(--space-m); border-bottom: 1px solid var(--hairline); flex: none; }
+.ck-term__b { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-m); font: 400 12px/1.65 var(--mono); color: var(--term-fg); white-space: pre-wrap; }
+.ck-term__b .d { color: var(--term-dim); }
+.ck-term__b .u { color: var(--text); }
+.ck-term__f { flex: none; border-top: 1px solid var(--hairline); padding: var(--space-m); }
+.ck-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--hairline); flex: none; }
+.ck-tab { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 var(--space-m); font: var(--t-small); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ck-tab:hover { color: var(--text-2); }
+.ck-tab.on { color: var(--text); border-bottom-color: var(--text); }
+
+.ck-tree { font: var(--t-small); }
+.ck-tree button { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--ctl-s); padding: 0 var(--space-s); border-radius: var(--r-field); color: var(--dim); text-align: left; white-space: nowrap; overflow: hidden; }
+.ck-tree button svg { flex: none; }
+.ck-tree button:hover { background: var(--sel); color: var(--text-2); }
+.ck-tree button.on { color: var(--text); background: var(--sel); }
+.ck-tree .in1 { padding-left: 22px; }
+.ck-tree .in2 { padding-left: 36px; }
+
+/* ── Misc ───────────────────────────────────────────────────────────── */
+
+.ck-empty { display: grid; gap: 6px; padding: var(--space-xl) 0; }
+.ck-empty__t { font: var(--t-h3); color: var(--text-2); }
+.ck-empty__l { font: var(--t-small); color: var(--muted); max-width: 60ch; }
+
+.ck-spark { display: block; width: 100%; height: 44px; overflow: visible; }
+.ck-spark path { fill: none; stroke: var(--text-2); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+.ck-spark .base { stroke: var(--hairline); }
+
+.ck-bars { display: flex; align-items: flex-end; gap: 3px; height: 44px; }
+.ck-bars i { flex: 1 1 0; background: var(--hairline); border-radius: 1px; }
+.ck-bars i.on { background: var(--text-2); }
+
+.ck-time { display: grid; gap: 0; }
+.ck-time__i { display: grid; grid-template-columns: 58px 12px 1fr; align-items: start; gap: var(--space-s); padding: 9px 0; }
+.ck-time__t { font: var(--n-xs); color: var(--faint); padding-top: 3px; }
+.ck-time__d { position: relative; height: 100%; }
+.ck-time__d::before { content: ""; position: absolute; left: 4px; top: 6px; width: 5px; height: 5px; border-radius: 50%; border: 1px solid var(--outline-strong); }
+.ck-time__d::after { content: ""; position: absolute; left: 6px; top: 13px; bottom: -10px; width: 1px; background: var(--hairline); }
+.ck-time__i:last-child .ck-time__d::after { display: none; }
+.ck-time__x { font: var(--t-small); color: var(--text-2); }
+.ck-time__x em { font-style: normal; color: var(--muted); }
