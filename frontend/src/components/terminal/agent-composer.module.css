@@ -1,226 +1,20 @@
-/* Direct port of prototype:290-368 onto the real tokens. Class names match
-   the plan's table (step 16):
-   .composer .cmode .mbadge.composing .mswap -> composer cmode mbadge
-     mbadgeComposing mswap   (the prototype's `.mwhy` prose slot is now the
-     provider/model selectors — see `.selectors` at the end of this file)
-   .cctx .pill(.file/.task/.tpl/.add/.dropped) -> cctx pill pillFile pillTask
-     pillTpl pillAdd pillDropped
-   .cedit .mention .gut .dropzone -> cedit mention gut dropzone
-   .cact .fanout .hint .kbd .send .sendghost -> cact fanout hint kbd send
-     sendGhost
-   .chist .hpill .hpill.q -> chist hpill hpillQueued
-   The prototype's persistent wire row is gone — it's now a popover
-   (previewPanel previewHead previewLabel previewMeta previewClose
-   previewCode previewNote) behind the `{}` pill (pillWire) next to
-   `+ context`, sharing chrome with pickerPanel.
-
-   Composer slash-command / @-mention menu additions (composer-slash-commands
-   plan, Changes 8/9):
-   .editorMirror .mirrorMark -> the hidden caret-coordinate mirror (decision 8)
-   .suggest .suggestGroup .suggestRow(.Active) .suggestLabel .suggestMeta
-     .suggestFooter -> the shared slash/mention suggestion panel
-   .helpPanel .helpPanelHeader .helpRow .helpName .helpSummary .helpClose ->
-     the read-only `/help` panel (decision 12)
-   .cnote(.Error) -> the command-outcome note row
-   .wireWarn -> the unregistered-command warning (decision 4); the RUNS
-     disposition it used to sit beside now renders inside the `{}` popover */
-
-.composer {
-  flex: 0 0 auto;
-  background: var(--bg-2);
-  border-top: 1px solid var(--line-2);
-  display: flex;
-  flex-direction: column;
-}
-
-.composerFocused {
-  border-top-color: var(--accent-line);
-}
-
-/* No session behind the input — it ended, or its start was refused (#42, where
- * the pane accepted a whole prompt over a session the shell had already
- * rejected). Typing stays possible, because the draft has to survive the
- * Restart/Retry that follows, so this marks the surface as not-connected rather
- * than hiding it: the editor stays legible, the chrome around it stops
- * presenting itself as live. */
-.composerStale {
-  border-top-color: var(--warn);
-}
-
-.composerStale .cmode,
-.composerStale .cact {
-  opacity: 0.55;
-}
-
-.cmode {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 9px;
-  border-bottom: 1px solid var(--line-1);
-  font-family: var(--font-mono);
-  font-size: 10px;
-}
-
-.mbadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  padding: 2px 7px;
-  border-radius: var(--r-1);
-  text-transform: uppercase;
-  flex: none;
-}
-
-.mbadgeComposing {
-  background: var(--violet-soft);
-  color: var(--violet);
-  border: 1px solid rgba(168, 85, 247, 0.3);
-}
-
-/* Outlined rather than filled (D8): related to but not confusable with the
-   filled `.mbadgeComposing` badge beside it. */
-.mbadgeSubagent {
-  background: transparent;
-  color: var(--violet);
-  border: 1px solid rgba(168, 85, 247, 0.45);
-}
-
-/* Accent-blue sibling of `.mbadgeSubagent`, same outlined idiom — distinct
-   colour so a live Task delegation and a live Workflow orchestration never
-   read as the same badge when both are showing (mirrors the HUD cell's own
-   `.acc` vs `.violet` split, D7). */
-.mbadgeOrchestration {
-  background: transparent;
-  color: var(--accent);
-  border: 1px solid rgba(59, 130, 246, 0.45);
-}
-
-.mswap {
-  margin-left: auto;
-  flex: none;
-  color: var(--fg-3);
-  border: 1px solid var(--line-2);
-  background: var(--bg-1);
-  border-radius: var(--r-1);
-  padding: 2px 7px;
-  font-size: 9.5px;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.mswap:hover {
-  border-color: var(--accent-line);
-  color: var(--fg-1);
-}
-
-.cctx {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 9px 0;
-  flex-wrap: wrap;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: var(--bg-1);
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  padding: 2px 9px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--fg-2);
-}
-
-.pillKey {
-  color: var(--fg-4);
-}
-
-.pillRemove {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-  font: inherit;
-}
-
-.pillFile {
-  border-color: rgba(56, 189, 248, 0.3);
-  color: var(--info);
-}
-
-.pillTask {
-  border-color: rgba(168, 85, 247, 0.32);
-  color: var(--violet);
-}
-
-.pillTpl {
-  border-color: rgba(34, 197, 94, 0.3);
-  color: var(--ok);
-}
-
-.pillAdd {
-  border-style: dashed;
-  color: var(--fg-3);
-  background: transparent;
-  cursor: pointer;
-  font-family: var(--font-mono);
-}
-
-.pillWire {
-  border-style: dashed;
-  color: var(--fg-3);
-  background: transparent;
-  cursor: pointer;
-  font-family: var(--font-mono);
-  padding: 2px 7px;
-}
-
-.pillWire:hover {
-  border-color: var(--accent-line);
-  color: var(--fg-1);
-}
-
-.pillDropped {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-soft);
-  animation: landed 1.6s ease-out;
-}
-
-@keyframes landed {
-  0% {
-    transform: scale(0.82);
-    opacity: 0;
-  }
-  40% {
-    transform: scale(1.04);
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
+/* What is left of the composer's own CSS after the Deck conversion (#293).
+   The four rows — config, context, input, affordances — are `.dk-comp*` now,
+   and the buttons, tags and selects are Deck's own. What stays here is the
+   editor stack, whose overlay, mirror and textarea must share font metrics
+   and insets to the pixel or the `@`-mention highlight drifts off the text it
+   is highlighting, plus the three panels that float over it. Everything below
+   renders inside `.deck`, so it is written against Deck's tokens. */
 
 .cedit {
   position: relative;
-  margin: 7px 9px 0;
-  background: var(--bg-1);
+  background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-3);
+  border-radius: 3px;
 }
 
-.composerFocused .cedit {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.07);
+.cedit:focus-within {
+  border-color: var(--fg-3);
 }
 
 /* The bottom padding is `.gut`'s reserved strip, not breathing room: the
@@ -228,7 +22,8 @@
    it would render behind the text. Keeping the strip in the padding is what
    lets a full draft's last row stay readable. `min-height` is the sum of the
    parts (8 + `.editorTextarea`'s 48 + 20), so the empty box does not jump on
-   the first keystroke. */
+   the first keystroke. Any change here has to be mirrored in
+   `lib/composer-editor-layout.ts`, which duplicates the numbers. */
 .editorStack {
   position: relative;
   padding: 8px 10px 20px;
@@ -238,7 +33,7 @@
 .editorOverlay,
 .editorTextarea,
 .editorMirror {
-  font-family: var(--font-mono);
+  font-family: var(--mono);
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -258,17 +53,17 @@
   position: absolute;
   top: 8px;
   left: 10px;
-  color: var(--fg-1);
+  color: var(--fg);
   pointer-events: none;
   overflow: hidden;
 }
 
-/* Caret-coordinate mirror (Design decision 8) — same font metrics and
-   wrapping as `.editorOverlay`/`.editorTextarea` by construction (the shared
-   rule above), but never visible and never the measuring surface for
-   `.mention`'s own drift. Width is set inline from `textarea.clientWidth`,
-   not from a `right` inset, so a scrollbar past `.editorTextarea`'s
-   `max-height` cannot narrow one without the other. */
+/* Caret-coordinate mirror — same font metrics and wrapping as
+   `.editorOverlay`/`.editorTextarea` by construction (the shared rule above),
+   but never visible and never the measuring surface for `.mention`'s own
+   drift. Width is set inline from `textarea.clientWidth`, not from a `right`
+   inset, so a scrollbar past `.editorTextarea`'s `max-height` cannot narrow
+   one without the other. */
 .editorMirror {
   position: absolute;
   top: 8px;
@@ -283,8 +78,8 @@
 }
 
 .mention {
-  color: var(--info);
-  background: rgba(56, 189, 248, 0.1);
+  color: var(--run);
+  background: var(--run-bg);
   border-radius: 2px;
   padding: 0 2px;
 }
@@ -296,11 +91,15 @@
   resize: none;
   background: transparent;
   color: transparent;
-  caret-color: var(--fg-1);
+  caret-color: var(--fg);
   outline: none;
   min-height: 48px;
   max-height: 264px;
   overflow-y: auto;
+}
+
+.editorTextarea::placeholder {
+  color: var(--fg-4);
 }
 
 /* Sits inside `.editorStack`'s reserved bottom padding — see that rule. */
@@ -308,9 +107,8 @@
   position: absolute;
   right: 9px;
   bottom: 4px;
-  font-size: 9.5px;
+  font-size: var(--fs-xs);
   color: var(--fg-4);
-  font-family: var(--font-mono);
   pointer-events: none;
 }
 
@@ -323,170 +121,41 @@
      released while it is visible reaches handlePaneDrop (append) instead of
      handleDrop (caret-precise), or is cancelled outright. */
   pointer-events: none;
-  border: 1.5px dashed var(--accent);
-  border-radius: var(--r-3);
-  background: rgba(9, 14, 26, 0.93);
+  border: 1px dashed var(--mark);
+  border-radius: 3px;
+  background: var(--bg);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--accent);
+  font-size: var(--fs-s);
+  color: var(--mark);
   white-space: normal;
 }
 
-.cact {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 9px 8px;
-  flex-wrap: wrap;
-}
-
-.kbd {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--fg-3);
-  background: var(--bg-1);
-  border: 1px solid var(--line-2);
-  border-bottom-width: 2px;
-  border-radius: var(--r-1);
-  padding: 1px 5px;
-}
-
-.hint {
-  font-size: 10px;
-  color: var(--fg-4);
-  font-family: var(--font-mono);
-}
-
-.fanout {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--fg-3);
-  background: var(--bg-1);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-1);
-  padding: 2px 7px;
-  cursor: pointer;
-}
-
-.fanoutCount {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.send {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--violet);
-  color: #fff;
-  border: 1px solid transparent;
-  border-radius: var(--r-2);
-  padding: 5px 13px;
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 550;
-  cursor: pointer;
-}
-
-.send:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.send .kbd {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #fff;
-}
-
-.sendGhost {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-1);
-  color: var(--fg-2);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-2);
-  padding: 5px 11px;
-  font-size: 11.5px;
-  font-family: var(--font-sans);
-  cursor: pointer;
-}
-
-.sendGhost:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* The unregistered-command warning (Design decision 4). It stays a full-width
-   line in the composer's own stack rather than moving into the `{}` popover:
-   the point of the warning is that it is seen without being asked for. */
-.wireWarn {
-  padding: 0 9px 6px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--warn);
-}
-
-
-.chist {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 9px 8px;
-  overflow: hidden;
-}
-
-.hpill {
-  flex: none;
-  max-width: 210px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  background: var(--bg-1);
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-1);
-  padding: 2px 8px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--fg-3);
-  cursor: pointer;
-}
-
-.hpill:hover {
-  color: var(--fg-1);
-  border-color: var(--line-2);
-}
-
-.hpillQueued {
-  border-color: rgba(245, 158, 11, 0.3);
-  color: var(--warn);
-  cursor: default;
-}
+/* ── Floating panels over the editor ───────────────────────────────────── */
 
 .pickerPanel,
-.previewPanel {
+.previewPanel,
+.suggest,
+.helpPanel {
   position: absolute;
-  left: 8px;
-  bottom: calc(100% + 6px);
   overflow-y: auto;
-  background: var(--bg-3);
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-3);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+  border-radius: 3px;
+  font-size: var(--fs-s);
   z-index: 10;
 }
 
-.pickerPanel {
+.pickerPanel,
+.previewPanel,
+.helpPanel {
+  left: 8px;
+  bottom: calc(100% + 6px);
+}
+
+.pickerPanel,
+.helpPanel {
   width: 320px;
   /* Taller than the old 220px because the search row costs a line and the list
      now holds every open task, not only the in-progress ones. */
@@ -502,8 +171,8 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  color: var(--fg-4);
-  font-size: 9.5px;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
 }
 
 .previewHead {
@@ -513,47 +182,41 @@
 }
 
 .previewLabel {
-  color: var(--fg-3);
-  font-weight: 600;
+  color: var(--fg-2);
   letter-spacing: 0.06em;
   flex: none;
 }
 
 .previewMeta {
-  color: var(--fg-4);
+  color: var(--fg-3);
 }
 
 .previewClose {
   margin-left: auto;
-  appearance: none;
-  background: transparent;
-  border: 0;
   color: var(--fg-3);
-  cursor: pointer;
-  font: inherit;
   line-height: 1;
   padding: 0 2px;
 }
 
 .previewClose:hover {
-  color: var(--fg-1);
+  color: var(--fg);
 }
 
 .previewCode {
   color: var(--ok);
-  background: rgba(34, 197, 94, 0.08);
+  background: var(--ok-bg);
   padding: 1px 4px;
   border-radius: 2px;
   white-space: pre-wrap;
   word-break: break-all;
   overflow-y: auto;
   max-height: 170px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
 }
 
 .previewNote {
-  color: var(--fg-4);
+  color: var(--fg-3);
 }
 
 /* Sticky so the filter stays reachable while scrolling a long backlog. */
@@ -561,42 +224,43 @@
   position: sticky;
   top: 0;
   padding: 6px;
-  background: var(--bg-3);
-  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
   z-index: 1;
 }
 
 .pickerInput {
   width: 100%;
   padding: 4px 7px;
-  background: var(--bg-1);
+  background: var(--bg);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-2);
-  color: var(--fg-1);
-  font-family: inherit;
-  font-size: 10.5px;
+  border-radius: 3px;
+  color: var(--fg);
+  font: inherit;
   outline: none;
 }
 
 .pickerInput:focus {
-  border-color: var(--accent);
+  border-color: var(--fg-3);
 }
 
 .pickerInput::placeholder {
   color: var(--fg-4);
 }
 
-.pickerHeader {
+.pickerHeader,
+.suggestGroup {
   padding: 4px 9px;
-  color: var(--fg-4);
-  font-size: 9px;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  border-bottom: 1px solid var(--line-1);
-  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
 }
 
-.pickerRow {
+.pickerRow,
+.suggestRow {
   display: flex;
   gap: 8px;
   align-items: baseline;
@@ -615,79 +279,11 @@
    allowed to consume slack, and it truncates rather than wrapping so every row
    stays one line and the list stays scannable. */
 .pickerRowId {
-  color: var(--fg-4);
+  color: var(--fg-3);
   flex: 0 0 auto;
 }
 
-.pickerRowTitle {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pickerRowMeta {
-  flex: 0 0 auto;
-  color: var(--fg-4);
-  font-size: 9px;
-}
-
-.pickerRow:hover {
-  background: var(--accent-soft);
-  color: var(--fg-0);
-}
-
-.pickerEmpty {
-  padding: 8px 9px;
-  color: var(--fg-4);
-}
-
-/* ── slash/mention suggestion panel (Design decision 8/9) ────────────────────
-   Anchored by the inline `left`/`bottom` the component computes from the
-   caret's mirror position, always opening upward — the same reasoning as
-   `.pickerPanel` above, reused rather than re-derived. */
-.suggest {
-  position: absolute;
-  min-width: 260px;
-  max-width: 420px;
-  max-height: 240px;
-  overflow-y: auto;
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-3);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  z-index: 10;
-}
-
-.suggestGroup {
-  padding: 4px 9px;
-  color: var(--fg-4);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  border-bottom: 1px solid var(--line-1);
-  background: var(--bg-2);
-}
-
-.suggestRow {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  padding: 5px 9px;
-  color: var(--fg-2);
-  line-height: 1.5;
-  cursor: pointer;
-}
-
-.suggestRow:hover,
-.suggestRowActive {
-  background: var(--accent-soft);
-  color: var(--fg-0);
-}
-
+.pickerRowTitle,
 .suggestLabel {
   flex: 1 1 auto;
   min-width: 0;
@@ -696,63 +292,62 @@
   white-space: nowrap;
 }
 
+.pickerRowMeta,
 .suggestMeta {
   flex: 0 0 auto;
-  color: var(--fg-4);
-  font-size: 9px;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+}
+
+.pickerRow:hover,
+.suggestRow:hover,
+.suggestRowActive {
+  background: var(--sel-2);
+  color: var(--fg);
+}
+
+.pickerEmpty {
+  padding: 8px 9px;
+  color: var(--fg-3);
+}
+
+/* ── slash/mention suggestion panel ─────────────────────────────────────
+   Anchored by the inline `left`/`bottom` the component computes from the
+   caret's mirror position, always opening upward. */
+.suggest {
+  min-width: 260px;
+  max-width: 420px;
+  max-height: 240px;
 }
 
 .suggestFooter {
   position: sticky;
   bottom: 0;
   padding: 4px 9px;
-  color: var(--fg-4);
-  font-size: 9px;
-  background: var(--bg-2);
-  border-top: 1px solid var(--line-1);
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
 }
 
-/* ── `/help` panel (Design decision 12) — same chrome as `.pickerPanel`, but
-   static: nothing in it is selectable, so it never gets a hover/active
-   state. */
-.helpPanel {
-  position: absolute;
-  left: 8px;
-  bottom: calc(100% + 6px);
-  width: 320px;
-  max-height: 320px;
-  overflow-y: auto;
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-3);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  z-index: 10;
-}
-
+/* ── `/help` panel — same chrome as `.pickerPanel`, but static: nothing in it
+   is selectable, so it never gets a hover/active state. */
 .helpPanelHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 6px 9px;
-  color: var(--fg-4);
-  font-size: 9px;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  border-bottom: 1px solid var(--line-1);
-  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
 }
 
 .helpClose {
-  appearance: none;
-  background: transparent;
-  border: 0;
   color: inherit;
-  cursor: pointer;
-  padding: 0;
   line-height: 1;
-  font: inherit;
   text-transform: none;
   letter-spacing: normal;
 }
@@ -762,7 +357,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 6px 9px;
-  border-bottom: 1px solid var(--line-1);
+  border-bottom: 1px solid var(--line);
 }
 
 .helpRow:last-child {
@@ -770,128 +365,10 @@
 }
 
 .helpName {
-  color: var(--accent);
+  color: var(--run);
 }
 
 .helpSummary {
   color: var(--fg-3);
-  font-size: 9.5px;
-}
-
-/* ── command outcome note (between the actions row and the wire row) ────── */
-.cnote {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--fg-3);
-  padding: 0 10px 4px;
-}
-
-.cnoteError {
-  color: var(--err);
-}
-
-/* ── provider + model selectors (mode row) ──────────────────────────────────
-   Native <select>s deliberately: the mode row is 10 px mono chrome inside a
-   pane that can be a third of the window wide, and a custom popover here would
-   be the third dropdown implementation in this file's neighbourhood. They are
-   styled down to the row's scale and inherit the mono face so they read as part
-   of the strip rather than as OS widgets. */
-.selectors {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.selectWrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.selectLabel {
-  color: var(--fg-4);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  flex: none;
-}
-
-.select {
-  appearance: none;
-  background: var(--bg-1);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-1);
-  color: var(--fg-2);
-  font-family: inherit;
-  font-size: 9.5px;
-  padding: 2px 5px;
-  max-width: 11rem;
-  min-width: 0;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.select:hover:not(:disabled) {
-  border-color: var(--accent-line);
-  color: var(--fg-1);
-}
-
-.select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.select:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.selectError {
-  flex: none;
-  color: var(--err);
-  font-size: 9.5px;
-}
-
-/* The selected provider is not the one the live session is running (it started
-   before the catalog was known) — the value shown is what a restart *would*
-   use, so it is marked as not-yet-applied rather than presented as fact. */
-.selectStale {
-  border-color: rgba(245, 158, 11, 0.45);
-  color: var(--warn);
-}
-
-.selectWarn {
-  flex: none;
-  appearance: none;
-  background: var(--warn-soft);
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  border-radius: var(--r-1);
-  color: var(--warn);
-  font-family: inherit;
-  font-size: 9.5px;
-  padding: 2px 7px;
-  cursor: pointer;
-}
-
-.selectWarn:hover {
-  background: rgba(245, 158, 11, 0.22);
-}
-
-/* The pane's agent/sub-agent/workflow picker, sitting in the mode row beside
-   the badges. Sized to the row's own type scale rather than the platform
-   default so it reads as chrome, not as a form control. */
-.viewPick {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  padding: 1px 4px;
-  max-width: 240px;
-  background: var(--bg-2);
-  color: var(--fg-2);
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-1);
+  font-size: var(--fs-xs);
 }

@@ -58,13 +58,23 @@ export function iconForEntry(
   return { glyph: GLYPH_FOR_TONE[tone], tone };
 }
 
+/** Deck's own `.dk-tree__g-*` tones, in the shape `iconClassFor` expects. */
+export const DECK_ICON_CLASSES = {
+  icDir: "dk-tree__g-dir",
+  icPy: "dk-tree__g-py",
+  icTs: "dk-tree__g-ts",
+  icMd: "dk-tree__g-md",
+  icRs: "dk-tree__g-rs",
+  icSql: "dk-tree__g-sql",
+  icPlain: "dk-tree__g-plain",
+} as const;
+
 /**
- * Resolve the `.ic.*` CSS-module class for `tone`. Shared by
- * `<ExplorerTree>` and `<ExplorerFind>` — both were carrying byte-identical
- * copies of this switch before it moved here. Takes the caller's own CSS
- * module object (all three explorer components import the same
- * `workspace-navigator.module.css`) rather than importing one here, so this
- * stays a pure module with no CSS-module/React dependency of its own.
+ * Resolve the icon class for `tone` from the caller's own class map — the CSS
+ * module the explorer used to import, or `DECK_ICON_CLASSES` now. Shared by
+ * `<ExplorerTree>` and `<ExplorerFind>`, which were carrying byte-identical
+ * copies of this switch before it moved here, and it stays a pure module with
+ * no CSS/React dependency of its own.
  */
 export function iconClassFor(
   tone: IconTone,

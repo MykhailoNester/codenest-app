@@ -46,12 +46,19 @@ export function findFileStatus(
   return git.files.find((f) => f.path === relative);
 }
 
+/** Deck's own `.dk-gs` modifiers, in the shape `gsClassFor` expects. */
+export const DECK_GS_CLASSES = {
+  gsA: "dk-gs a",
+  gsD: "dk-gs d",
+  gsU: "dk-gs u",
+  gsM: "dk-gs m",
+} as const;
+
 /**
- * Resolve the `.gs.*` CSS-module class for a status letter. Shared by
+ * Resolve the status-letter class from the caller's own class map. Shared by
  * `<ExplorerTree>` and `<ChangedList>` — both were carrying byte-identical
- * copies of this switch before it moved here. Takes the caller's own CSS
- * module object rather than importing one here, so this stays a pure
- * module with no CSS-module/React dependency of its own.
+ * copies of this switch before it moved here — and it stays a pure module
+ * with no CSS/React dependency of its own.
  */
 export function gsClassFor(
   status: string,

@@ -9,7 +9,6 @@
 
 import type { ReactElement } from "react";
 import { useTerminalStore } from "../../stores/terminal-store";
-import styles from "./empty-pane.module.css";
 
 interface EmptyPaneProps {
   /** The leaf's placeholder terminalId (e.g. `"pending-2"`). */
@@ -38,17 +37,24 @@ export function EmptyPane({
   }
 
   return (
-    <div className={styles.pane}>
-      <div className={styles.meta}>
-        {projectName !== undefined && (
-          <span className={styles.projectName}>{projectName}</span>
-        )}
+    <div
+      className="dk-pane"
+      style={{
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "var(--u3)",
+      }}
+    >
+      <div style={{ textAlign: "center", fontSize: "var(--fs-s)" }}>
+        {projectName !== undefined && <div>{projectName}</div>}
         {providerName !== undefined && (
-          <span className={styles.providerName}>{providerName}</span>
+          <div className="dim" style={{ fontSize: "var(--fs-xs)" }}>
+            {providerName}
+          </div>
         )}
       </div>
-      <button type="button" className={styles.openBtn} onClick={handleOpen}>
-        Open shell here
+      <button type="button" className="dk-btn" onClick={handleOpen}>
+        open shell here
       </button>
     </div>
   );

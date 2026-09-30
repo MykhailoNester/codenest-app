@@ -1,8 +1,7 @@
 /**
- * The Workspace and Project tree bodies (prototype `.x-ws` / `.x-proj`,
- * markup lines 513-558). One renderer, two modes:
- *  - `mode="ws"`: every resolved root as a collapsible `.rootrow`, plus the
- *    virtual Shared root under its own `.grp` header.
+ * The Workspace and Project tree bodies. One renderer, two modes:
+ *  - `mode="ws"`: every resolved root as a collapsible root line, plus the
+ *    virtual Shared root under its own group heading.
  *  - `mode="proj"`: a single root — the one `rootForCwd` resolves for the
  *    focused pane's cwd, or the cwd itself as an ad-hoc root when it is
  *    under no imported project.
@@ -13,6 +12,14 @@
  * unless the watcher is `degraded`, which forces a fresh `fsListDir` on
  * every expand (design decision 7 — a degraded watcher's cached state
  * cannot be trusted).
+ *
+ * Deck (#293): rows are `DeckLine`s on a `DeckGrid`, but the grid is a
+ * `role="tree"` with `manageFocus={false}`. The tree keeps its own roving
+ * tabindex because the focused row follows `selectedPath` across expands and
+ * collapses, and it keeps ArrowLeft/ArrowRight, ⌘Enter and the drag payload —
+ * none of which a flat grid has a word for. The state glyph in column one is
+ * the row's *liveness*: `~` for a path the watcher just saw change, `×` for
+ * one that could not be listed.
  */
 
 import {
@@ -34,10 +41,19 @@ import {
   EXPLORER_LIVE_PULSE_MS,
   type TreeNode,
 } from "../../lib/explorer/tree-model";
-import { iconForEntry, iconClassFor } from "../../lib/explorer/file-icons";
-import { findFileStatus, gsClassFor } from "../../lib/explorer/git-status";
+import {
+  DECK_ICON_CLASSES,
+  iconForEntry,
+  iconClassFor,
+} from "../../lib/explorer/file-icons";
+import {
+  DECK_GS_CLASSES,
+  findFileStatus,
+  gsClassFor,
+} from "../../lib/explorer/git-status";
 import { writePathDragPayload } from "../../lib/explorer/drag-payload";
-import styles from "./workspace-navigator.module.css";
+import { DECK_COLS } from "../deck/deck-cols";
+import { DeckGrid, DeckLine, type DeckState } from "../deck/deck-grid";
 
 export interface ExplorerTreeProps {
   mode: "ws" | "proj";
@@ -45,21 +61,12 @@ export interface ExplorerTreeProps {
   followedRoot: RootDescriptor | null;
 }
 
-function depthClass(depth: number): string {
-  switch (depth) {
-    case 1:
-      return styles.d1 ?? "";
-    case 2:
-      return styles.d2 ?? "";
-    case 3:
-      return styles.d3 ?? "";
-    case 4:
-      return styles.d4 ?? "";
-    case 5:
-      return styles.d5 ?? "";
-    default:
-      return styles.dMax ?? "";
-  }
+/** Indentation lives inside the name cell, so the trailing column still
+ *  lines up down the whole panel however deep the row is. Depths past the
+ *  fifth clamp rather than growing unbounded — a 262px panel runs out of
+ *  room well before then. */
+function indentFor(depth: number): number {
+  return Math.min(depth, 6) * 13 - 4;
 }
 
 /** An ad-hoc root for a cwd that is under no imported project (rootForCwd
@@ -73,6 +80,27 @@ function adHocRoot(cwd: string): RootDescriptor {
     requestedPath: cwd,
     canonicalPath: null,
   };
+}
+
+/** The name cell: twisty, type glyph, label. */
+function nameCell(
+  depth: number,
+  twisty: string,
+  glyph: string,
+  glyphClass: string,
+  label: ReactElement | string,
+): ReactElement {
+  return (
+    <span className="dk-tree__n" style={{ paddingLeft: indentFor(depth) }}>
+      <span className="t" aria-hidden="true">
+        {twisty}
+      </span>
+      <span className={`g ${glyphClass}`} aria-hidden="true">
+        {glyph}
+      </span>
+      <span className="l">{label}</span>
+    </span>
+  );
 }
 
 export function ExplorerTree({
@@ -97,7 +125,7 @@ export function ExplorerTree({
   // "unavailable" row rather than a silently-stuck twisty.
   const [unavailable, setUnavailable] = useState<Record<string, string>>({});
 
-  // A single shared clock, not one timer per row: the `.live` pulse and the
+  // A single shared clock, not one timer per row: the live pulse and the
   // `moved` tag both expire relative to "now", and re-rendering once a
   // second is enough for either to visibly clear.
   const [now, setNow] = useState(() => Date.now());
@@ -228,61 +256,68 @@ export function ExplorerTree({
       }
     };
 
+    // The trailing column carries what the row's own state does not: why it
+    // could not be listed, how many children are hidden, what git makes of
+    // it — and, independently of any of those, that the watcher just saw it
+    // move.
+    const trail = (
+      <>
+        {failed ? (
+          <span className="dk-meta">unavailable</span>
+        ) : node.isDir && !nodeExpanded && node.childCount !== null ? (
+          <span className="dk-meta">{node.childCount}</span>
+        ) : !node.isDir && fileStatus ? (
+          <span className={gsClassFor(fileStatus.status, DECK_GS_CLASSES)}>
+            {fileStatus.status}
+          </span>
+        ) : null}
+        {showMoved && (
+          <span className="dk-tag" data-s="run" style={{ marginLeft: 5 }}>
+            moved
+          </span>
+        )}
+      </>
+    );
+
+    const state: DeckState = failed ? "fail" : showLive ? "run" : "idle";
+
     return (
       <div key={node.path}>
-        <div
+        <DeckLine
           role="treeitem"
-          aria-expanded={node.isDir ? nodeExpanded : undefined}
-          aria-selected={selected}
-          tabIndex={selected ? 0 : -1}
-          ref={(el) => {
-            if (el) rowEls.set(node.path, el);
-          }}
-          className={[
-            styles.row,
-            depthClass(depth),
-            selected ? styles.rowSelected : "",
-            showMoved ? styles.movedRow : "",
-            failed ? styles.unavailable : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          draggable
-          onDragStart={(e) => writePathDragPayload(e.dataTransfer, [node.path])}
-          onClick={() => {
+          state={state}
+          selected={selected}
+          cells={[
+            {
+              v: nameCell(
+                depth,
+                node.isDir ? (nodeExpanded ? "▾" : "▸") : "",
+                icon.glyph,
+                iconClassFor(icon.tone, DECK_ICON_CLASSES),
+                node.name,
+              ),
+              title: node.path,
+            },
+            { v: trail, cls: "r" },
+          ]}
+          onOpen={() => {
             setSelectedPath(node.path);
             if (node.isDir) toggleNode(rootId, node);
           }}
-          onKeyDown={onKeyDown}
-        >
-          {showLive && <span className={styles.live} aria-hidden="true" />}
-          <span className={styles.tw} aria-hidden="true">
-            {node.isDir ? (nodeExpanded ? "▾" : "▸") : ""}
-          </span>
-          <span
-            className={`${styles.ic} ${iconClassFor(icon.tone, styles)}`}
-            aria-hidden="true"
-            title={node.isSymlink ? "link" : undefined}
-          >
-            {icon.glyph}
-          </span>
-          <span className={styles.nm}>{node.name}</span>
-          {failed && <span className={styles.cnt}>unavailable</span>}
-          {!failed &&
-            node.isDir &&
-            !nodeExpanded &&
-            node.childCount !== null && (
-              <span className={styles.cnt}>{node.childCount}</span>
-            )}
-          {!failed && !node.isDir && fileStatus && (
-            <span
-              className={`${styles.gs} ${gsClassFor(fileStatus.status, styles)}`}
-            >
-              {fileStatus.status}
-            </span>
-          )}
-          {showMoved && <span className={styles.mvtag}>moved</span>}
-        </div>
+          rowRef={(el) => {
+            if (el) rowEls.set(node.path, el);
+          }}
+          rowProps={{
+            "aria-expanded": node.isDir ? nodeExpanded : undefined,
+            "aria-selected": selected,
+            "aria-disabled": failed || undefined,
+            tabIndex: selected ? 0 : -1,
+            draggable: true,
+            onDragStart: (e) =>
+              writePathDragPayload(e.dataTransfer, [node.path]),
+            onKeyDown,
+          }}
+        />
         {renderChildren(rootId, node, depth + 1, git)}
       </div>
     );
@@ -329,50 +364,52 @@ export function ExplorerTree({
       }
     };
 
+    const trail = failed ? (
+      <span className="dk-meta">unavailable</span>
+    ) : showBranch ? (
+      <span className="dk-meta">
+        {git?.branch}
+        {git?.dirty ? <em>*</em> : null}
+      </span>
+    ) : (
+      ""
+    );
+
     return (
       <div key={root.id}>
-        <div
+        <DeckLine
           role="treeitem"
-          aria-expanded={nodeExpanded}
-          tabIndex={isTabStop ? 0 : -1}
-          ref={(el) => {
+          className="is-root"
+          state={failed ? "fail" : "idle"}
+          cells={[
+            {
+              v: nameCell(
+                1,
+                nodeExpanded ? "▾" : "▸",
+                root.kind === "shared" ? "⬡" : "◆",
+                root.kind === "shared" ? "dk-tree__g-sql" : "dk-tree__g-dir",
+                root.label,
+              ),
+              title: root.canonicalPath ?? root.requestedPath,
+            },
+            { v: trail, cls: "r" },
+          ]}
+          onOpen={() => toggleRoot(root)}
+          rowRef={(el) => {
             if (el) rowEls.set(root.requestedPath, el);
           }}
-          className={[
-            styles.row,
-            styles.rootrow,
-            styles.d1,
-            failed ? styles.unavailable : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          draggable
-          onDragStart={(e) =>
-            writePathDragPayload(e.dataTransfer, [
-              root.canonicalPath ?? root.requestedPath,
-            ])
-          }
-          onClick={() => toggleRoot(root)}
-          onKeyDown={onKeyDown}
-        >
-          <span className={styles.tw} aria-hidden="true">
-            {nodeExpanded ? "▾" : "▸"}
-          </span>
-          <span
-            className={`${styles.ic} ${root.kind === "shared" ? styles.icShared : styles.icDir}`}
-            aria-hidden="true"
-          >
-            {root.kind === "shared" ? "⬡" : "◆"}
-          </span>
-          <span className={styles.nm}>{root.label}</span>
-          {failed && <span className={styles.cnt}>unavailable</span>}
-          {!failed && showBranch && (
-            <span className={styles.branch}>
-              {git?.branch}
-              {git?.dirty ? <em>*</em> : null}
-            </span>
-          )}
-        </div>
+          rowProps={{
+            "aria-expanded": nodeExpanded,
+            "aria-disabled": failed || undefined,
+            tabIndex: isTabStop ? 0 : -1,
+            draggable: true,
+            onDragStart: (e) =>
+              writePathDragPayload(e.dataTransfer, [
+                root.canonicalPath ?? root.requestedPath,
+              ]),
+            onKeyDown,
+          }}
+        />
         {nodeExpanded && node?.children
           ? node.children.map((child) => renderNode(root.id, child, 2, git))
           : null}
@@ -383,21 +420,28 @@ export function ExplorerTree({
   if (mode === "ws") {
     if (roots.length === 0) {
       return (
-        <div className={styles.tree}>
-          <div className={styles.empty}>
-            No projects imported yet — import one from Projects.
-          </div>
+        <div className="dk-note">
+          No projects imported yet — import one from Projects.
         </div>
       );
     }
     return (
-      <div className={styles.tree} role="tree" aria-label="Workspace">
+      <DeckGrid
+        cols={DECK_COLS.tree}
+        className="tree"
+        role="tree"
+        manageFocus={false}
+        label="Workspace"
+      >
         {roots.map((root, i) =>
           root.kind === "shared" ? (
             <div key={`grp:${root.id}`}>
-              <div className={styles.grp}>
-                Shared · workspace
-                <span className={styles.grpCnt}>.claude/</span>
+              <div
+                className="dk-head"
+                style={{ gridTemplateColumns: "1fr auto" }}
+              >
+                <span>Shared · workspace</span>
+                <span>.claude/</span>
               </div>
               {renderRootRow(root, i === 0)}
             </div>
@@ -405,7 +449,7 @@ export function ExplorerTree({
             renderRootRow(root, i === 0)
           ),
         )}
-      </div>
+      </DeckGrid>
     );
   }
 
@@ -414,10 +458,8 @@ export function ExplorerTree({
   const followedCwd = followedLeaf?.cwd ?? null;
   if (!focusedLeafId || !followedCwd) {
     return (
-      <div className={styles.tree}>
-        <div className={styles.empty}>
-          Focus a terminal pane to follow its directory.
-        </div>
+      <div className="dk-note">
+        Focus a terminal pane to follow its directory.
       </div>
     );
   }
@@ -430,13 +472,21 @@ export function ExplorerTree({
     ) + 1;
 
   return (
-    <div className={styles.tree} role="tree" aria-label="Project">
-      <div className={styles.grp}>
-        following pane {tabIndex || 1}
-        {followedLeaf?.exited ? " (pane exited)" : ""}
-        <span className={styles.grpCnt}>OSC 7</span>
+    <DeckGrid
+      cols={DECK_COLS.tree}
+      className="tree"
+      role="tree"
+      manageFocus={false}
+      label="Project"
+    >
+      <div className="dk-head" style={{ gridTemplateColumns: "1fr auto" }}>
+        <span>
+          following pane {tabIndex || 1}
+          {followedLeaf?.exited ? " (pane exited)" : ""}
+        </span>
+        <span>OSC 7</span>
       </div>
       {renderRootRow(activeRoot, true)}
-    </div>
+    </DeckGrid>
   );
 }

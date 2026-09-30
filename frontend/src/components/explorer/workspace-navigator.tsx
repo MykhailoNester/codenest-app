@@ -1,16 +1,12 @@
 /**
- * The Explorer panel — 1:1 port of the `.exp` aside in
- * warp-class-input-composer-prototype.html (markup lines 487-593). Mounted
- * only in the main window (`TerminalPage`), only when the `explorer`
- * feature is on — see Design decision 3 in the workspace-navigator plan for
- * why the feature read is hoisted above `TerminalsLayout` rather than
- * living in this component.
+ * The workspace navigator — the sessions surface's left rail. Owns the header
+ * actions, the three-way mode switcher, the search box (which doubles as the
+ * ⌘P entry point into Find), the tree host, the footer (every number sourced
+ * from `WatchState`, never hardcoded) and the resize/collapse handle. The
+ * actual IPC lifecycle lives in `use-explorer-sync.ts`, mounted once here.
  *
- * Owns: the header actions, the three-way mode switcher, the search box
- * (which doubles as the ⌘P entry point into Find), the tree host, the
- * footer (every number sourced from `WatchState`, never hardcoded — see
- * NO MOCK UI in the task), and the resize/collapse handle. The actual IPC
- * lifecycle lives in `use-explorer-sync.ts`, mounted once here.
+ * Deck (#293): this is `.dk-side`, and the bodies inside it are the list
+ * primitive. Labels are lowercase, which is Deck's rule, not an abbreviation.
  */
 
 import {
@@ -36,14 +32,13 @@ import { rootForCwd } from "../../lib/explorer/roots";
 import { ExplorerTree } from "./explorer-tree";
 import { ChangedList } from "./changed-list";
 import { ExplorerFind } from "./explorer-find";
-import styles from "./workspace-navigator.module.css";
 
 const RESIZE_ARROW_STEP = 16;
 
 const MODE_CHIPS: { key: TreeMode; label: string }[] = [
-  { key: "ws", label: "Workspace" },
-  { key: "proj", label: "Project" },
-  { key: "chg", label: "Changed" },
+  { key: "ws", label: "workspace" },
+  { key: "proj", label: "project" },
+  { key: "chg", label: "changed" },
 ];
 
 /** Maps the shell's stable backend slugs (`fswatch/mod.rs:387-399`) to
@@ -173,7 +168,7 @@ export function WorkspaceNavigator(): ReactElement {
   };
 
   const searchPlaceholder =
-    mode === "chg" ? "Filter changed…" : "Search files…";
+    mode === "chg" ? "filter changed…" : "search files…";
 
   // -- resize handle: live width follows the pointer, committed to the
   // persisted store only on pointerup so localStorage is not hammered. --
@@ -227,9 +222,7 @@ export function WorkspaceNavigator(): ReactElement {
   // broken.
   return (
     <aside
-      className={
-        panelCollapsed ? `${styles.exp} ${styles.expCollapsed}` : styles.exp
-      }
+      className={panelCollapsed ? "dk-side is-collapsed" : "dk-side"}
       style={panelCollapsed ? undefined : { width: widthPx }}
       data-dragging={dragWidth !== null ? "true" : undefined}
       data-collapsed={panelCollapsed ? "true" : "false"}
@@ -237,7 +230,7 @@ export function WorkspaceNavigator(): ReactElement {
       {panelCollapsed ? (
         <button
           type="button"
-          className={styles.railBtn}
+          className="dk-side__rail"
           aria-label="Expand Explorer panel"
           title="Expand Explorer panel"
           onClick={() => setPanelCollapsed(false)}
@@ -252,180 +245,191 @@ export function WorkspaceNavigator(): ReactElement {
           narrowing aside clips it instead of reflowing every row into a 14 px
           column and back again on expand. */}
       <div
-        className={styles.expbody}
+        className="dk-side__in"
         style={{ width: widthPx }}
         aria-hidden={panelCollapsed}
         inert={panelCollapsed}
       >
-      <div className={styles.exphead}>
-        <h3 className={styles.title}>Explorer</h3>
-        <button
-          type="button"
-          className={styles.expicon}
-          aria-label="Refresh"
-          title="Refresh"
-          onClick={refresh}
-        >
-          ⟳
-        </button>
-        <button
-          type="button"
-          className={styles.expicon}
-          aria-label="More"
-          title="More"
-          aria-haspopup="menu"
-          aria-expanded={moreOpen}
-          onClick={() => setMoreOpen((o) => !o)}
-        >
-          ⋯
-        </button>
-        <button
-          type="button"
-          className={styles.expicon}
-          aria-label="Collapse panel"
-          title="Collapse panel"
-          onClick={() => setPanelCollapsed(true)}
-        >
-          ⇤
-        </button>
-        {moreOpen && (
-          <div className={styles.menu} role="menu">
-            <button
-              type="button"
-              className={styles.menuItem}
-              onClick={handleCollapseAll}
-            >
-              Collapse all
-            </button>
-            <button
-              type="button"
-              className={styles.menuItem}
-              disabled={!menuTargetRoot}
-              onClick={handleRevealRoot}
-            >
-              Reveal root in Finder
-            </button>
-            <button
-              type="button"
-              className={styles.menuItem}
-              disabled={!menuTargetRoot}
-              onClick={handleOpenRoot}
-            >
-              Open root in editor
-            </button>
-            <button
-              type="button"
-              className={styles.menuItem}
-              disabled={!menuTargetRoot}
-              onClick={handleCopyRootPath}
-            >
-              Copy root path
-            </button>
-            <button
-              type="button"
-              className={styles.menuItem}
-              onClick={handleRebuildIndex}
-            >
-              Rebuild file index
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className={styles.expmodes} role="tablist">
-        {MODE_CHIPS.map((chip) => {
-          const active =
-            mode === chip.key || (mode === "find" && lastTreeMode === chip.key);
-          const sublabel =
-            chip.key === "ws"
-              ? `${roots.length} roots`
-              : chip.key === "proj"
-                ? "follows pane"
-                : "git";
-          return (
-            <span
-              key={chip.key}
-              role="tab"
-              aria-selected={active}
-              tabIndex={0}
-              className={`${styles.expmode} ${active ? styles.expmodeOn : ""}`}
-              onClick={() => setMode(chip.key)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setMode(chip.key);
-                }
-              }}
-            >
-              {chip.label}
-              <b className={styles.expmodeSub}>{sublabel}</b>
-            </span>
-          );
-        })}
-      </div>
-
-      <div
-        className={`${styles.expsearch} ${mode === "find" ? styles.sboxActive : ""}`}
-      >
-        <div className={styles.sbox}>
-          <span aria-hidden="true">⌕</span>
-          <input
-            ref={searchInputRef}
-            className={styles.q}
-            value={query}
-            placeholder={searchPlaceholder}
-            aria-label="Search files"
-            onFocus={onSearchFocus}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onSearchKeyDown}
-          />
-          <span className={styles.kbd}>⌘P</span>
+        <div className="dk-side__h">
+          {/* Still "explorer", lowercased: the aria-labels beside it name the
+              Explorer panel, and the mode chip below already says workspace. */}
+          <h3>explorer</h3>
+          <span className="sp" />
+          <button
+            type="button"
+            className="dk-side__i"
+            aria-label="Refresh"
+            title="Refresh"
+            onClick={refresh}
+          >
+            ⟳
+          </button>
+          <button
+            type="button"
+            className="dk-side__i"
+            aria-label="More"
+            title="More"
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((o) => !o)}
+          >
+            ⋯
+          </button>
+          <button
+            type="button"
+            className="dk-side__i"
+            aria-label="Collapse panel"
+            title="Collapse panel"
+            onClick={() => setPanelCollapsed(true)}
+          >
+            ⇤
+          </button>
+          {moreOpen && (
+            <div className="dk-menu" role="menu">
+              <button type="button" onClick={handleCollapseAll}>
+                collapse all
+              </button>
+              <button
+                type="button"
+                disabled={!menuTargetRoot}
+                onClick={handleRevealRoot}
+              >
+                reveal root in Finder
+              </button>
+              <button
+                type="button"
+                disabled={!menuTargetRoot}
+                onClick={handleOpenRoot}
+              >
+                open root in editor
+              </button>
+              <button
+                type="button"
+                disabled={!menuTargetRoot}
+                onClick={handleCopyRootPath}
+              >
+                copy root path
+              </button>
+              <button type="button" onClick={handleRebuildIndex}>
+                rebuild file index
+              </button>
+            </div>
+          )}
         </div>
-      </div>
 
-      {mode === "ws" && (
-        <ExplorerTree mode="ws" roots={roots} followedRoot={followedRoot} />
-      )}
-      {mode === "proj" && (
-        <ExplorerTree mode="proj" roots={roots} followedRoot={followedRoot} />
-      )}
-      {mode === "chg" && <ChangedList roots={roots} />}
-      {mode === "find" && <ExplorerFind roots={roots} />}
+        <div className="dk-side__row">
+          <div className="dk-seg" role="tablist">
+            {MODE_CHIPS.map((chip) => {
+              const active =
+                mode === chip.key ||
+                (mode === "find" && lastTreeMode === chip.key);
+              const sublabel =
+                chip.key === "ws"
+                  ? `${roots.length} roots`
+                  : chip.key === "proj"
+                    ? "follows pane"
+                    : "git";
+              return (
+                <button
+                  key={chip.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={active ? "on" : undefined}
+                  onClick={() => setMode(chip.key)}
+                >
+                  {chip.label}
+                  <b
+                    style={{
+                      display: "block",
+                      fontWeight: 400,
+                      fontSize: "var(--fs-xs)",
+                      opacity: 0.75,
+                    }}
+                  >
+                    {sublabel}
+                  </b>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-      <div className={styles.expfoot}>
-        {watch ? (
-          <>
-            <span
-              className={`${styles.dot} ${watch.degraded ? styles.dotWarn : ""}`}
+        <div className="dk-side__row">
+          <div
+            className="dk-field"
+            style={mode === "find" ? { borderColor: "var(--fg-3)" } : undefined}
+          >
+            <span aria-hidden="true" className="dim">
+              ⌕
+            </span>
+            <input
+              ref={searchInputRef}
+              value={query}
+              placeholder={searchPlaceholder}
+              aria-label="Search files"
+              onFocus={onSearchFocus}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onSearchKeyDown}
             />
-            watching {watch.rootCount} roots ·{" "}
-            {formatCount(watch.indexedFileCount)} files ·{" "}
-            {backendLabel(watch.backend)}
-            <br />
-            excluded: {watch.excludedDirs.join(" · ")}
-            {watch.degraded && watch.rejected[0] && (
-              <>
-                <br />
-                {watch.rejected[0].reason}
-              </>
-            )}
-          </>
-        ) : (
-          "starting watcher…"
-        )}
-      </div>
+            <kbd className="dim" style={{ fontSize: "var(--fs-xs)" }}>
+              ⌘P
+            </kbd>
+          </div>
+        </div>
 
-      <div
-        className={styles.resizer}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize Explorer panel"
-        tabIndex={0}
-        onPointerDown={onResizerPointerDown}
-        onPointerMove={onResizerPointerMove}
-        onPointerUp={onResizerPointerUp}
-        onKeyDown={onResizerKeyDown}
-      />
+        <div className="dk-side__body">
+          {mode === "ws" && (
+            <ExplorerTree mode="ws" roots={roots} followedRoot={followedRoot} />
+          )}
+          {mode === "proj" && (
+            <ExplorerTree
+              mode="proj"
+              roots={roots}
+              followedRoot={followedRoot}
+            />
+          )}
+          {mode === "chg" && <ChangedList roots={roots} />}
+          {mode === "find" && <ExplorerFind roots={roots} />}
+        </div>
+
+        <div className="dk-side__f">
+          {watch ? (
+            <>
+              <span
+                className="dk-s"
+                role="img"
+                aria-label={watch.degraded ? "stalled" : "running"}
+                data-s={watch.degraded ? "stall" : "run"}
+              />{" "}
+              watching {watch.rootCount} roots ·{" "}
+              {formatCount(watch.indexedFileCount)} files ·{" "}
+              {backendLabel(watch.backend)}
+              <br />
+              excluded: {watch.excludedDirs.join(" · ")}
+              {watch.degraded && watch.rejected[0] && (
+                <>
+                  <br />
+                  {watch.rejected[0].reason}
+                </>
+              )}
+            </>
+          ) : (
+            "starting watcher…"
+          )}
+        </div>
+
+        <div
+          className="dk-side__rz"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize Explorer panel"
+          tabIndex={0}
+          onPointerDown={onResizerPointerDown}
+          onPointerMove={onResizerPointerMove}
+          onPointerUp={onResizerPointerUp}
+          onKeyDown={onResizerKeyDown}
+        />
       </div>
     </aside>
   );

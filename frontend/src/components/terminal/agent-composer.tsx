@@ -185,14 +185,16 @@ function pillLabel(pill: ContextPill): string {
   }
 }
 
-function pillClass(pill: ContextPill): string | undefined {
+/** The pill's Deck tone: a file is live context, a task is what you are being
+ *  asked for, a template is a thing already decided. */
+function pillTone(pill: ContextPill): string | undefined {
   switch (pill.kind) {
     case "file":
-      return styles.pillFile;
+      return "run";
     case "task":
-      return styles.pillTask;
+      return "wait";
     case "template":
-      return styles.pillTpl;
+      return undefined;
   }
 }
 
@@ -579,11 +581,10 @@ function ProviderModelRow({
   }
 
   return (
-    <div className={styles.selectors}>
-      <label className={styles.selectWrap}>
-        <span className={styles.selectLabel}>provider</span>
+    <>
+      <label className={`dk-sel${unapplied ? " stale" : ""}`}>
+        <span className="dim">provider</span>
         <select
-          className={`${styles.select} ${unapplied ? styles.selectStale : ""}`}
           value={active.id}
           onChange={(e) => handleProviderChange(Number(e.currentTarget.value))}
           aria-label="Agent provider"
@@ -598,17 +599,17 @@ function ProviderModelRow({
       {unapplied ? (
         <button
           type="button"
-          className={styles.selectWarn}
+          className="dk-btn"
+          style={{ color: "var(--warn)", borderColor: "var(--warn)" }}
           onClick={onRequestRestart}
           title={`This session started before ${active.displayName} was known, so it is running without that provider's environment — which is what a 401 on the first message means. Restart to apply it.`}
         >
           ⚠ restart to apply
         </button>
       ) : null}
-      <label className={styles.selectWrap}>
-        <span className={styles.selectLabel}>model</span>
+      <label className="dk-sel">
+        <span className="dim">model</span>
         <select
-          className={styles.select}
           value={model ?? active.defaultModel ?? ""}
           onChange={(e) => handleModelChange(e.currentTarget.value)}
           disabled={models.length === 0}
@@ -626,14 +627,13 @@ function ProviderModelRow({
         </select>
       </label>
       {modelError !== null ? (
-        <span className={styles.selectError} title={modelError}>
+        <span className="dk-tag" data-s="fail" title={modelError}>
           model switch failed
         </span>
       ) : null}
-      <label className={styles.selectWrap}>
-        <span className={styles.selectLabel}>mode</span>
+      <label className="dk-sel">
+        <span className="dim">mode</span>
         <select
-          className={styles.select}
           value={shownMode}
           onChange={(e) => handleModeChange(e.currentTarget.value)}
           aria-label="Permission mode"
@@ -652,13 +652,14 @@ function ProviderModelRow({
       </label>
       {(modeError ?? refusedMode) !== null ? (
         <span
-          className={styles.selectError}
+          className="dk-tag"
+          data-s="wait"
           title={modeError ?? refusedMode ?? ""}
         >
           mode switch refused
         </span>
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -1389,19 +1390,20 @@ export function AgentComposer({
 
   return (
     <div
-      className={sessionEnded ? `${styles.composer} ${styles.composerStale}` : styles.composer}
+      className="dk-comp"
       data-agent-composer
       // "Is there a session behind this input?", readable from the DOM: the
       // pane's own status is not the answer once a start has been refused (#42).
       data-session={sessionEnded ? "none" : "live"}
     >
-      <div className={styles.cmode}>
-        <span className={`${styles.mbadge} ${styles.mbadgeComposing}`}>◆ Conversation</span>
+      {/* Config row, in the prototype's order: what this pane is, then the
+          selectors that decide how the next turn runs. */}
+      <div className="dk-comp__cfg">
+        <span className="dk-tag" data-s="run">
+          conversation
+        </span>
         {subagentCount > 0 ? (
-          <span
-            className={`${styles.mbadge} ${styles.mbadgeSubagent}`}
-            data-testid="composer-subagent-badge"
-          >
+          <span className="dk-tag" data-testid="composer-subagent-badge">
             ◈ {subagentCount} sub-agent{subagentCount === 1 ? "" : "s"}
           </span>
         ) : null}
@@ -1410,38 +1412,41 @@ export function AgentComposer({
           // session can launch a dozen sub-agents, and tabs would either wrap
           // over the composer or scroll horizontally, both worse than a list
           // that stays one control wide however many agents there are.
-          <select
-            className={styles.viewPick}
-            aria-label="Show which agent"
-            value={viewKey(selectedView ?? { kind: "main" })}
-            onChange={(e) => {
-              onSelectView(parseViewKey(e.currentTarget.value));
-              // Hand focus back to the editor, exactly as the recall pill
-              // does below. Without this the caret is left on the <select>,
-              // where Escape reaches no handler at all — `handleKeyDown` is
-              // bound only on the textarea and the window-level Escape bails
-              // on `[data-agent-composer]` — so "Escape while viewing a
-              // sub-agent returns to the main transcript" would silently not
-              // hold for the pointer user, who is the likeliest one to be
-              // standing here (plan D16). The caret is read off the blurred
-              // textarea, which retains its selection, so a pick costs the
-              // user neither their draft nor their place.
-              focusComposerAt(leafId, textareaRef.current?.selectionStart ?? undefined);
-            }}
-            data-testid="composer-view-picker"
-          >
-            {views.map((v) => (
-              <option key={v.key} value={v.key}>
-                {v.running ? "◉ " : ""}
-                {v.label}
-                {v.elapsedMs !== null ? ` · ${formatDuration(v.elapsedMs)}` : ""}
-              </option>
-            ))}
-          </select>
+          <label className="dk-sel">
+            <span className="dim">view</span>
+            <select
+              aria-label="Show which agent"
+              value={viewKey(selectedView ?? { kind: "main" })}
+              onChange={(e) => {
+                onSelectView(parseViewKey(e.currentTarget.value));
+                // Hand focus back to the editor, exactly as the recall pill
+                // does below. Without this the caret is left on the <select>,
+                // where Escape reaches no handler at all — `handleKeyDown` is
+                // bound only on the textarea and the window-level Escape bails
+                // on `[data-agent-composer]` — so "Escape while viewing a
+                // sub-agent returns to the main transcript" would silently not
+                // hold for the pointer user, who is the likeliest one to be
+                // standing here (plan D16). The caret is read off the blurred
+                // textarea, which retains its selection, so a pick costs the
+                // user neither their draft nor their place.
+                focusComposerAt(leafId, textareaRef.current?.selectionStart ?? undefined);
+              }}
+              data-testid="composer-view-picker"
+            >
+              {views.map((v) => (
+                <option key={v.key} value={v.key}>
+                  {v.running ? "◉ " : ""}
+                  {v.label}
+                  {v.elapsedMs !== null ? ` · ${formatDuration(v.elapsedMs)}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
         ) : null}
         {orchestrationBadge !== "" ? (
           <span
-            className={`${styles.mbadge} ${styles.mbadgeOrchestration}`}
+            className="dk-tag"
+            data-s="wait"
             data-testid="composer-orchestration-badge"
           >
             ◇ {orchestrationBadge}
@@ -1455,9 +1460,10 @@ export function AgentComposer({
           live={live}
           onRequestRestart={onRequestRestart}
         />
+        <span className="sp" />
         <button
           type="button"
-          className={styles.mswap}
+          className="dk-btn bare"
           onClick={() => void splitPane(leafId, "h")}
           title="Open a shell pane beside this one (⌘⇧T)"
         >
@@ -1465,14 +1471,14 @@ export function AgentComposer({
         </button>
       </div>
 
-      <div className={styles.cctx}>
+      {/* Context row — what this turn carries with it. */}
+      <div className="dk-comp__ctx">
         {pills.map((pill) => (
-          <span key={pill.id} className={`${styles.pill} ${pillClass(pill)}`}>
-            <span className={styles.pillKey}>{pillKey(pill)}</span>
-            {pillLabel(pill)}
+          <span key={pill.id} className="dk-tag" data-s={pillTone(pill)}>
+            {pillKey(pill)} {pillLabel(pill)}
             <button
               type="button"
-              className={styles.pillRemove}
+              style={{ marginLeft: 5, color: "inherit" }}
               aria-label={`Remove ${pillLabel(pill)}`}
               onClick={() => removePill(leafId, pill.id)}
             >
@@ -1482,7 +1488,7 @@ export function AgentComposer({
         ))}
         <button
           type="button"
-          className={`${styles.pill} ${styles.pillAdd}`}
+          className="dk-btn bare"
           // Keeps this press away from the picker's outside-click listener, so
           // clicking the trigger while open closes it once rather than closing
           // and reopening in the same gesture.
@@ -1494,7 +1500,7 @@ export function AgentComposer({
         </button>
         <button
           type="button"
-          className={`${styles.pill} ${styles.pillWire}`}
+          className="dk-btn bare"
           aria-label="Show what Send writes to the agent"
           aria-expanded={popover === "preview"}
           aria-controls={previewPanelId}
@@ -1639,78 +1645,88 @@ export function AgentComposer({
         </div>
       </div>
 
-      <div className={styles.cact}>
+      {/* Affordance row — what you can press, and where the send lives. */}
+      <div className="dk-comp__act">
         {agentPaneCount > 1 ? (
           <button
             type="button"
-            className={styles.fanout}
+            className="dk-btn bare"
             onClick={() => setFanoutAll(leafId, !fanoutAll)}
           >
             fanout{" "}
-            <b className={styles.fanoutCount}>
+            <b className="dim" style={{ fontWeight: 400 }}>
               {fanoutAll ? `${agentPaneCount} agent panes` : "this session"}
             </b>
           </button>
         ) : (
-          <span className={styles.fanout}>
-            fanout <b className={styles.fanoutCount}>this session</b>
+          <span className="dk-comp__note">
+            fanout{" "}
+            <b className="dim" style={{ fontWeight: 400 }}>
+              this session
+            </b>
           </span>
         )}
-        <span className={styles.hint}>
+        <span className="dk-comp__note">
           {startFailed ? (
             "no session for this pane · Retry to start one"
           ) : sessionEnded ? (
             "session ended · Restart to send"
           ) : (
             <>
-              <span className={styles.kbd}>/</span> commands ·{" "}
-              <span className={styles.kbd}>@</span> mention ·{" "}
-              <span className={styles.kbd}>⇧↩</span> newline ·{" "}
-              <span className={styles.kbd}>⌃↑↓</span> agents ·{" "}
-              <span className={styles.kbd}>esc</span>{" "}
+              <kbd className="dim">/</kbd> commands ·{" "}
+              <kbd className="dim">@</kbd> mention ·{" "}
+              <kbd className="dim">⇧↩</kbd> newline ·{" "}
+              <kbd className="dim">⌃↑↓</kbd> agents ·{" "}
+              <kbd className="dim">esc</kbd>{" "}
               {selectedView !== undefined && selectedView.kind !== "main"
                 ? "back to main"
                 : "interrupt"}{" "}
               ·{" "}
-              <span className={styles.kbd}>⌘Z</span> undo
+              <kbd className="dim">⌘Z</kbd> undo
             </>
           )}
         </span>
         <button
           type="button"
-          className={styles.sendGhost}
+          className="dk-btn"
           // `sessionEnded` as well as the status: queueing behind a turn that no
           // longer has a session behind it is the same false promise Send was
           // making (#42) — the pane's `running` can outlive the session itself.
           disabled={status !== "running" || sessionEnded || command !== undefined}
           onClick={() => queue(leafId)}
         >
-          ⌛ Queue
+          ⌛ queue
         </button>
-        <button type="button" className={styles.send} disabled={sendDisabled} onClick={handleSend}>
-          {command ? "Run" : "Send"} <span className={styles.kbd}>⌘↩</span>
+        <button
+          type="button"
+          className="dk-btn pri"
+          disabled={sendDisabled}
+          onClick={handleSend}
+        >
+          {command ? "run" : "send"} <kbd>⌘↩</kbd>
         </button>
       </div>
 
       {note !== null ? (
         <div
-          className={`${styles.cnote} ${note.kind === "error" ? styles.cnoteError : ""}`}
+          className={`dk-comp__note${note.kind === "error" ? " err" : ""}`}
           role="status"
         >
           {note.note}
         </div>
       ) : null}
       {showUnregisteredWarning && wireWarningText !== null ? (
-        <div className={styles.wireWarn}>{wireWarningText}</div>
+        <div className="dk-comp__note err">{wireWarningText}</div>
       ) : null}
 
 
-      <div className={styles.chist}>
+      <div className="dk-comp__hist">
         {history.slice(0, MAX_HISTORY_PILLS).map((entry, i) => (
           <button
             key={i}
             type="button"
-            className={styles.hpill}
+            className="dk-btn bare"
+            style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}
             title={entry}
             onClick={() => {
               recall(i, leafId);
@@ -1725,7 +1741,7 @@ export function AgentComposer({
           </button>
         ))}
         {queued.map((entry, i) => (
-          <span key={i} className={`${styles.hpill} ${styles.hpillQueued}`} title={entry}>
+          <span key={i} className="dk-tag" data-s="todo" title={entry}>
             ⌛ queued · {entry}
           </span>
         ))}

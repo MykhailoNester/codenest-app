@@ -24,8 +24,13 @@ import { useFindActions } from "../../hooks/use-find-actions";
 import { useExplorerStore } from "../../stores/explorer-store";
 import type { RootDescriptor } from "../../lib/explorer/roots";
 import { fuzzyRank, type FuzzyMatch } from "../../lib/explorer/fuzzy";
-import { iconForEntry, iconClassFor } from "../../lib/explorer/file-icons";
-import styles from "./workspace-navigator.module.css";
+import {
+  DECK_ICON_CLASSES,
+  iconForEntry,
+  iconClassFor,
+} from "../../lib/explorer/file-icons";
+import { DECK_COLS } from "../deck/deck-cols";
+import { DeckGrid, DeckLine } from "../deck/deck-grid";
 
 export interface ExplorerFindProps {
   roots: RootDescriptor[];
@@ -59,11 +64,7 @@ function highlightRanges(
     if (start > cursor) {
       pieces.push(<span key={`${i}-pre`}>{path.slice(cursor, start)}</span>);
     }
-    pieces.push(
-      <b key={`${i}-hit`} className={styles.match}>
-        {path.slice(start, end)}
-      </b>,
-    );
+    pieces.push(<b key={`${i}-hit`}>{path.slice(start, end)}</b>);
     cursor = end;
   });
   if (cursor < path.length) {
@@ -133,23 +134,59 @@ export function ExplorerFind({ roots }: ExplorerFindProps): ReactElement {
     if (!stillShown) setSelectedPath(first.item.absPath);
   }, [shown, selectedPath, setSelectedPath]);
 
+  const actions: {
+    glyph: string;
+    label: string;
+    kbd: string;
+    disabled: boolean;
+    title?: string;
+    run: () => void;
+  }[] = [
+    {
+      glyph: "↗",
+      label: "Open in editor",
+      kbd: "⌘⏎",
+      disabled: !hasSelection,
+      run: openSelected,
+    },
+    {
+      glyph: "⌗",
+      label: "Paste path into shell pane",
+      kbd: "⇧⏎",
+      disabled: !canPaste,
+      ...(canPaste ? {} : { title: "Focus a terminal pane to paste into" }),
+      run: pasteSelected,
+    },
+    {
+      glyph: "⇱",
+      label: "Reveal in Finder",
+      kbd: "⏎",
+      disabled: !hasSelection,
+      run: revealSelected,
+    },
+  ];
+
   return (
-    <div className={styles.tree} role="tree" aria-label="Find">
-      <div className={styles.grp}>
-        {ranked.length} matches
-        <span className={styles.grpCnt}>
+    <DeckGrid
+      cols={DECK_COLS.tree}
+      className="tree"
+      role="tree"
+      manageFocus={false}
+      label="Find"
+    >
+      <div className="dk-head" style={{ gridTemplateColumns: "1fr auto" }}>
+        <span>{ranked.length} matches</span>
+        <span>
           {sourceLabel(indexes)} · {indexes.length} roots
         </span>
       </div>
-      {anyTruncated && <div className={styles.empty}>index truncated</div>}
+      {anyTruncated && <div className="dk-note">index truncated</div>}
       {skippedNonUtf8 > 0 && (
-        <div className={styles.empty}>
+        <div className="dk-note">
           {skippedNonUtf8} files skipped (non-UTF-8)
         </div>
       )}
-      {!trimmedQuery && (
-        <div className={styles.empty}>Type to search files…</div>
-      )}
+      {!trimmedQuery && <div className="dk-note">Type to search files…</div>}
       {shown.map(({ item, match }) => {
         const icon = iconForEntry(
           item.relPath.slice(item.relPath.lastIndexOf("/") + 1),
@@ -157,71 +194,68 @@ export function ExplorerFind({ roots }: ExplorerFindProps): ReactElement {
           false,
         );
         return (
-          <div
+          <DeckLine
             key={item.absPath}
             role="treeitem"
-            aria-selected={selectedPath === item.absPath}
-            className={`${styles.row} ${styles.d1} ${
-              selectedPath === item.absPath ? styles.rowSelected : ""
-            }`}
-            onClick={() => setSelectedPath(item.absPath)}
-          >
-            <span className={styles.tw} aria-hidden="true" />
-            <span
-              className={`${styles.ic} ${iconClassFor(icon.tone, styles)}`}
-              aria-hidden="true"
-            >
-              {icon.glyph}
-            </span>
-            <span className={styles.nm}>
-              {highlightRanges(item.relPath, match.ranges)}
-            </span>
-            <span className={styles.cnt}>{item.root.label}</span>
-          </div>
+            selected={selectedPath === item.absPath}
+            cells={[
+              {
+                v: (
+                  <span className="dk-tree__n" style={{ paddingLeft: 9 }}>
+                    <span className="t" aria-hidden="true" />
+                    <span
+                      className={`g ${iconClassFor(icon.tone, DECK_ICON_CLASSES)}`}
+                      aria-hidden="true"
+                    >
+                      {icon.glyph}
+                    </span>
+                    <span className="l">
+                      {highlightRanges(item.relPath, match.ranges)}
+                    </span>
+                  </span>
+                ),
+                title: item.absPath,
+              },
+              {
+                v: <span className="dk-meta">{item.root.label}</span>,
+                cls: "r",
+              },
+            ]}
+            rowProps={{ "aria-selected": selectedPath === item.absPath }}
+            onOpen={() => setSelectedPath(item.absPath)}
+          />
         );
       })}
 
-      <div className={styles.grp}>actions</div>
-      <button
-        type="button"
-        className={styles.row}
-        disabled={!hasSelection}
-        onClick={openSelected}
-      >
-        <span className={styles.tw} aria-hidden="true" />
-        <span className={styles.ic} aria-hidden="true">
-          ↗
-        </span>
-        <span className={styles.nm}>Open in editor</span>
-        <span className={styles.cnt}>⌘⏎</span>
-      </button>
-      <button
-        type="button"
-        className={styles.row}
-        disabled={!canPaste}
-        title={!canPaste ? "Focus a terminal pane to paste into" : undefined}
-        onClick={pasteSelected}
-      >
-        <span className={styles.tw} aria-hidden="true" />
-        <span className={styles.ic} aria-hidden="true">
-          ⌗
-        </span>
-        <span className={styles.nm}>Paste path into shell pane</span>
-        <span className={styles.cnt}>⇧⏎</span>
-      </button>
-      <button
-        type="button"
-        className={styles.row}
-        disabled={!hasSelection}
-        onClick={revealSelected}
-      >
-        <span className={styles.tw} aria-hidden="true" />
-        <span className={styles.ic} aria-hidden="true">
-          ⇱
-        </span>
-        <span className={styles.nm}>Reveal in Finder</span>
-        <span className={styles.cnt}>⏎</span>
-      </button>
-    </div>
+      <div className="dk-head" style={{ gridTemplateColumns: "1fr" }}>
+        <span>actions</span>
+      </div>
+      {actions.map((a) => (
+        <DeckLine
+          key={a.label}
+          role="treeitem"
+          cells={[
+            {
+              v: (
+                <span className="dk-tree__n" style={{ paddingLeft: 9 }}>
+                  <span className="t" aria-hidden="true" />
+                  <span className="g" aria-hidden="true">
+                    {a.glyph}
+                  </span>
+                  <span className="l">{a.label}</span>
+                </span>
+              ),
+              title: a.label,
+            },
+            { v: <span className="dk-meta">{a.kbd}</span>, cls: "r" },
+          ]}
+          rowProps={{
+            "aria-disabled": a.disabled || undefined,
+            ...(a.title !== undefined ? { title: a.title } : {}),
+          }}
+          {...(a.disabled ? {} : { onOpen: a.run })}
+        />
+      ))}
+    </DeckGrid>
   );
 }

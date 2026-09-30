@@ -251,7 +251,10 @@ export function TerminalWindowRoot(): ReactElement {
   }, []);
 
   return (
-    <div className={styles.root}>
+    // `deck` is what scopes the design system, and the popout is not wrapped
+    // in `DeckShell` — it has no rail and no status line. Carrying the class
+    // here is what gives the same layout its Deck tokens in both windows.
+    <div className={`deck ${styles.root}`}>
       {sidecarDown && (
         <div className={styles.banner} role="alert">
           <span className={styles.bannerDot} aria-hidden="true" />

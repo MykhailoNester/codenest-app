@@ -1,3 +1,6 @@
+/* Split geometry. The Deck tokens are in scope here — every pane tree renders
+   inside the sessions surface, which carries `.deck`. */
+
 .handleH {
   width: 4px;
   background: transparent;
@@ -7,7 +10,7 @@
 
 .handleH:hover,
 .handleH[data-resize-handle-active] {
-  background: var(--accent-line, rgba(59, 130, 246, 0.32));
+  background: var(--line-2);
 }
 
 .handleV {
@@ -19,7 +22,7 @@
 
 .handleV:hover,
 .handleV[data-resize-handle-active] {
-  background: var(--accent-line, rgba(59, 130, 246, 0.32));
+  background: var(--line-2);
 }
 
 .leaf {
@@ -36,5 +39,5 @@
   position: absolute;
   inset: 0;
   z-index: 50;
-  background: var(--bg-1);
+  background: var(--bg);
 }

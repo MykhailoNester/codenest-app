@@ -836,11 +836,7 @@ export function AgentPane({
 
   return (
     <div
-      className={[
-        styles.pane,
-        isFocused ? styles.paneFocused : "",
-        dropActive ? styles.paneDrop : "",
-      ]
+      className={["dk-pane", isFocused ? "on" : "", dropActive ? "drop" : ""]
         .filter(Boolean)
         .join(" ")}
       data-agent-pane-id={leafId}
@@ -860,15 +856,29 @@ export function AgentPane({
       onDrop={handlePaneDrop}
     >
       {showHeader ? (
-        <div className={styles.header}>
-          <span className={styles.kind}>Agent</span>
-          <span className={styles.title}>{title}</span>
-          <span className={styles.cwd} title={cwd ?? ""}>
+        <div className="dk-pane__h">
+          {/* Column one is the session's own state, so the header answers
+              "is this running?" before you read a word of it. */}
+          <span
+            className="dk-s"
+            role="img"
+            aria-label="agent pane"
+            data-s={
+              conv.status === "exited"
+                ? "fail"
+                : conv.status === "running"
+                  ? "run"
+                  : "idle"
+            }
+          />
+          <span className="dim">agent</span>
+          <span className="t">{title}</span>
+          <span className="w" title={cwd ?? ""}>
             {cwd ?? ""}
           </span>
           <button
             type="button"
-            className={styles.iconBtn}
+            className="i"
             onClick={() => toggleMaximize(leafId)}
             aria-label={isMaximized ? "Restore pane" : "Expand pane"}
             title={isMaximized ? "Restore pane" : "Expand pane"}
@@ -877,7 +887,7 @@ export function AgentPane({
           </button>
           <button
             type="button"
-            className={styles.close}
+            className="i"
             onClick={() => void closePane(leafId)}
             aria-label="Close pane"
           >
@@ -960,17 +970,21 @@ export function AgentPane({
           already typed.
         */}
         {startError !== null ? (
-          <div className={styles.startError}>
-            <span>{startError}</span>
-            <button type="button" className={styles.restartBtn} onClick={requestRestart}>
-              Retry
+          <div className="dk-pane__f">
+            <span className="dk-s" role="img" aria-label="failed" data-s="fail" />
+            <span style={{ color: "var(--err)" }}>{startError}</span>
+            <span className="sp" />
+            <button type="button" className="dk-btn" onClick={requestRestart}>
+              retry
             </button>
           </div>
         ) : conv.status === "exited" ? (
-          <div className={styles.endedBar}>
-            <span>Session ended (exit {conv.exitCode ?? "?"})</span>
-            <button type="button" className={styles.restartBtn} onClick={requestRestart}>
-              Restart
+          <div className="dk-pane__f">
+            <span className="dk-s" role="img" aria-label="inert" data-s="idle" />
+            <span>session ended (exit {conv.exitCode ?? "?"})</span>
+            <span className="sp" />
+            <button type="button" className="dk-btn" onClick={requestRestart}>
+              restart
             </button>
           </div>
         ) : null}

@@ -204,13 +204,13 @@ describe("WorkspaceNavigator", () => {
 
     // Two projects + the virtual Shared root, once getWorkspacePath resolves.
     await waitFor(() => {
-      const wsTab = screen.getByRole("tab", { name: /Workspace/ });
+      const wsTab = screen.getByRole("tab", { name: /workspace/i });
       within(wsTab).getByText("3 roots");
     });
 
-    const projTab = screen.getByRole("tab", { name: /Project/ });
+    const projTab = screen.getByRole("tab", { name: /project/i });
     within(projTab).getByText("follows pane");
-    const chgTab = screen.getByRole("tab", { name: /Changed/ });
+    const chgTab = screen.getByRole("tab", { name: /changed/i });
     within(chgTab).getByText("git");
   });
 
@@ -220,7 +220,7 @@ describe("WorkspaceNavigator", () => {
       expect(screen.getByRole("tree", { name: "Workspace" })).not.toBeNull();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: /Changed/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /changed/i }));
 
     expect(screen.getByRole("tree", { name: "Changed" })).not.toBeNull();
     expect(screen.queryByRole("tree", { name: "Workspace" })).toBeNull();
@@ -232,7 +232,7 @@ describe("WorkspaceNavigator", () => {
       expect(screen.getByRole("tree", { name: "Workspace" })).not.toBeNull();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: /Changed/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /changed/i }));
     expect(screen.getByRole("tree", { name: "Changed" })).not.toBeNull();
 
     act(() => {
@@ -336,7 +336,7 @@ describe("WorkspaceNavigator", () => {
     await waitFor(() => {
       expect(screen.getByRole("tree", { name: "Workspace" })).not.toBeNull();
     });
-    fireEvent.click(screen.getByRole("tab", { name: /Changed/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /changed/i }));
 
     await waitFor(() => {
       expect(screen.getAllByText("clean").length).toBeGreaterThan(0);

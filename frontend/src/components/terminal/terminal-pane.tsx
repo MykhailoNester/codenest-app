@@ -824,29 +824,36 @@ export function TerminalPane({
 
   return (
     <div
-      className={`${styles.pane} ${isFocused ? styles.paneFocused : ""} ${dropActive ? styles.paneDrop : ""}`}
+      className={`dk-pane ${isFocused ? "on" : ""} ${dropActive ? "drop" : ""}`}
       data-terminal-id={terminalId}
       {...panePathDropHandlers}
     >
       {showHeader ? (
-        <div className={styles.header}>
-          {/* Kind badge (prototype `.phead .kind.shell`, CSS line 188). Now
-              that an agent pane is the default surface, a shell pane has to say
-              what it is — the agent pane has carried its own badge since it
-              shipped, and the pair only reads as deliberate when both do. */}
-          <span className={styles.kind}>Shell</span>
+        <div className="dk-pane__h">
+          {/* State in column one, as everywhere else: a shell pane passes your
+              keystrokes to its own process and is inert until it exits. It
+              also says which kind of pane this is without a coloured dot. */}
+          <span
+            className="dk-s"
+            role="img"
+            aria-label="shell pane"
+            data-s={liveLeaf?.exited === true ? "fail" : "idle"}
+          />
+          <span className="dim">shell</span>
           {editing ? (
-            <input
-              autoFocus
-              value={draftTitle}
-              onChange={(e) => setDraftTitle(e.target.value)}
-              onBlur={commitTitle}
-              onKeyDown={onTitleKey}
-              className={styles.titleInput}
-            />
+            <span className="dk-field" style={{ height: 20, flex: "none" }}>
+              <input
+                autoFocus
+                value={draftTitle}
+                onChange={(e) => setDraftTitle(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={onTitleKey}
+                style={{ width: "8rem" }}
+              />
+            </span>
           ) : (
             <span
-              className={styles.title}
+              className="t"
               onDoubleClick={() => {
                 setDraftTitle(title);
                 setEditing(true);
@@ -855,12 +862,12 @@ export function TerminalPane({
               {title}
             </span>
           )}
-          <span className={styles.cwd} title={liveCwd ?? ""}>
+          <span className="w" title={liveCwd ?? ""}>
             {shortCwd(liveCwd)}
           </span>
           <button
             type="button"
-            className={styles.iconBtn}
+            className="i"
             onClick={() => toggleMaximize(terminalId)}
             aria-label={
               maximizedLeafId === terminalId ? "Restore pane" : "Expand pane"
@@ -877,7 +884,7 @@ export function TerminalPane({
           </button>
           <button
             type="button"
-            className={styles.close}
+            className="i"
             onClick={() => void closePane(terminalId)}
             aria-label="Close pane"
           >
@@ -925,12 +932,13 @@ export function TerminalPane({
           prototype's `⌘2` pane-index chip is deliberately not reproduced: pane
           indices are not a binding this app has (⌘1-9 switch tabs), and a chip
           that names a shortcut which does nothing is worse than no chip. */}
-      <div className={styles.modeFooter}>
-        <span className={styles.modeBadge}>○ Passthrough</span>
-        <span className={styles.modeWhy}>same cwd, own process</span>
+      <div className="dk-pane__f">
+        <span className="dk-tag">passthrough</span>
+        <span>same cwd, own process</span>
+        <span className="sp" />
         <button
           type="button"
-          className={styles.modeSwap}
+          className="dk-btn bare"
           onClick={() => void splitPane(terminalId, "h", { kind: "agent" })}
           title="Start an agent pane beside this shell (⌘⇧A)"
         >

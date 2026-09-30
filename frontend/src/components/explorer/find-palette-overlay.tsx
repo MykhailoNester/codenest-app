@@ -27,7 +27,6 @@ import { useFindActions } from "../../hooks/use-find-actions";
 import { resolveRoots } from "../../lib/explorer/roots";
 import { formatCount } from "../../lib/format-helpers";
 import { ExplorerFind } from "./explorer-find";
-import styles from "./workspace-navigator.module.css";
 import overlayStyles from "./find-palette-overlay.module.css";
 
 export function FindPaletteOverlay(): ReactElement | null {
@@ -111,14 +110,15 @@ export function FindPaletteOverlay(): ReactElement | null {
         role="dialog"
         aria-label="Find file"
       >
-        <div className={styles.expsearch}>
-          <div className={styles.sbox}>
-            <span aria-hidden="true">⌕</span>
+        <div className="dk-side__row">
+          <div className="dk-field">
+            <span aria-hidden="true" className="dim">
+              ⌕
+            </span>
             <input
               ref={inputRef}
-              className={styles.q}
               value={query}
-              placeholder="Search files…"
+              placeholder="search files…"
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -133,7 +133,9 @@ export function FindPaletteOverlay(): ReactElement | null {
                 }
               }}
             />
-            <span className={styles.kbd}>⌘P</span>
+            <kbd className="dim" style={{ fontSize: "var(--fs-xs)" }}>
+              ⌘P
+            </kbd>
           </div>
         </div>
         <ExplorerFind roots={roots} />
