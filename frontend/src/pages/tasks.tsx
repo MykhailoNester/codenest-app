@@ -19,7 +19,6 @@
  * `tasks`.
  */
 import {
-  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -29,7 +28,6 @@ import {
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import {
   useTasks,
@@ -39,37 +37,25 @@ import {
   useTaxonomy,
   useAgentRuns,
   changeTaskStatus,
-  updateTask,
-  setBoardWipLimit,
-  addTaskLabel,
-  removeTaskLabel,
   type AgentRun,
-  type LookupsOut,
   type Task,
   type Taxonomy,
   type WorkflowVocabEntry,
 } from "../lib/api";
-import { Shell } from "../components/layout/shell";
-import { LaunchFromSourceButton } from "../components/launch/launch-from-source-button";
-import { BoardColumn } from "../components/taskboard/board-column";
+import { DeckShell } from "../components/deck/deck-shell";
+import { DeckTaskGroup } from "../components/deck/deck-task-group";
+import { DeckFilters } from "../components/deck/deck-filters";
+import { taskState } from "../components/deck/deck-cols";
+import type { DeckState } from "../components/deck/deck-grid";
+
+type DeckStateOrUndefined = DeckState | undefined;
 import { ComposerModal } from "../components/taskboard/composer-modal";
-import { FilterBar } from "../components/taskboard/filter-bar";
-import {
-  ViewToggle,
-  type ViewMode,
-} from "../components/taskboard/view-toggle";
 import type {
-  BoardColumnDef,
   ChipOption,
-  TaskBoardVocab,
 } from "../components/taskboard/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VIRTUAL_THRESHOLD = 50;
-const ROW_HEIGHT_PX = 41;
-const ROW_GRID =
-  "60px minmax(180px,2fr) minmax(140px,1fr) 130px 90px 140px 100px";
 
 const UNASSIGNED_NAME = "Unassigned";
 
@@ -104,8 +90,6 @@ const FALLBACK_TASK_STATUSES: ReadonlyArray<WorkflowVocabEntry> = [
 // Kept in sync by hand with the identical string in composer-modal.tsx
 // (not shared via an export: see the note at that file's private
 // buildAssigneeOptions for why).
-const AGENT_HINT =
-  "Assigning does not start a session. The agent's saved provider and model become the defaults when you launch this task with ▶.";
 
 const SORT_OPTIONS: readonly ChipOption[] = [
   { value: "", label: "Newest" },
@@ -116,345 +100,18 @@ const SORT_OPTIONS: readonly ChipOption[] = [
 
 // Module-level sentinels to avoid fresh-reference cascade.
 const NO_STATUSES: string[] = [];
-const NO_STATUS_COLORS: Record<string, string> = {};
 const NO_VOCAB: WorkflowVocabEntry[] = [];
 const NO_TAXONOMY: Taxonomy[] = [];
-const NO_WIP: Record<string, number> = {};
 const NO_RUNS: AgentRun[] = [];
 
 // ─── List-view sub-components (unchanged — only the toolbar above them is
 //     reskinned; the row markup, virtualization and grouping stay as-is) ──────
 
-interface TaskRowCallbacks {
-  navigate: (path: string) => void;
-  setProjectFilter: (id: string) => void;
-  changeStatus: (id: number, status: string) => void;
-  statuses: string[];
-  statusColors: Record<string, string>;
-  statusLabels: Record<string, string>;
-  priorityColors: Record<string, string>;
-  priorityLabels: Record<string, string>;
-}
 
-interface TaskRowProps {
-  task: Task;
-  cb: TaskRowCallbacks;
-}
 
-function TaskRowTableInner({ task: t, cb }: TaskRowProps): ReactElement {
-  return (
-    <tr style={{ borderBottom: "1px solid var(--line-1)" }}>
-      <td style={{ padding: "8px 12px" }}>
-        <button
-          type="button"
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--accent)",
-            fontSize: 13,
-            padding: 0,
-          }}
-          onClick={() => cb.navigate(`/tasks/${t.id}`)}
-        >
-          #{t.id}
-        </button>
-      </td>
-      <td style={{ padding: "8px 12px" }}>
-        <button
-          type="button"
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--fg-0)",
-            fontSize: 13,
-            padding: 0,
-            textAlign: "left",
-          }}
-          onClick={() => cb.navigate(`/tasks/${t.id}`)}
-        >
-          {t.title}
-        </button>
-      </td>
-      <td style={{ padding: "8px 12px" }}>
-        <button
-          type="button"
-          onClick={() => cb.setProjectFilter(String(t.project_id))}
-          style={{
-            fontSize: 11,
-            padding: "2px 7px",
-            borderRadius: 3,
-            background: "color-mix(in srgb, var(--accent) 12%, transparent)",
-            border:
-              "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
-            color: "var(--accent)",
-            cursor: "pointer",
-          }}
-        >
-          {t.project_name ?? UNASSIGNED_NAME}
-        </button>
-      </td>
-      <td style={{ padding: "8px 12px" }}>
-        <select
-          value={t.status}
-          onChange={(e) => cb.changeStatus(t.id, e.target.value)}
-          style={{
-            fontSize: 11,
-            padding: "2px 6px",
-            background: `${cb.statusColors[t.status] ?? "var(--bg-2)"}20`,
-            border: `1px solid ${cb.statusColors[t.status] ?? "var(--line-2)"}50`,
-            color: cb.statusColors[t.status] ?? "var(--fg-2)",
-            borderRadius: 4,
-            cursor: "pointer",
-          }}
-        >
-          {cb.statuses.map((s) => (
-            <option key={s} value={s}>
-              {cb.statusLabels[s] ?? s}
-            </option>
-          ))}
-        </select>
-      </td>
-      <td style={{ padding: "8px 12px" }}>
-        <span
-          style={{
-            fontSize: 11,
-            padding: "2px 7px",
-            borderRadius: 3,
-            border: `1px solid ${cb.priorityColors[t.priority] ?? "var(--line-2)"}50`,
-            color: cb.priorityColors[t.priority] ?? "var(--fg-3)",
-          }}
-        >
-          {cb.priorityLabels[t.priority] ?? t.priority}
-        </span>
-      </td>
-      <td style={{ padding: "8px 12px", fontSize: 13, color: "var(--fg-3)" }}>
-        {t.assignee_name ?? "—"}
-      </td>
-      <td style={{ padding: "4px 8px" }} onClick={(e) => e.stopPropagation()}>
-        <LaunchFromSourceButton
-          kind="task"
-          id={t.id}
-          label="Launch"
-          icon="play"
-          tone="run"
-        />
-      </td>
-    </tr>
-  );
-}
-const TaskRowTable = memo(TaskRowTableInner);
 
-function TaskRowVirtualInner({ task: t, cb }: TaskRowProps): ReactElement {
-  const cell = {
-    padding: "8px 12px",
-    display: "flex",
-    alignItems: "center",
-  } as const;
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: ROW_GRID,
-        height: ROW_HEIGHT_PX,
-        borderBottom: "1px solid var(--line-1)",
-      }}
-    >
-      <div style={cell}>
-        <button
-          type="button"
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--accent)",
-            fontSize: 13,
-            padding: 0,
-          }}
-          onClick={() => cb.navigate(`/tasks/${t.id}`)}
-        >
-          #{t.id}
-        </button>
-      </div>
-      <div style={{ ...cell, overflow: "hidden" }}>
-        <button
-          type="button"
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--fg-0)",
-            fontSize: 13,
-            padding: 0,
-            textAlign: "left",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            width: "100%",
-          }}
-          onClick={() => cb.navigate(`/tasks/${t.id}`)}
-        >
-          {t.title}
-        </button>
-      </div>
-      <div style={cell}>
-        <button
-          type="button"
-          onClick={() => cb.setProjectFilter(String(t.project_id))}
-          style={{
-            fontSize: 11,
-            padding: "2px 7px",
-            borderRadius: 3,
-            background: "color-mix(in srgb, var(--accent) 12%, transparent)",
-            border:
-              "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
-            color: "var(--accent)",
-            cursor: "pointer",
-            maxWidth: "100%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {t.project_name ?? UNASSIGNED_NAME}
-        </button>
-      </div>
-      <div style={cell}>
-        <select
-          value={t.status}
-          onChange={(e) => cb.changeStatus(t.id, e.target.value)}
-          style={{
-            fontSize: 11,
-            padding: "2px 6px",
-            background: `${cb.statusColors[t.status] ?? "var(--bg-2)"}20`,
-            border: `1px solid ${cb.statusColors[t.status] ?? "var(--line-2)"}50`,
-            color: cb.statusColors[t.status] ?? "var(--fg-2)",
-            borderRadius: 4,
-            cursor: "pointer",
-          }}
-        >
-          {cb.statuses.map((s) => (
-            <option key={s} value={s}>
-              {cb.statusLabels[s] ?? s}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div style={cell}>
-        <span
-          style={{
-            fontSize: 11,
-            padding: "2px 7px",
-            borderRadius: 3,
-            border: `1px solid ${cb.priorityColors[t.priority] ?? "var(--line-2)"}50`,
-            color: cb.priorityColors[t.priority] ?? "var(--fg-3)",
-          }}
-        >
-          {cb.priorityLabels[t.priority] ?? t.priority}
-        </span>
-      </div>
-      <div style={{ ...cell, fontSize: 13, color: "var(--fg-3)" }}>
-        {t.assignee_name ?? "—"}
-      </div>
-      <div
-        style={{ ...cell, padding: "4px 8px" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <LaunchFromSourceButton
-          kind="task"
-          id={t.id}
-          label="Launch"
-          icon="play"
-          tone="run"
-        />
-      </div>
-    </div>
-  );
-}
-const TaskRowVirtual = memo(TaskRowVirtualInner);
 
-const HEADER_LABELS = [
-  "ID",
-  "Title",
-  "Project",
-  "Status",
-  "Priority",
-  "Assignee",
-  "",
-] as const;
 
-function VirtualTaskList({
-  tasks,
-  cb,
-}: {
-  tasks: Task[];
-  cb: TaskRowCallbacks;
-}): ReactElement {
-  const parentRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line react-hooks/incompatible-library
-  const virtualizer = useVirtualizer({
-    count: tasks.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT_PX,
-    overscan: 8,
-  });
-  return (
-    <div className="d3-card" style={{ padding: 0, overflow: "hidden" }}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: ROW_GRID,
-          borderBottom: "1px solid var(--line-2)",
-          background: "var(--bg-2)",
-        }}
-      >
-        {HEADER_LABELS.map((h) => (
-          <div
-            key={h}
-            style={{
-              padding: "8px 12px",
-              fontSize: 11,
-              color: "var(--fg-3)",
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            {h}
-          </div>
-        ))}
-      </div>
-      <div ref={parentRef} style={{ height: 600, overflowY: "auto" }}>
-        <div
-          style={{
-            height: virtualizer.getTotalSize(),
-            position: "relative",
-            width: "100%",
-          }}
-        >
-          {virtualizer.getVirtualItems().map((vRow) => {
-            const t = tasks[vRow.index]!;
-            return (
-              <div
-                key={t.id}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${vRow.start}px)`,
-                }}
-              >
-                <TaskRowVirtual task={t} cb={cb} />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -464,8 +121,7 @@ export function TasksPage(): ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // View mode persisted in URL so refresh keeps the user's choice
-  const viewParam = searchParams.get("view");
-  const viewMode: ViewMode = viewParam === "list" ? "list" : "board";
+  const [groupBy, setGroupBy] = useState<"status" | "project">("status");
 
   const projectFilter = searchParams.get("project_id") ?? "";
   const priorityFilter = searchParams.get("priority") ?? "";
@@ -483,8 +139,8 @@ export function TasksPage(): ReactElement {
   if (projectFilter) taskFilters.project_id = projectFilter;
   if (priorityFilter) taskFilters.priority = priorityFilter;
   if (assigneeFilter) taskFilters.assignee_id = assigneeFilter;
-  if (viewMode === "list" && statusFilter) taskFilters.status = statusFilter;
-  if (viewMode === "list" && sortFilter) taskFilters.sort = sortFilter;
+  if (statusFilter) taskFilters.status = statusFilter;
+  if (sortFilter) taskFilters.sort = sortFilter;
 
   const { data: tasks = [] } = useTasks(taskFilters);
   const { data: projects = [] } = useProjects();
@@ -494,10 +150,8 @@ export function TasksPage(): ReactElement {
   const { data: liveRuns = NO_RUNS } = useAgentRuns(null, "running");
 
   const statuses = lookups?.statuses ?? NO_STATUSES;
-  const statusColors = lookups?.status_colors ?? NO_STATUS_COLORS;
   const taskStatusVocab = lookups?.workflow_task_statuses ?? NO_VOCAB;
   const priorityVocab = lookups?.workflow_task_priorities ?? NO_VOCAB;
-  const wipLimits = lookups?.board_wip_limits ?? NO_WIP;
 
   // `label` is a taxonomies.id and is applied client-side — there is no
   // server-side label filter (see the Composer/filter-bar plan's D9/§Edge
@@ -547,30 +201,7 @@ export function TasksPage(): ReactElement {
   // D3 — priority rank/count for the card glyph. Deliberately NOT
   // fallback-merged: `priorityCount` reads 0 until lookups resolve, so every
   // glyph renders "▬" (never a crash) rather than guessing at a rank.
-  const priorityRank = useMemo(() => {
-    const m: Record<string, number> = {};
-    priorityVocab.forEach((e, i) => {
-      m[e.slug] = i;
-    });
-    return m;
-  }, [priorityVocab]);
 
-  const boardVocab = useMemo<TaskBoardVocab>(
-    () => ({
-      priorityColors,
-      priorityLabels,
-      statusLabels,
-      priorityRank,
-      priorityCount: priorityVocab.length,
-    }),
-    [
-      priorityColors,
-      priorityLabels,
-      statusLabels,
-      priorityRank,
-      priorityVocab.length,
-    ],
-  );
 
   // Fallback-merged lists for pickers, so options (and the Composer's
   // defaults) are never empty before lookups resolve.
@@ -584,28 +215,7 @@ export function TasksPage(): ReactElement {
   // Board columns: one per active task status, ordered/labelled/coloured by
   // the Workflow Labels taxonomy. Adding a status adds a column; removing it
   // drops one.
-  const boardColumns = useMemo<BoardColumnDef[]>(
-    () =>
-      taskStatusList.map((e) => ({
-        id: e.slug,
-        label: e.label,
-        color: e.color ?? "#6366f1",
-      })),
-    [taskStatusList],
-  );
 
-  const tasksByColumn = useMemo<Map<string, Task[]>>(() => {
-    const map = new Map<string, Task[]>();
-    for (const col of boardColumns) map.set(col.id, []);
-    const fallbackId = boardColumns[0]?.id;
-    for (const t of visibleTasks) {
-      // Each column id is a status slug; an orphan status (e.g. one that was
-      // deactivated while tasks still carry it) falls into the first column.
-      const colId = map.has(t.status) ? t.status : fallbackId;
-      if (colId) map.get(colId)?.push(t);
-    }
-    return map;
-  }, [visibleTasks, boardColumns]);
 
   // ── Chip-picker option arrays (cards + Composer) ────────────────────────
 
@@ -634,26 +244,6 @@ export function TasksPage(): ReactElement {
   // ComposerModal takes raw `members` and builds its own options (D9/D10
   // in the plan already treat these as two separate constructions, not one
   // shared helper), while the card takes this pre-built array.
-  const assigneeOptions = useMemo<ChipOption[]>(() => {
-    const humans = members
-      .filter((m) => m.type === "human")
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((m): ChipOption => ({ value: String(m.id), label: m.name, group: "Humans" }));
-    const agents = members
-      .filter((m) => m.type === "agent")
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(
-        (m): ChipOption => ({
-          value: String(m.id),
-          label: m.name,
-          group: "Agents",
-          hint: AGENT_HINT,
-        }),
-      );
-    return [{ value: "", label: "— Unassigned" }, ...humans, ...agents];
-  }, [members]);
 
   const labelOptions = useMemo(
     () => labelTaxonomy.map((t) => ({ id: t.id, label: t.display_name, color: t.color })),
@@ -736,7 +326,6 @@ export function TasksPage(): ReactElement {
   // ── UI state ─────────────────────────────────────────────────────────────
 
   const [showComposer, setShowComposer] = useState(false);
-  const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
 
   // The OmniBar's "New Task" command navigates here with `?new=1` — there is
   // no other cross-page way to open this form. Clearing the param with
@@ -776,90 +365,17 @@ export function TasksPage(): ReactElement {
     [invalidateTasks],
   );
 
-  const handlePriority = useCallback(
-    async (id: number, priority: string) => {
-      try {
-        await updateTask(id, { priority });
-        invalidateTasks();
-      } catch (err) {
-        toast.error(`Failed to change priority: ${(err as Error).message}`);
-      }
-    },
-    [invalidateTasks],
-  );
 
-  const handleAssignee = useCallback(
-    async (id: number, assigneeId: number | null) => {
-      try {
-        await updateTask(id, { assignee_id: assigneeId });
-        invalidateTasks();
-      } catch (err) {
-        toast.error(`Failed to change assignee: ${(err as Error).message}`);
-      }
-    },
-    [invalidateTasks],
-  );
 
-  const handleToggleLabel = useCallback(
-    async (id: number, labelId: number, next: boolean) => {
-      try {
-        if (next) await addTaskLabel(id, labelId);
-        else await removeTaskLabel(id, labelId);
-        invalidateTasks();
-      } catch (err) {
-        toast.error(`Failed to update labels: ${(err as Error).message}`);
-      }
-    },
-    [invalidateTasks],
-  );
 
-  const wipLimitWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
 
-  const handleSetWipLimit = useCallback(
-    (statusSlug: string, limit: number | null) => {
-      wipLimitWriteQueueRef.current = wipLimitWriteQueueRef.current.then(
-        async () => {
-          try {
-            const current =
-              qc.getQueryData<LookupsOut>(["lookups"])?.board_wip_limits ??
-              NO_WIP;
-            await setBoardWipLimit(current, statusSlug, limit);
-            await qc.invalidateQueries({ queryKey: ["lookups"] });
-          } catch (err) {
-            toast.error(
-              `Failed to update WIP limit: ${(err as Error).message}`,
-            );
-          }
-        },
-      );
-    },
-    [qc],
-  );
 
   // Stable wrappers so TaskCard's memo() actually short-circuits — every
   // callback below keeps referential identity across renders as long as its
   // dependency (an already-useCallback'd handler) does too.
-  const onCardNavigate = useCallback(
-    (path: string) => void navigate(path),
-    [navigate],
-  );
   const onCardStatus = useCallback(
     (id: number, status: string) => void handleStatus(id, status),
     [handleStatus],
-  );
-  const onCardPriority = useCallback(
-    (id: number, priority: string) => void handlePriority(id, priority),
-    [handlePriority],
-  );
-  const onCardAssignee = useCallback(
-    (id: number, assigneeId: number | null) =>
-      void handleAssignee(id, assigneeId),
-    [handleAssignee],
-  );
-  const onCardToggleLabel = useCallback(
-    (id: number, labelId: number, next: boolean) =>
-      void handleToggleLabel(id, labelId, next),
-    [handleToggleLabel],
   );
 
   // ── Filter helpers ───────────────────────────────────────────────────────
@@ -882,15 +398,6 @@ export function TasksPage(): ReactElement {
     setSearchParams(p);
   }, [searchParams, setSearchParams]);
 
-  const setViewMode = useCallback(
-    (mode: ViewMode) => {
-      const p = new URLSearchParams(searchParams);
-      if (mode === "board") p.delete("view");
-      else p.set("view", mode);
-      setSearchParams(p);
-    },
-    [searchParams, setSearchParams],
-  );
 
   const filtersActive = Boolean(
     projectFilter || priorityFilter || assigneeFilter || labelFilter,
@@ -936,248 +443,143 @@ export function TasksPage(): ReactElement {
     setFilterRef.current = setFilter;
     handleStatusRef.current = handleStatus;
   });
-  const rowCallbacks = useMemo<TaskRowCallbacks>(
-    () => ({
-      navigate: (path: string) => void navigateRef.current(path),
-      setProjectFilter: (id: string) => setFilterRef.current("project_id", id),
-      changeStatus: (id: number, status: string) =>
-        void handleStatusRef.current(id, status),
-      statuses,
-      statusColors,
-      statusLabels,
-      priorityColors,
-      priorityLabels,
-    }),
-    [statuses, statusColors, statusLabels, priorityColors, priorityLabels],
-  );
 
-  // ── List-view grouped rendering ──────────────────────────────────────────
+  // ── Deck grouping ────────────────────────────────────────────────────────
+  // One list, grouped. Replaces the kanban: at two hundred tasks a column you
+  // scroll is worse than a group you can collapse, and status stays one click
+  // away on each line rather than a drag.
 
-  const groups = useMemo(() => {
-    if (viewMode !== "list" || projectFilter) return null;
-    const byProject = new Map<number, { name: string; rows: Task[] }>();
-    for (const t of visibleTasks) {
-      const entry = byProject.get(t.project_id);
-      if (entry) {
-        entry.rows.push(t);
-      } else {
-        byProject.set(t.project_id, {
-          name: t.project_name ?? UNASSIGNED_NAME,
-          rows: [t],
-        });
+  const deckGroups = useMemo(() => {
+    if (groupBy === "project") {
+      const byProject = new Map<number, { name: string; rows: Task[] }>();
+      for (const t of visibleTasks) {
+        const entry = byProject.get(t.project_id);
+        if (entry) entry.rows.push(t);
+        else
+          byProject.set(t.project_id, {
+            name: t.project_name ?? UNASSIGNED_NAME,
+            rows: [t],
+          });
       }
+      return [...byProject.entries()]
+        .map(([id, g]) => ({
+          id: String(id),
+          label: g.name,
+          rows: g.rows,
+          state: undefined as DeckStateOrUndefined,
+        }))
+        .sort((a, b) => {
+          if (a.label === UNASSIGNED_NAME) return 1;
+          if (b.label === UNASSIGNED_NAME) return -1;
+          return a.label.localeCompare(b.label);
+        });
     }
-    return [...byProject.entries()]
-      .map(([id, g]) => ({ id, ...g }))
-      .sort((a, b) => {
-        if (a.name === UNASSIGNED_NAME) return 1;
-        if (b.name === UNASSIGNED_NAME) return -1;
-        return a.name.localeCompare(b.name);
-      });
-  }, [visibleTasks, projectFilter, viewMode]);
 
-  const renderTable = (rows: Task[]) => (
-    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-      <thead>
-        <tr style={{ borderBottom: "1px solid var(--line-2)" }}>
-          {HEADER_LABELS.map((h) => (
-            <th
-              key={h}
-              style={{
-                padding: "8px 12px",
-                fontSize: 11,
-                color: "var(--fg-3)",
-                textAlign: "left",
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              {h}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((t) => (
-          <TaskRowTable key={t.id} task={t} cb={rowCallbacks} />
-        ))}
-      </tbody>
-    </table>
-  );
+    // Status order comes from the taxonomy, so adding a status adds a group.
+    // A task whose status is not in the taxonomy — one deactivated while tasks
+    // still carry it — falls into the first group rather than disappearing,
+    // which is what the board it replaces did.
+    const known = new Set(taskStatusList.map((e) => e.slug));
+    const firstSlug = taskStatusList[0]?.slug;
+    return taskStatusList.map((e) => ({
+      id: e.slug,
+      label: e.label.toLowerCase(),
+      rows: visibleTasks.filter(
+        (t) => t.status === e.slug || (e.slug === firstSlug && !known.has(t.status)),
+      ),
+      state: taskState(e.slug) as DeckStateOrUndefined,
+    }));
+  }, [groupBy, visibleTasks, taskStatusList]);
+
 
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <Shell
+    <DeckShell
+      title="work"
+      crumb={`${visibleTasks.length} shown${filtersActive ? " · filtered" : ""}`}
       actions={
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <ViewToggle mode={viewMode} onChange={setViewMode} />
+        <>
+          <div className="dk-seg" role="group" aria-label="Group by">
+            <button
+              type="button"
+              className={groupBy === "status" ? "on" : undefined}
+              onClick={() => setGroupBy("status")}
+            >
+              status
+            </button>
+            <button
+              type="button"
+              className={groupBy === "project" ? "on" : undefined}
+              onClick={() => setGroupBy("project")}
+            >
+              project
+            </button>
+          </div>
           <button
-            className="d3-btn d3-btn--primary"
             type="button"
+            className="dk-btn pri"
             title="New task (N)"
             onClick={() => setShowComposer(true)}
           >
-            + New Task
+            + task
           </button>
-        </div>
+        </>
       }
     >
-      <div style={{ padding: "0 24px 24px" }}>
-        <div className="tb-toolbar">
-          <FilterBar
-            values={{
-              project_id: projectFilter,
-              priority: priorityFilter,
-              assignee_id: assigneeFilter,
-              label: labelFilter,
-              status: statusFilter,
-            }}
-            projectOptions={projectFilterOptions}
-            priorityOptions={priorityFilterOptions}
-            assigneeOptions={assigneeFilterOptions}
-            labelOptions={labelFilterOptions}
-            statusOptions={
-              viewMode === "list" ? statusFilterOptions : undefined
-            }
-            sort={
-              viewMode === "list"
-                ? { value: sortFilter, options: SORT_OPTIONS }
-                : undefined
-            }
-            onSet={setFilter}
-            onSetSort={
-              viewMode === "list" ? (v) => setFilter("sort", v) : undefined
-            }
-            onClearAll={handleClearAll}
-          />
-        </div>
-
-        {/* ── BOARD VIEW ── */}
-        {viewMode === "board" && (
-          <div className="tb-board">
-            {boardColumns.map((col) => (
-              <BoardColumn
-                key={col.id}
-                col={col}
-                tasks={tasksByColumn.get(col.id) ?? []}
-                wipLimit={wipLimits[col.id] ?? null}
-                filtersActive={filtersActive}
-                onSetWipLimit={(slug, limit) =>
-                  void handleSetWipLimit(slug, limit)
-                }
-                liveTaskIds={liveTaskIds}
-                card={{
-                  vocab: boardVocab,
-                  statusOptions,
-                  priorityOptions,
-                  assigneeOptions,
-                  labelOptions,
-                  onNavigate: onCardNavigate,
-                  onStatus: onCardStatus,
-                  onPriority: onCardPriority,
-                  onAssignee: onCardAssignee,
-                  onToggleLabel: onCardToggleLabel,
-                }}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* ── LIST VIEW ── */}
-        {viewMode === "list" && (
-          <>
-            {visibleTasks.length === 0 ? (
-              <div
-                style={{
-                  color: "var(--fg-3)",
-                  fontSize: 13,
-                  padding: "32px 0",
-                  textAlign: "center",
-                }}
-              >
-                No tasks
-                {statusFilter ? ` with status "${statusFilter}"` : ""}
-                {projectFilter ? " in selected project" : ""}.
-              </div>
-            ) : visibleTasks.length >= VIRTUAL_THRESHOLD ? (
-              <VirtualTaskList tasks={visibleTasks} cb={rowCallbacks} />
-            ) : groups ? (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                }}
-              >
-                {groups.map((g) => {
-                  const isCollapsed = collapsed[g.id] ?? false;
-                  return (
-                    <div
-                      key={g.id}
-                      className="d3-card"
-                      style={{ padding: 0, overflow: "hidden" }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCollapsed((prev) => ({
-                            ...prev,
-                            [g.id]: !isCollapsed,
-                          }))
-                        }
-                        style={{
-                          width: "100%",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          padding: "10px 14px",
-                          background: "var(--bg-2)",
-                          border: "none",
-                          borderBottom: isCollapsed
-                            ? "none"
-                            : "1px solid var(--line-2)",
-                          color: "var(--fg-1)",
-                          cursor: "pointer",
-                          textAlign: "left",
-                          fontSize: 13,
-                          fontWeight: 600,
-                        }}
-                      >
-                        <span style={{ width: 12, color: "var(--fg-3)" }}>
-                          {isCollapsed ? "▸" : "▾"}
-                        </span>
-                        <span>{g.name}</span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            padding: "2px 7px",
-                            borderRadius: 3,
-                            background: "var(--bg-3)",
-                            color: "var(--fg-3)",
-                            fontWeight: 500,
-                          }}
-                        >
-                          {g.rows.length}
-                        </span>
-                      </button>
-                      {!isCollapsed && renderTable(g.rows)}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div
-                className="d3-card"
-                style={{ padding: 0, overflow: "hidden" }}
-              >
-                {renderTable(visibleTasks)}
-              </div>
-            )}
-          </>
-        )}
+      <div className="dk-bigs" style={{ alignItems: "flex-end" }}>
+        <DeckFilters
+          values={{
+            project_id: projectFilter,
+            priority: priorityFilter,
+            assignee_id: assigneeFilter,
+            label: labelFilter,
+            status: statusFilter,
+          }}
+          options={{
+            project_id: projectFilterOptions,
+            priority: priorityFilterOptions,
+            assignee_id: assigneeFilterOptions,
+            label: labelFilterOptions,
+            status: statusFilterOptions,
+          }}
+          sort={{ value: sortFilter, options: SORT_OPTIONS }}
+          onSet={setFilter}
+          onSetSort={(v) => setFilter("sort", v)}
+          onClearAll={handleClearAll}
+        />
       </div>
+
+      {visibleTasks.length === 0 ? (
+        <div className="dk-note sans">
+          No tasks match the current filters.
+          {filtersActive && (
+            <>
+              {" "}
+              <button type="button" className="dk-btn bare" onClick={handleClearAll}>
+                clear filters
+              </button>
+            </>
+          )}
+        </div>
+      ) : (
+        deckGroups.map((g) => (
+          <DeckTaskGroup
+            key={g.id}
+            label={g.label}
+            state={g.state}
+            rows={g.rows}
+            statuses={statuses}
+            statusLabels={statusLabels}
+            priorityLabels={priorityLabels}
+            liveTaskIds={liveTaskIds}
+            onOpen={(id) => void navigate(`/tasks/${id}`)}
+            onProject={(pid) => setFilter("project_id", String(pid))}
+            onStatus={(id, s) => onCardStatus(id, s)}
+          />
+        ))
+      )}
+
 
       {showComposer && (
         <ComposerModal
@@ -1193,6 +595,6 @@ export function TasksPage(): ReactElement {
           onCreated={invalidateTasks}
         />
       )}
-    </Shell>
+    </DeckShell>
   );
 }
