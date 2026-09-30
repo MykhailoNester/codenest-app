@@ -249,6 +249,9 @@
 .dk-group__h .n { color: var(--fg-3); }
 .dk-group__h .note { color: var(--fg-3); letter-spacing: 0; text-transform: none; font-size: var(--fs-s); }
 .dk-group__h .sp { margin-left: auto; }
+.dk-group__btn { display: flex; align-items: baseline; gap: var(--u2); color: inherit;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; }
+.dk-group__btn:hover { color: var(--fg); }
 .dk-group__h[data-s="block"] { color: var(--err); }
 .dk-group__h[data-s="stall"] { color: var(--warn); }
 .dk-group__h[data-s="run"] { color: var(--run); }

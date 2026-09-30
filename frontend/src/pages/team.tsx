@@ -27,8 +27,14 @@ import {
   type InvocableItem,
   type ShadowedInvocable,
 } from "../lib/api";
-import { Shell } from "../components/layout/shell";
-import styles from "./team.module.css";
+import { DeckShell } from "../components/deck/deck-shell";
+import {
+  DeckGrid,
+  DeckGroup,
+  DeckHead,
+  DeckLine,
+  type DeckState,
+} from "../components/deck/deck-grid";
 
 function toTitleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -36,141 +42,13 @@ function toTitleCase(s: string): string {
 
 /* ── Icons (inline, monochrome — inherit currentColor) ──────────────── */
 
-function ChevronIcon(): ReactElement {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M4 6l4 4 4-4"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
-function ChevronRightIcon(): ReactElement {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M6 4l4 4-4 4"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
-function WorkspaceIcon(): ReactElement {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <rect
-        x="2"
-        y="3"
-        width="12"
-        height="10"
-        rx="1.5"
-        stroke="currentColor"
-        strokeWidth="1.3"
-      />
-      <path d="M2 6h12" stroke="currentColor" strokeWidth="1.3" />
-    </svg>
-  );
-}
 
-function ProjectIcon(): ReactElement {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M2 5.5l5.2-2.8 5.2 2.8v5L7.2 13.3 2 10.5v-5z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M2 5.5l5.2 2.8 5.2-2.8M7.2 8.3v5"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
-function AgentGlyph(): ReactElement {
-  // A small "chip / processor" mark — reads as an autonomous agent.
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <rect
-        x="4.5"
-        y="4.5"
-        width="7"
-        height="7"
-        rx="1.4"
-        stroke="currentColor"
-        strokeWidth="1.3"
-      />
-      <path
-        d="M8 2.5v2M8 11.5v2M2.5 8h2M11.5 8h2M4.5 5.5h-2M4.5 10.5h-2M11.5 5.5h2M11.5 10.5h2"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
-function SkillGlyph(): ReactElement {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M8.5 2L4 9h3.2L7 14l4.5-7H8.3L8.5 2z"
-        fill="currentColor"
-        stroke="currentColor"
-        strokeWidth="0.8"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
-function CommandGlyph(): ReactElement {
-  // A shell caret — reads as a slash command.
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M4 5l3 3-3 3M8.5 11.5H12"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
-function AlertGlyph(): ReactElement {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M8 2.8l5.6 9.7H2.4L8 2.8z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8 6.4v3.1"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-      <circle cx="8" cy="11" r="0.75" fill="currentColor" />
-    </svg>
-  );
-}
 
 /* ── Workspace rows (the catalog — one row per invocable) ───────────── */
 
@@ -203,79 +81,46 @@ function InvocableRow({
     void navigate(`/team/${encodeURIComponent(item.name)}`);
   };
 
-  const glyphClass =
-    bucket === "skills"
-      ? styles.glyphSkill
-      : bucket === "commands"
-        ? styles.glyphCommand
-        : item.kind === "org"
-          ? styles.glyphOrg
-          : styles.glyphProject;
-
-  const clickable = isAgent
-    ? {
-        onClick: open,
-        onKeyDown: (e: React.KeyboardEvent) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            open();
-          }
-        },
-        tabIndex: 0,
-        role: "button",
-        "aria-label": `Open ${item.alias}`,
-      }
-    : {};
+  const state: DeckState = broken ? "fail" : isRunning ? "run" : "idle";
 
   return (
-    <div
-      className={`${styles.row} ${isAgent ? styles.rowClickable : ""}`}
-      {...clickable}
-    >
-      <span className={`${styles.glyph} ${glyphClass}`}>
-        {bucket === "agents" ? (
-          <AgentGlyph />
-        ) : bucket === "skills" ? (
-          <SkillGlyph />
-        ) : (
-          <CommandGlyph />
-        )}
-      </span>
-      <span className={styles.name}>{item.alias}</span>
-      {isRunning && (
-        <span className={styles.runningDot} title="Running" aria-label="Running" />
-      )}
-      {/* What `.claude/` actually links this under — the literal text that
-          resolves it. The whole point of the page telling the truth. */}
-      <code className={styles.token} title={item.link_path ?? item.canonical_path}>
-        {item.invoke_token}
-      </code>
-      {item.description ? (
-        <span className={styles.desc}>{item.description}</span>
-      ) : (
-        <span className={styles.descEmpty} />
-      )}
-      <span className={styles.meta}>
-        {item.model != null && item.model !== "" && (
-          <span className={styles.modelChip}>{item.model}</span>
-        )}
-        <span className={styles.origin}>{originLabel(item)}</span>
-        {item.materialized === true && (
-          <span
-            className={styles.copy}
-            title="Generated copy — its name was rewritten to clear a collision, so edits here do not reach the project"
-          >
-            copy
-          </span>
-        )}
-        {broken && <span className={styles.status}>{item.verify_status}</span>}
-        {isAgent && (
-          <span className={styles.chevronRight}>
-            <ChevronRightIcon />
-          </span>
-        )}
-      </span>
-    </div>
+    <DeckLine
+      state={state}
+      onOpen={isAgent ? open : undefined}
+      cells={[
+        { v: <code title={item.link_path ?? item.canonical_path}>{item.invoke_token}</code> },
+        { v: item.alias, cls: "sub" },
+        item.description ?? "",
+        item.model ?? "",
+        {
+          v: (
+            <>
+              {originLabel(item)}
+              {item.materialized === true && (
+                <>
+                  {" "}
+                  <span
+                    className="dk-tag"
+                    title="Generated copy — its name was rewritten to clear a collision, so edits here do not reach the project"
+                  >
+                    copy
+                  </span>
+                </>
+              )}
+              {broken && (
+                <>
+                  {" "}
+                  <span className="dk-tag" data-s="fail">
+                    {item.verify_status}
+                  </span>
+                </>
+              )}
+            </>
+          ),
+          cls: "r",
+        },
+      ]}
+    />
   );
 }
 
@@ -293,89 +138,106 @@ function AgentRow({
   const navigate = useNavigate();
   const displayName = agent.display_name ?? toTitleCase(agent.name);
   const isOrg = agent.kind === "org";
+  const broken = Boolean(agent.verify_status && agent.verify_status !== "ok");
 
   const open = (): void => {
     void navigate(`/team/${encodeURIComponent(agent.name)}`);
   };
 
   return (
-    <div
-      className={`${styles.row} ${styles.rowClickable}`}
-      onClick={open}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          open();
-        }
-      }}
-      tabIndex={0}
-      role="button"
-      aria-label={`Open ${displayName}`}
-    >
-      <span
-        className={`${styles.glyph} ${
-          isOrg ? styles.glyphOrg : styles.glyphProject
-        }`}
-      >
-        <AgentGlyph />
-      </span>
-      <span className={styles.name}>{displayName}</span>
-      {isRunning && (
-        <span className={styles.runningDot} title="Running" aria-label="Running" />
-      )}
-      {agent.description ? (
-        <span className={styles.desc}>{agent.description}</span>
-      ) : (
-        <span className={styles.descEmpty} />
-      )}
-      <span className={styles.meta}>
-        {agent.model && <span className={styles.modelChip}>{agent.model}</span>}
-        <span className={styles.kind}>{isOrg ? "org" : "project"}</span>
-        {/* `enabled` only means "asked to be shared". An agent whose name is
-            already taken by one that cannot be aliased is enabled and still not
-            in `.claude/`, so the shared badge would be a lie. */}
-        {isConflicted ? (
-          <span
-            className={styles.status}
-            title="Not linked into the workspace — another agent already answers to this name"
-          >
-            not linked
-          </span>
-        ) : (
-          agent.is_shared === true && (
-            <span className={styles.shared}>shared</span>
-          )
-        )}
-        {agent.verify_status && agent.verify_status !== "ok" && (
-          <span className={styles.status}>{agent.verify_status}</span>
-        )}
-        <span className={styles.chevronRight}>
-          <ChevronRightIcon />
-        </span>
-      </span>
-    </div>
+    <DeckLine
+      state={broken ? "fail" : isRunning ? "run" : "idle"}
+      onOpen={open}
+      cells={[
+        { v: displayName, cls: "sub" },
+        agent.description ?? "",
+        agent.model ?? "",
+        {
+          v: (
+            <>
+              {isOrg ? "org" : "project"}
+              {/* `enabled` only means "asked to be shared". An agent whose name
+                  is already taken by one that cannot be aliased is enabled and
+                  still not in `.claude/`, so a shared badge would be a lie. */}
+              {isConflicted ? (
+                <>
+                  {" "}
+                  <span
+                    className="dk-tag"
+                    data-s="wait"
+                    title="Not linked into the workspace — another agent already answers to this name"
+                  >
+                    not linked
+                  </span>
+                </>
+              ) : (
+                agent.is_shared === true && (
+                  <>
+                    {" "}
+                    <span className="dk-tag" data-s="done">
+                      shared
+                    </span>
+                  </>
+                )
+              )}
+              {broken && (
+                <>
+                  {" "}
+                  <span className="dk-tag" data-s="fail">
+                    {agent.verify_status}
+                  </span>
+                </>
+              )}
+            </>
+          ),
+          cls: "r",
+        },
+      ]}
+    />
   );
 }
 
 function SkillRow({ skill }: { skill: ConfiguredSkillInfo }): ReactElement {
   const displayName = toTitleCase(skill.name.replace(/-/g, " "));
+  const broken = Boolean(skill.verify_status && skill.verify_status !== "ok");
   return (
-    <div className={styles.row}>
-      <span className={`${styles.glyph} ${styles.glyphSkill}`}>
-        <SkillGlyph />
-      </span>
-      <span className={styles.name}>{displayName}</span>
-      <span className={styles.descEmpty} />
-      <span className={styles.meta}>
-        <span className={styles.kind}>skill</span>
-        {skill.is_shared === true && <span className={styles.shared}>shared</span>}
-        {skill.verify_status && skill.verify_status !== "ok" && (
-          <span className={styles.status}>{skill.verify_status}</span>
-        )}
-      </span>
-    </div>
+    <DeckLine
+      state={broken ? "fail" : "idle"}
+      cells={[
+        { v: displayName, cls: "sub" },
+        "",
+        "",
+        {
+          v: (
+            <>
+              skill
+              {skill.is_shared === true && (
+                <>
+                  {" "}
+                  <span className="dk-tag" data-s="done">
+                    shared
+                  </span>
+                </>
+              )}
+              {broken && (
+                <>
+                  {" "}
+                  <span className="dk-tag" data-s="fail">
+                    {skill.verify_status}
+                  </span>
+                </>
+              )}
+            </>
+          ),
+          cls: "r",
+        },
+      ]}
+    />
   );
 }
+
+const COLS_INVOCABLE = "14px 190px 170px minmax(0, 1fr) 110px 200px";
+const COLS_AGENT = "14px 190px minmax(0, 1fr) 110px 200px";
 
 /* ── Group (collapsible) ─────────────────────────────────────────────── */
 
@@ -390,34 +252,15 @@ function Group({
   count: number;
   children: ReactNode;
 }): ReactElement {
-  const [open, setOpen] = useState(true);
-
   return (
-    <div className={styles.group}>
-      <button
-        type="button"
-        className={styles.groupHead}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <span className={`${styles.chevron} ${open ? styles.open : ""}`}>
-          <ChevronIcon />
-        </span>
-        <span className={styles.groupIcon}>
-          {isWorkspace ? <WorkspaceIcon /> : <ProjectIcon />}
-        </span>
-        <span
-          className={`${styles.groupName} ${
-            isWorkspace ? styles.workspace : ""
-          }`}
-        >
-          {label}
-        </span>
-        <span className={styles.count}>{count}</span>
-        <span className={styles.groupLine} />
-      </button>
-      {open && <div className={styles.list}>{children}</div>}
-    </div>
+    <DeckGroup
+      label={isWorkspace ? `${label}` : label}
+      count={count}
+      collapsible
+      state={isWorkspace ? "run" : "idle"}
+    >
+      {children}
+    </DeckGroup>
   );
 }
 
@@ -445,8 +288,8 @@ function WorkspaceGroup({
     <Group label="Shared · workspace" isWorkspace count={total}>
       {sections.map(([heading, bucket, items]) =>
         items.length === 0 ? null : (
-          <div key={bucket}>
-            <div className={styles.subHead}>{heading}</div>
+          <DeckGrid key={bucket} cols={COLS_INVOCABLE} label={heading}>
+            <DeckHead cells={["token", heading.toLowerCase(), "what it does", "model", "r origin"]} />
             {items.map((item) => (
               <InvocableRow
                 key={`${bucket}-${item.invoke_token}`}
@@ -455,7 +298,7 @@ function WorkspaceGroup({
                 isRunning={runningNames.has(item.name)}
               />
             ))}
-          </div>
+          </DeckGrid>
         ),
       )}
     </Group>
@@ -482,8 +325,8 @@ function ProjectGroup({
   return (
     <Group label={label} count={agents.length + skills.length}>
       {hasAgents && (
-        <>
-          <div className={styles.subHead}>Agents</div>
+        <DeckGrid cols={COLS_AGENT} label={`${label} agents`}>
+          <DeckHead cells={["agent", "what it does", "model", "r kind"]} />
           {agents.map((a) => (
             <AgentRow
               key={`${a.kind}-${a.id}`}
@@ -492,15 +335,15 @@ function ProjectGroup({
               isConflicted={a.kind === "project" && conflictedAgentIds.has(a.id)}
             />
           ))}
-        </>
+        </DeckGrid>
       )}
       {hasSkills && (
-        <>
-          <div className={styles.subHead}>Skills</div>
+        <DeckGrid cols={COLS_AGENT} label={`${label} skills`}>
+          <DeckHead cells={["skill", "what it does", "model", "r kind"]} />
           {skills.map((s) => (
             <SkillRow key={s.id} skill={s} />
           ))}
-        </>
+        </DeckGrid>
       )}
     </Group>
   );
@@ -523,39 +366,31 @@ function ConflictNotice({
   const n = conflicts.length;
 
   return (
-    <div className={styles.notice} role="status">
-      <span className={styles.noticeIcon}>
-        <AlertGlyph />
-      </span>
-      <div className={styles.noticeBody}>
-        <div className={styles.noticeTitle}>
-          {n === 1
-            ? "1 agent is not linked into the workspace"
-            : `${n} agents are not linked into the workspace`}
-        </div>
-        <ul className={styles.noticeList}>
-          {conflicts.map((c) => (
-            <li key={`${c.kind}-${c.row_id}`}>
-              <code>{c.name}</code> from <b>{c.project}</b> — {conflictReason(c)}{" "}
-              already answers to that name, and the file declares no{" "}
-              <code>name:</code> to rewrite.
-            </li>
-          ))}
-        </ul>
+    <div className="dk-note sans" role="status" style={{ borderLeft: "2px solid var(--warn)" }}>
+      <div style={{ color: "var(--fg-2)" }}>
+        {n === 1
+          ? "1 agent is not linked into the workspace"
+          : `${n} agents are not linked into the workspace`}
       </div>
+      <ul style={{ margin: "var(--u2) 0", paddingLeft: "var(--u4)" }}>
+        {conflicts.map((c) => (
+          <li key={`${c.kind}-${c.row_id}`}>
+            <code>{c.name}</code> from <b>{c.project}</b> — {conflictReason(c)} already answers to
+            that name, and the file declares no <code>name:</code> to rewrite.
+          </li>
+        ))}
+      </ul>
       <button
         type="button"
-        className={styles.noticeBtn}
+        className="dk-btn"
         onClick={() => regen.mutate()}
         disabled={regen.isPending}
       >
-        {regen.isPending ? "Regenerating…" : "Regenerate links"}
+        {regen.isPending ? "regenerating…" : "regenerate links"}
       </button>
     </div>
   );
 }
-
-/* ── Filtering ───────────────────────────────────────────────────────── */
 
 function matchesInvocable(i: InvocableItem, q: string): boolean {
   const hay = `${i.alias} ${i.name} ${i.invoke_token} ${i.description ?? ""} ${
@@ -631,10 +466,10 @@ function AgentListSection(): ReactElement {
   }, [catalogQ.data, configuredQ.data, q]);
 
   if (catalogQ.isLoading || configuredQ.isLoading) {
-    return <div className={styles.state}>Loading agents…</div>;
+    return <div className="dk-note">Loading agents…</div>;
   }
   if (catalogQ.isError) {
-    return <div className={styles.state}>Failed to load agents.</div>;
+    return <div className="dk-note">Failed to load agents.</div>;
   }
 
   const totalRaw =
@@ -648,9 +483,7 @@ function AgentListSection(): ReactElement {
 
   if (totalRaw === 0) {
     return (
-      <div className={styles.empty}>
-        No agents yet — import a project or finish onboarding.
-      </div>
+      <div className="dk-note sans">No agents yet — import a project or finish onboarding.</div>
     );
   }
 
@@ -664,16 +497,17 @@ function AgentListSection(): ReactElement {
     <>
       {conflicts.length > 0 && <ConflictNotice conflicts={conflicts} />}
 
-      <div className={styles.toolbar}>
-        <input
-          className={styles.search}
-          type="text"
-          placeholder="Filter agents, skills & commands…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          aria-label="Filter agents and skills"
-        />
-        <span className={styles.summary}>
+      <div className="dk-bigs" style={{ alignItems: "flex-end" }}>
+        <div className="dk-field" style={{ width: 280 }}>
+          <input
+            type="text"
+            placeholder="filter agents, skills & commands…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            aria-label="Filter agents and skills"
+          />
+        </div>
+        <span style={{ display: "flex", gap: "var(--u4)", color: "var(--fg-3)" }}>
           <span>
             <b>{totals.agents}</b> agents
           </span>
@@ -692,9 +526,7 @@ function AgentListSection(): ReactElement {
       </div>
 
       {!hasResults ? (
-        <div className={styles.empty}>
-          No agents, skills or commands match “{filter}”.
-        </div>
+        <div className="dk-note sans">No agents, skills or commands match “{filter}”.</div>
       ) : (
         <>
           <WorkspaceGroup
@@ -721,10 +553,8 @@ function AgentListSection(): ReactElement {
 
 export function TeamPage(): ReactElement {
   return (
-    <Shell>
-      <div className={styles.page}>
-        <AgentListSection />
-      </div>
-    </Shell>
+    <DeckShell title="agents" crumb="what each project can invoke, and where it resolves from">
+      <AgentListSection />
+    </DeckShell>
   );
 }

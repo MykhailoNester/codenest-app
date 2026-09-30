@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { DeckGrid, DeckHead, DeckLine, DECK_COLS } from "../deck-grid";
+import { DECK_COLS } from "../deck-cols";
+import { DeckGrid, DeckHead, DeckLine } from "../deck-grid";
 
 afterEach(cleanup);
 

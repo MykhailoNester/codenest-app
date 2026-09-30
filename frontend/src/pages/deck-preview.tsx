@@ -1,6 +1,7 @@
 import { type ReactElement } from "react";
 import { DeckShell } from "../components/deck/deck-shell";
-import { DeckGrid, DeckGroup, DeckHead, DeckLine, DECK_COLS } from "../components/deck/deck-grid";
+import { DECK_COLS } from "../components/deck/deck-cols";
+import { DeckGrid, DeckGroup, DeckHead, DeckLine } from "../components/deck/deck-grid";
 
 /**
  * Shows the Deck chrome on real data at `/deck`, so the shell can be reviewed

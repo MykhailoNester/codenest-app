@@ -36,8 +36,8 @@ import { collectLeaves } from "../lib/layout-tree";
 import { openTerminalsWindow, emitFocusPaneToTerminals } from "../lib/ipc";
 import { relativeTime } from "../lib/format-helpers";
 import { DeckShell } from "../components/deck/deck-shell";
+import { DECK_COLS } from "../components/deck/deck-cols";
 import {
-  DECK_COLS,
   DeckGrid,
   DeckGroup,
   DeckHead,

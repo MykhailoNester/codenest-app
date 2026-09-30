@@ -1,10 +1,9 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useId,
   useRef,
+  useState,
   type KeyboardEvent,
   type ReactElement,
   type ReactNode,
@@ -40,8 +39,6 @@ function cellOf(c: DeckCell): { v: ReactNode; cls?: string; title?: string } {
     : { v: c as ReactNode };
 }
 
-const GridCtx = createContext<{ register: (el: HTMLDivElement | null) => void } | null>(null);
-
 interface DeckGridProps {
   /** grid-template-columns for every row in this list. */
   cols: string;
@@ -57,49 +54,58 @@ interface DeckGridProps {
  * of them) or none.
  */
 export function DeckGrid({ cols, label, className, children }: DeckGridProps): ReactElement {
-  const rows = useRef<HTMLDivElement[]>([]);
   const root = useRef<HTMLDivElement>(null);
 
-  rows.current = [];
-  const register = useCallback((el: HTMLDivElement | null) => {
-    if (el && !rows.current.includes(el)) rows.current.push(el);
-  }, []);
+  const rowsOf = useCallback(
+    (): HTMLDivElement[] =>
+      root.current ? Array.from(root.current.querySelectorAll<HTMLDivElement>(".dk-line")) : [],
+    [],
+  );
 
-  // First row is the single tab stop until the user moves.
+  // First row is the single tab stop until the user moves, so Tab reaches the
+  // list once instead of stopping on all forty rows.
   useEffect(() => {
-    const live = rows.current.filter((r) => r.isConnected);
-    live.forEach((r, i) => (r.tabIndex = i === 0 ? 0 : -1));
+    const rows = rowsOf();
+    rows.forEach((r, i) => (r.tabIndex = i === 0 ? 0 : -1));
   });
 
-  const onKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
-    const live = rows.current.filter((r) => r.isConnected);
-    const at = live.indexOf(document.activeElement as HTMLDivElement);
-    if (at < 0) return;
-    let to = -1;
-    if (e.key === "ArrowDown") to = Math.min(at + 1, live.length - 1);
-    else if (e.key === "ArrowUp") to = Math.max(at - 1, 0);
-    else if (e.key === "Home") to = 0;
-    else if (e.key === "End") to = live.length - 1;
-    else return;
-    e.preventDefault();
-    live[at]!.tabIndex = -1;
-    live[to]!.tabIndex = 0;
-    live[to]!.focus();
-  }, []);
+  const onKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLDivElement>) => {
+      const rows = rowsOf();
+      const at = rows.indexOf(document.activeElement as HTMLDivElement);
+      if (at < 0) return;
+
+      const to =
+        e.key === "ArrowDown"
+          ? Math.min(at + 1, rows.length - 1)
+          : e.key === "ArrowUp"
+            ? Math.max(at - 1, 0)
+            : e.key === "Home"
+              ? 0
+              : e.key === "End"
+                ? rows.length - 1
+                : null;
+      if (to === null) return;
+
+      e.preventDefault();
+      rows[at]!.tabIndex = -1;
+      rows[to]!.tabIndex = 0;
+      rows[to]!.focus();
+    },
+    [rowsOf],
+  );
 
   return (
-    <GridCtx.Provider value={{ register }}>
-      <div
-        ref={root}
-        role="grid"
-        aria-label={label}
-        className={`dk-list${className ? ` ${className}` : ""}`}
-        style={{ ["--cols" as string]: cols }}
-        onKeyDown={onKeyDown}
-      >
-        {children}
-      </div>
-    </GridCtx.Provider>
+    <div
+      ref={root}
+      role="grid"
+      aria-label={label}
+      className={`dk-list${className ? ` ${className}` : ""}`}
+      style={{ ["--cols" as string]: cols }}
+      onKeyDown={onKeyDown}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -141,7 +147,6 @@ export function DeckLine({
   fresh,
   selected,
 }: DeckLineProps): ReactElement {
-  const ctx = useContext(GridCtx);
   const cls = [
     "dk-line",
     done && "is-done",
@@ -153,7 +158,6 @@ export function DeckLine({
 
   return (
     <div
-      ref={ctx?.register}
       role="row"
       tabIndex={-1}
       className={cls}
@@ -189,28 +193,51 @@ interface DeckGroupProps {
   count?: ReactNode;
   note?: ReactNode;
   state?: DeckState;
+  /** Renders the heading as a disclosure. Children stay mounted when open. */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
   children: ReactNode;
 }
 
 /** A titled section. The heading is a real h2 so the page has an outline. */
-export function DeckGroup({ label, count, note, state, children }: DeckGroupProps): ReactElement {
+export function DeckGroup({
+  label,
+  count,
+  note,
+  state,
+  collapsible,
+  defaultOpen = true,
+  children,
+}: DeckGroupProps): ReactElement {
   const id = useId();
+  const [open, setOpen] = useState(defaultOpen);
+
+  const heading = (
+    <>
+      {collapsible && <span aria-hidden="true">{open ? "▾" : "▸"}</span>}
+      <span>{label}</span>
+      {count != null && <span className="n">{count}</span>}
+      {note != null && <span className="note">{note}</span>}
+    </>
+  );
+
   return (
     <div className="dk-group">
       <h2 className="dk-group__h" id={id} data-s={state}>
-        <span>{label}</span>
-        {count != null && <span className="n">{count}</span>}
-        {note != null && <span className="note">{note}</span>}
+        {collapsible ? (
+          <button
+            type="button"
+            className="dk-group__btn"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {heading}
+          </button>
+        ) : (
+          heading
+        )}
       </h2>
-      {children}
+      {(!collapsible || open) && children}
     </div>
   );
 }
-
-/** Column templates, so a list's shape is named rather than inlined. */
-export const DECK_COLS = {
-  default: "14px minmax(0, 1fr) 110px 150px 62px 96px",
-  tasks: "14px 50px minmax(0, 1fr) 100px 118px 52px 80px",
-  simple: "14px minmax(0, 1fr) 90px",
-  wide: "14px minmax(0, 1fr) 118px 68px 80px 90px",
-} as const;

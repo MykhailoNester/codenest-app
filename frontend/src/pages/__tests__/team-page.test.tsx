@@ -45,8 +45,10 @@ vi.mock("../../lib/api", () => ({
   }),
 }));
 
-vi.mock("../../components/layout/shell", () => ({
-  Shell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+// Stubbed for the same reason the old Shell was: this file tests the agent
+// catalog, not the chrome.
+vi.mock("../../components/deck/deck-shell", () => ({
+  DeckShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 function agent(overrides: Partial<InvocableItem> = {}): InvocableItem {
@@ -202,9 +204,9 @@ describe("Agents page — workspace list", () => {
       }),
     });
 
-    expect(screen.getByText("Agents")).toBeTruthy();
-    expect(screen.getByText("Skills")).toBeTruthy();
-    expect(screen.getByText("Commands")).toBeTruthy();
+    expect(screen.getByRole("grid", { name: /^agents$/i })).toBeTruthy();
+    expect(screen.getByRole("grid", { name: /^skills$/i })).toBeTruthy();
+    expect(screen.getByRole("grid", { name: /^commands$/i })).toBeTruthy();
     expect(screen.getByText("/projects")).toBeTruthy();
     expect(screen.getByText("built-in")).toBeTruthy();
     expect(screen.getByText("/ship")).toBeTruthy();
@@ -241,7 +243,7 @@ describe("Agents page — name conflicts", () => {
       screen.getByText("1 agent is not linked into the workspace"),
     ).toBeTruthy();
 
-    const btn = screen.getByRole("button", { name: "Regenerate links" });
+    const btn = screen.getByRole("button", { name: /regenerate links/i });
     fireEvent.click(btn);
     expect(mockRegenerate).toHaveBeenCalledTimes(1);
   });
@@ -249,7 +251,7 @@ describe("Agents page — name conflicts", () => {
   it("renders no warning chrome when nothing conflicts", () => {
     setup({ catalog: catalog({ agents: [agent()] }) });
 
-    expect(screen.queryByRole("button", { name: "Regenerate links" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /regenerate links/i })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
   });
 
