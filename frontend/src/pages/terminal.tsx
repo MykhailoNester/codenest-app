@@ -1,13 +1,12 @@
 import { Suspense, useEffect } from "react";
 import type { ReactElement } from "react";
-import { Shell } from "../components/layout/shell";
+import { DeckShell } from "../components/deck/deck-shell";
 import { TabBar } from "../components/terminal/tab-bar";
 import { SplitContainer } from "../components/terminal/split-container";
 import { WorkspaceNavigator } from "../components/explorer/workspace-navigator";
 import { useTerminalShortcuts } from "../hooks/use-terminal-shortcuts";
 import { useTerminalFileDrop } from "../hooks/use-terminal-file-drop";
 import { useTerminalStore } from "../stores/terminal-store";
-import styles from "./terminal.module.css";
 
 interface TerminalsLayoutProps {
   /**
@@ -70,15 +69,15 @@ export function TerminalsLayout({
   }, [hydrated, skipHydration, hydrateFromStorage, setHydrated]);
 
   const page = (
-    <div className={styles.page}>
+    <div className="dk-sess__main">
       <TabBar onCloseTab={onCloseTab} />
-      <div className={styles.paneArea}>
+      <div className="dk-sess__panes">
         <Suspense fallback={null}>
           {tabs.length > 0 ? (
             tabs.map((tab) => (
               <div
                 key={tab.id}
-                className={styles.tabPane}
+                className="dk-sess__tab"
                 data-tab-pane={tab.id}
                 data-active={tab.id === activeTabId ? "true" : "false"}
               >
@@ -90,7 +89,7 @@ export function TerminalsLayout({
               </div>
             ))
           ) : (
-            <div className={styles.empty}>
+            <div className="dk-sess__empty">
               {hydrated ? "No terminals" : "Starting…"}
             </div>
           )}
@@ -108,7 +107,7 @@ export function TerminalsLayout({
   if (!showNavigator) return page;
 
   return (
-    <div className={styles.row}>
+    <div className="dk-sess">
       <WorkspaceNavigator />
       {page}
     </div>
@@ -117,8 +116,8 @@ export function TerminalsLayout({
 
 export function TerminalPage(): ReactElement {
   return (
-    <Shell scrollable={false}>
+    <DeckShell title="sessions" scrollable={false}>
       <TerminalsLayout showNavigator />
-    </Shell>
+    </DeckShell>
   );
 }

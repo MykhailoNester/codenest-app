@@ -315,6 +315,138 @@
 .dk-tab:hover { color: var(--fg-2); }
 .dk-tab.on { color: var(--fg); border-bottom-color: var(--fg); }
 
+/* ── Sessions surface ─────────────────────────────────────────────────
+   The one screen that is a pane layout rather than a list: navigator on the
+   left, tab strip and live panes on the right. It is still the same four
+   rules — the tree is `.dk-list`, the strip is `.dk-tabs`, and the
+   composer's chrome is `.dk-btn` / `.dk-tag`. */
+
+/* A flush page owns its own overflow, so its title cannot keep the 24px of
+   air a scrolling page's does — that gap is the reading rhythm of a list, and
+   here it is just height stolen from a live terminal. */
+.dk-page.flush .dk-title { margin-bottom: 0; padding: var(--u2) var(--gut); }
+
+.dk-sess { display: flex; flex: 1 1 auto; min-height: 0; min-width: 0; }
+.dk-sess__main { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; }
+.dk-sess__panes { position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: hidden; }
+/* One wrapper per tab, all mounted at once so a hidden pane keeps its xterm
+   instance, its scrollback and real pixel dimensions. `visibility` — never
+   `display:none`, which zeroes the measurements the fit addon reads back. */
+.dk-sess__tab { position: absolute; inset: 0; padding: var(--u2); }
+.dk-sess__tab[data-active="false"] { visibility: hidden; pointer-events: none; }
+.dk-sess__empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--fg-3); font-size: var(--fs-s); }
+
+/* The navigator. Its own ground, like the nav rail, because it is the same
+   kind of thing: a place you look, not a place you work. */
+.dk-side { position: relative; display: flex; flex-direction: column; flex: none; min-height: 0;
+  overflow: hidden; background: var(--bg-1); border-right: 1px solid var(--line);
+  transition: width 190ms cubic-bezier(0.4, 0, 0.2, 1); }
+.dk-side[data-dragging="true"] { transition: none; }
+.dk-side.is-collapsed { width: 14px; align-items: center; padding-top: var(--u2); }
+.dk-side__in { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; opacity: 1; transition: opacity 130ms ease 40ms; }
+.dk-side.is-collapsed .dk-side__in { opacity: 0; pointer-events: none; transition: opacity 90ms ease; }
+@media (prefers-reduced-motion: reduce) { .dk-side, .dk-side__in, .dk-side.is-collapsed .dk-side__in { transition: none; } }
+.dk-side__h { position: relative; display: flex; align-items: center; gap: var(--u2); flex: none; height: 26px;
+  padding: 0 var(--u2) 0 var(--u3); border-bottom: 1px solid var(--line);
+  color: var(--fg-3); font-size: var(--fs-xs); letter-spacing: 1.1px; text-transform: uppercase; }
+.dk-side__h h3 { margin: 0; font: inherit; letter-spacing: inherit; }
+.dk-side__h .sp { margin-left: auto; }
+.dk-side__i { color: var(--fg-3); padding: 0 3px; font-size: var(--fs-s); line-height: 1; }
+.dk-side__i:hover { color: var(--fg); }
+.dk-side__row { display: flex; align-items: center; gap: var(--u2); flex: none; padding: var(--u2); border-bottom: 1px solid var(--line); }
+/* The navigator's mode switcher carries a second line per segment (what the
+   mode is following), so it is the one `.dk-seg` that cannot be a fixed row. */
+.dk-side__row > .dk-seg { flex: 1 1 auto; height: auto; min-height: 26px; }
+.dk-side__row > .dk-seg button { flex: 1 1 0; padding: 3px var(--u); text-align: center; line-height: 1.2; }
+.dk-side__row > .dk-field { flex: 1 1 auto; }
+.dk-side__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--u) 0 var(--u3); }
+.dk-side__f { flex: none; border-top: 1px solid var(--line); padding: var(--u2) var(--u3);
+  color: var(--fg-3); font-size: var(--fs-xs); line-height: 1.5; }
+/* On the panel's own edge rather than beside it, so a collapsed rail does not
+   leave a dead 4px column behind. */
+.dk-side__rz { position: absolute; top: 0; right: 0; width: 5px; height: 100%; cursor: col-resize; z-index: 3; }
+.dk-side__rz:hover, .dk-side__rz:focus-visible { background: var(--run); outline: none; }
+.dk-side__rail { color: var(--fg-3); font-size: var(--fs-xs); padding: 2px; line-height: 1; }
+.dk-side__rail:hover { color: var(--fg); }
+
+.dk-menu { position: absolute; top: 26px; right: var(--u2); z-index: 20; min-width: 190px; padding: var(--u) 0;
+  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 3px;
+  letter-spacing: 0; text-transform: none; }
+.dk-menu button { display: block; width: 100%; height: 26px; padding: 0 var(--u3); text-align: left;
+  font-size: var(--fs-s); color: var(--fg-2); }
+.dk-menu button:hover:not(:disabled) { background: var(--sel); color: var(--fg); }
+.dk-menu button:disabled { color: var(--fg-4); cursor: not-allowed; }
+
+/* The tree is the list primitive on a tighter row: a 262px panel holds forty
+   paths only at 24px, and the indent lives inside the name cell so the
+   trailing column still lines up down the whole panel. */
+.dk-list.tree { --cols: 14px minmax(0, 1fr) auto; }
+.dk-list.tree .dk-line { height: 24px; gap: var(--u2); padding: 0 var(--u2); font-size: var(--fs-s); }
+.dk-list.tree .dk-line[aria-disabled="true"] { color: var(--fg-4); cursor: default; }
+.dk-tree__n { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.dk-tree__n > .t { flex: none; width: 11px; text-align: center; color: var(--fg-4); font-size: var(--fs-xs); }
+.dk-tree__n > .g { flex: none; width: 12px; text-align: center; font-size: var(--fs-xs); }
+.dk-tree__n > .l { overflow: hidden; text-overflow: ellipsis; }
+.dk-tree__n > .l b { color: var(--mark); font-weight: 400; }
+.dk-tree__g-dir { color: var(--run); }
+.dk-tree__g-py { color: var(--ok); }
+.dk-tree__g-ts { color: var(--run); }
+.dk-tree__g-md { color: var(--fg-3); }
+.dk-tree__g-rs { color: var(--warn); }
+.dk-tree__g-sql { color: var(--mark); }
+.dk-tree__g-plain { color: var(--fg-4); }
+.dk-line.is-root .dk-tree__n > .l { color: var(--fg); }
+.dk-gs { font-size: var(--fs-xs); color: var(--fg-3); }
+.dk-gs.a { color: var(--ok); }
+.dk-gs.d { color: var(--err); }
+.dk-gs.m { color: var(--warn); }
+.dk-gs.u { color: var(--fg-3); }
+.dk-meta { color: var(--fg-3); font-size: var(--fs-xs); white-space: nowrap; }
+.dk-meta em { color: var(--warn); font-style: normal; }
+.dk-meta .add { color: var(--ok); }
+.dk-meta .del { color: var(--err); }
+
+/* Pane chrome. A shell pane and an agent pane are the same object with
+   different contents, so they get one header, one footer and one focus ring. */
+.dk-pane { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%;
+  min-height: 0; overflow: hidden; background: var(--bg-1);
+  border: 1px solid var(--line); border-radius: 3px; }
+.dk-pane.on { border-color: var(--run); }
+.dk-pane.drop { border-color: var(--mark); }
+.dk-pane__h { display: flex; align-items: center; gap: var(--u2); flex: none; height: 26px; padding: 0 var(--u2);
+  border-bottom: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-s); }
+.dk-pane__h .t { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.dk-pane__h .w { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-pane__h .i { display: inline-flex; align-items: center; color: var(--fg-3); padding: 0 4px; line-height: 1; }
+.dk-pane__h .i:hover { color: var(--fg); }
+.dk-pane__f { display: flex; align-items: center; gap: var(--u2); flex: none; height: 24px; padding: 0 var(--u2);
+  border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-xs); }
+.dk-pane__f .sp { margin-left: auto; }
+
+/* The composer. Four rows, in the order the prototype draws them: what the
+   session is, what it is carrying, what you are typing, what you can press. */
+.dk-comp { display: flex; flex-direction: column; gap: var(--u2); flex: none;
+  padding: var(--u2) var(--u3); border-top: 1px solid var(--line); }
+.dk-comp[data-session="none"] { border-top-color: var(--warn); }
+.dk-comp[data-session="none"] .dk-comp__cfg, .dk-comp[data-session="none"] .dk-comp__act { opacity: 0.55; }
+.dk-comp__cfg, .dk-comp__ctx, .dk-comp__act, .dk-comp__hist { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dk-comp__hist { gap: var(--u); }
+.dk-comp__cfg .sp, .dk-comp__act .sp, .dk-comp__ctx .sp { margin-left: auto; }
+.dk-comp__note { font-size: var(--fs-s); color: var(--fg-3); }
+.dk-comp__note.err { color: var(--err); }
+
+/* A real <select>, drawn as a Deck control. The displayed value has to be the
+   one the CLI reports back, so this cannot be a menu button over local state. */
+.dk-sel { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 24px;
+  padding: 0 18px 0 var(--u2); border: 1px solid transparent; border-radius: 3px;
+  color: var(--fg-3); font-size: var(--fs-s); white-space: nowrap; }
+.dk-sel:hover, .dk-sel:focus-within { border-color: var(--line-2); }
+.dk-sel select { appearance: none; -webkit-appearance: none; background: none; border: 0; outline: 0;
+  font: inherit; color: var(--fg); cursor: pointer; max-width: 160px; text-overflow: ellipsis; }
+.dk-sel::after { content: "▾"; position: absolute; right: 6px; color: var(--fg-4); pointer-events: none; font-size: var(--fs-xs); }
+.dk-sel select:disabled { color: var(--fg-4); cursor: not-allowed; }
+.dk-sel.stale select { color: var(--warn); }
+
 .dk-note { padding: var(--u3); color: var(--fg-3); font-size: var(--fs-s); line-height: 1.65; max-width: 80ch; }
 .dk-note.sans { font-family: var(--sans); font-size: 13px; max-width: 82ch; }
 .dk-rule { border: 0; border-top: 1px solid var(--line); margin: var(--u6) 0 var(--u4); }

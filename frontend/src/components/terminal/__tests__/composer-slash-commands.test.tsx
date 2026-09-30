@@ -339,7 +339,7 @@ describe("/clear — decision 6", () => {
     renderComposer({ status: "exited", onRequestRestart });
 
     typeDraft("/clear");
-    expect((screen.getByRole("button", { name: /Run/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /run/i }) as HTMLButtonElement).disabled).toBe(false);
 
     pressKey("Enter");
 
@@ -446,7 +446,7 @@ describe("multi-line drafts — decision 3", () => {
     renderComposer();
     fireEvent.change(editor(), { target: { value: "/compact\nplease explain" } });
 
-    expect(screen.getByRole("button", { name: /^Send/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^send/i })).toBeTruthy();
 
     pressKey("Enter");
     await waitFor(() => expect(agentSendMock).toHaveBeenCalled());
@@ -459,7 +459,7 @@ describe("queue", () => {
   it("is disabled while the draft is a registered command", () => {
     renderComposer({ status: "running" });
     typeDraft("/clear");
-    expect((screen.getByRole("button", { name: /Queue/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /queue/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 

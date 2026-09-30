@@ -248,8 +248,8 @@ describe("agent pane — a refused agent_start", () => {
     const retry = await screen.findByRole("button", { name: /retry/i }, { timeout: 10_000 });
     expect(retry).not.toBeNull();
     expect(composer().dataset.session).toBe("none");
-    expect(button(/^Send/).disabled).toBe(true);
-    expect(button(/Queue/).disabled).toBe(true);
+    expect(button(/^send/i).disabled).toBe(true);
+    expect(button(/queue/i).disabled).toBe(true);
     expect(composer().textContent).toContain("no session for this pane");
   });
 

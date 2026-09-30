@@ -4,9 +4,11 @@ import {
   useId,
   useRef,
   useState,
+  type ComponentPropsWithoutRef,
   type KeyboardEvent,
   type ReactElement,
   type ReactNode,
+  type Ref,
 } from "react";
 
 export type DeckState =
@@ -45,6 +47,18 @@ interface DeckGridProps {
   /** Named for assistive tech; usually the group heading. */
   label: string;
   className?: string;
+  /**
+   * The list's own role. A hierarchy is a `tree`, not a `grid`: its rows nest,
+   * they expand and collapse, and ArrowLeft/ArrowRight mean something a grid
+   * has no word for. Defaults to `grid`, which is every flat list.
+   */
+  role?: "grid" | "tree";
+  /**
+   * Whether this list owns the roving tabindex. A tree drives its own — the
+   * focused row follows the selection across expands and collapses, which the
+   * generic "first row is the tab stop" rule would overwrite on every render.
+   */
+  manageFocus?: boolean;
   children: ReactNode;
 }
 
@@ -53,7 +67,14 @@ interface DeckGridProps {
  * it and Home/End jump. Without this the rows are either all tab stops (forty
  * of them) or none.
  */
-export function DeckGrid({ cols, label, className, children }: DeckGridProps): ReactElement {
+export function DeckGrid({
+  cols,
+  label,
+  className,
+  role = "grid",
+  manageFocus = true,
+  children,
+}: DeckGridProps): ReactElement {
   const root = useRef<HTMLDivElement>(null);
 
   const rowsOf = useCallback(
@@ -65,12 +86,14 @@ export function DeckGrid({ cols, label, className, children }: DeckGridProps): R
   // First row is the single tab stop until the user moves, so Tab reaches the
   // list once instead of stopping on all forty rows.
   useEffect(() => {
+    if (!manageFocus) return;
     const rows = rowsOf();
     rows.forEach((r, i) => (r.tabIndex = i === 0 ? 0 : -1));
   });
 
   const onKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
+      if (!manageFocus) return;
       const rows = rowsOf();
       const at = rows.indexOf(document.activeElement as HTMLDivElement);
       if (at < 0) return;
@@ -92,13 +115,13 @@ export function DeckGrid({ cols, label, className, children }: DeckGridProps): R
       rows[to]!.tabIndex = 0;
       rows[to]!.focus();
     },
-    [rowsOf],
+    [rowsOf, manageFocus],
   );
 
   return (
     <div
       ref={root}
-      role="grid"
+      role={role}
       aria-label={label}
       className={`dk-list${className ? ` ${className}` : ""}`}
       style={{ ["--cols" as string]: cols }}
@@ -125,6 +148,16 @@ export function DeckHead({ cells }: { cells: string[] }): ReactElement {
   );
 }
 
+/**
+ * Row attributes only a non-grid list needs: a tree's expand state, its own
+ * tab stop, a drag payload, its extra key bindings. Passing them through keeps
+ * the tree on this primitive instead of forking a second row component.
+ */
+type DeckRowExtras = Omit<
+  ComponentPropsWithoutRef<"div">,
+  "role" | "className" | "children" | "onClick"
+>;
+
 interface DeckLineProps {
   state?: DeckState;
   cells: DeckCell[];
@@ -132,6 +165,11 @@ interface DeckLineProps {
   done?: boolean;
   fresh?: boolean;
   selected?: boolean;
+  /** `treeitem` when the list is a tree; the cells then drop `gridcell`. */
+  role?: "row" | "treeitem";
+  className?: string;
+  rowRef?: Ref<HTMLDivElement>;
+  rowProps?: DeckRowExtras;
 }
 
 /**
@@ -146,37 +184,54 @@ export function DeckLine({
   done,
   fresh,
   selected,
+  role = "row",
+  className,
+  rowRef,
+  rowProps,
 }: DeckLineProps): ReactElement {
   const cls = [
     "dk-line",
     done && "is-done",
     fresh && "is-new",
     selected && "on",
+    className,
   ]
     .filter(Boolean)
     .join(" ");
 
+  // A `treeitem`'s children are its label, not addressable cells — `gridcell`
+  // inside one is invalid and makes the row unreadable rather than richer.
+  const cellRole = role === "row" ? "gridcell" : undefined;
+
   return (
     <div
-      role="row"
-      tabIndex={-1}
+      {...rowProps}
+      ref={rowRef}
+      role={role}
+      tabIndex={rowProps?.tabIndex ?? -1}
       className={cls}
       onClick={onOpen}
       onKeyDown={(e) => {
-        if (!onOpen) return;
+        rowProps?.onKeyDown?.(e);
+        if (e.defaultPrevented || !onOpen) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onOpen();
         }
       }}
     >
-      <span className="dk-s" role="gridcell" data-s={state} aria-label={STATE_WORD[state]} />
+      <span
+        className="dk-s"
+        role={cellRole ?? "img"}
+        data-s={state}
+        aria-label={STATE_WORD[state]}
+      />
       {cells.map((c, i) => {
         const { v, cls: k, title } = cellOf(c);
         return (
           <span
             key={i}
-            role="gridcell"
+            role={cellRole}
             className={k}
             title={title ?? (typeof v === "string" && v ? v : undefined)}
           >

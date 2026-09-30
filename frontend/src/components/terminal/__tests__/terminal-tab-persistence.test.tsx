@@ -7,7 +7,7 @@
 // byte the child process wrote while the tab was hidden.
 //
 // The fix keeps every tab's pane tree mounted and hides the inactive ones
-// with `visibility: hidden` (see `terminal.module.css`'s `.tabPane`) rather
+// with `visibility: hidden` (see Deck's `.dk-sess__tab`) rather
 // than unmounting them, so the xterm instance, its buffer and its output
 // subscription are all continuous across a switch.
 //

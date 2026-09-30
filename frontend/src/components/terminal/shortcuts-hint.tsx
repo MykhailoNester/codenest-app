@@ -42,7 +42,8 @@ export function ShortcutsHint(): ReactElement {
     <>
       <button
         type="button"
-        className={styles.trigger}
+        className="dk-tab"
+        style={{ marginLeft: "auto" }}
         onClick={() => setOpen((v) => !v)}
         aria-label="Keyboard shortcuts"
         title="Keyboard shortcuts"

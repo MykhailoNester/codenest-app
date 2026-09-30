@@ -135,7 +135,7 @@ describe("WirePreview", () => {
     expect(panel()!.querySelector("code")!.textContent).toBe(
       previewUserMessageLine(""),
     );
-    const sendButton = screen.getByRole("button", { name: /^Send/ }) as HTMLButtonElement;
+    const sendButton = screen.getByRole("button", { name: /^send/i }) as HTMLButtonElement;
     expect(sendButton.disabled).toBe(true);
   });
 

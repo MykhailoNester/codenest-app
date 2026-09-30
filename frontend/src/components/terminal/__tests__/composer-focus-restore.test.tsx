@@ -230,7 +230,7 @@ describe("composer focus/caret restore", () => {
 
     // Anchored: the `{}` wire-preview trigger is labelled "Show what Send
     // writes to the agent", so a loose /Send/ matches two buttons.
-    fireEvent.click(screen.getByRole("button", { name: /^Send/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^send/i }));
 
     // Simulate the user moving on while the send is in flight.
     const other = document.createElement("input");

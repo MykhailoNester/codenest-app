@@ -1,9 +1,9 @@
 import { useState } from "react";
 import type { ReactElement, MouseEvent, KeyboardEvent } from "react";
 import { useTerminalStore } from "../../stores/terminal-store";
-import { collectLeaves, paneKind } from "../../lib/layout-tree";
+import { collectLeaves, paneKind, type PaneKind } from "../../lib/layout-tree";
+import type { DeckState } from "../deck/deck-grid";
 import { Icon } from "../icon";
-import styles from "./tab-bar.module.css";
 import { ShortcutsHint } from "./shortcuts-hint";
 
 interface EditState {
@@ -22,6 +22,16 @@ interface TabBarProps {
    * re-seed-on-empty behaviour is preserved.
    */
   onCloseTab?: (tabId: string) => void;
+}
+
+/**
+ * The tab's state glyph, which replaces the old violet-square/grey-circle kind
+ * dot. It carries the same information plus one the dot never did: a tab whose
+ * pane has exited now says so in column one instead of only going dim.
+ */
+function tabState(kind: PaneKind, exited: boolean): DeckState {
+  if (exited) return "fail";
+  return kind === "shell" ? "idle" : "run";
 }
 
 export function TabBar({ onCloseTab }: TabBarProps): ReactElement {
@@ -70,53 +80,55 @@ export function TabBar({ onCloseTab }: TabBarProps): ReactElement {
   };
 
   return (
-    <div className={styles.bar} role="tablist">
+    <div className="dk-tabs" role="tablist">
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
         const isEditing = editing?.tabId === tab.id;
         const leaves = collectLeaves(tab.layout);
         const hasExited = leaves.some((l) => l.exited === true);
-        // A tab holds an agent pane, a shell pane, or a split of both. The dot
-        // reports what it *leads* with (prototype `.tab .kinddot`, line 170) so
-        // the strip is scannable now that both kinds are routine.
-        const leadKind = leaves[0] !== undefined ? paneKind(leaves[0]) : "shell";
+        // A tab holds an agent pane, a shell pane, or a split of both. The
+        // glyph reports what it *leads* with, so the strip is scannable now
+        // that both kinds are routine.
+        const leadKind =
+          leaves[0] !== undefined ? paneKind(leaves[0]) : "shell";
+        const state = tabState(leadKind, hasExited && !isActive);
         return (
           <button
             key={tab.id}
             type="button"
             role="tab"
             aria-selected={isActive}
-            className={[
-              styles.tab,
-              isActive ? styles.tabActive : "",
-              hasExited && !isActive ? styles.tabExited : "",
-            ].join(" ")}
+            className={isActive ? "dk-tab on" : "dk-tab"}
             onClick={() => setActiveTab(tab.id)}
             onDoubleClick={() => beginEdit(tab.id, tab.title)}
           >
             <span
-              className={`${styles.kindDot} ${
-                leadKind === "agent" ? styles.kindDotAgent : styles.kindDotShell
-              }`}
-              aria-hidden="true"
+              className="dk-s"
+              role="img"
+              aria-label={`${leadKind} pane`}
+              data-s={state}
             />
             {isEditing ? (
-              <input
-                className={styles.titleInput}
-                autoFocus
-                value={editing.draft}
-                onChange={(e) =>
-                  setEditing({ tabId: tab.id, draft: e.target.value })
-                }
-                onBlur={commitEdit}
-                onKeyDown={onKey}
-                onClick={(e) => e.stopPropagation()}
-              />
+              <span className="dk-field" style={{ height: 20 }}>
+                <input
+                  autoFocus
+                  value={editing.draft}
+                  onChange={(e) =>
+                    setEditing({ tabId: tab.id, draft: e.target.value })
+                  }
+                  onBlur={commitEdit}
+                  onKeyDown={onKey}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: "8rem" }}
+                />
+              </span>
             ) : (
-              <span className={styles.title}>{tab.title}</span>
+              <span className="trunc" style={{ maxWidth: "12rem" }}>
+                {tab.title}
+              </span>
             )}
             <span
-              className={styles.close}
+              className="dim"
               onClick={(e) => onCloseClick(e, tab.id)}
               role="button"
               aria-label={`Close ${tab.title}`}
@@ -131,7 +143,7 @@ export function TabBar({ onCloseTab }: TabBarProps): ReactElement {
           what a new tab gives you. */}
       <button
         type="button"
-        className={styles.add}
+        className="dk-tab"
         onClick={() => void addTab()}
         aria-label="New agent tab"
         title="New agent tab (⌘T)"
@@ -140,7 +152,7 @@ export function TabBar({ onCloseTab }: TabBarProps): ReactElement {
       </button>
       <button
         type="button"
-        className={styles.addShell}
+        className="dk-tab"
         onClick={() => void addTab({ kind: "shell" })}
         aria-label="New shell tab"
         title="New shell tab (⌥⌘T)"
