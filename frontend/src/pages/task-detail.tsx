@@ -591,7 +591,7 @@ export function TaskDetailPage(): ReactElement {
         </div>
 
         <div className="dk-detail">
-          <div>
+          <div className="dk-detail__doc">
             {editingTitle ? (
               <textarea
                 ref={titleRef}

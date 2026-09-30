@@ -98,8 +98,15 @@ vi.mock("sonner", () => ({
   toast: { error: mockToastError, success: mockToastSuccess },
 }));
 
-vi.mock("../../components/layout/shell", () => ({
-  Shell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+// Stubbed for the same reason the old Shell was: this file tests the record,
+// not the chrome. `actions` is rendered so the bar's buttons stay reachable.
+vi.mock("../../components/deck/deck-shell", () => ({
+  DeckShell: ({ children, actions }: { children: ReactNode; actions?: ReactNode }) => (
+    <div>
+      {actions}
+      {children}
+    </div>
+  ),
 }));
 
 // `LaunchFromSourceButton` calls `useLaunchSeed` unconditionally
@@ -585,7 +592,7 @@ describe("TaskDetailPage", () => {
       ],
     });
     const { container } = renderPage();
-    const doc = container.querySelector(".td-doc");
+    const doc = container.querySelector(".dk-detail__doc");
     expect(doc).not.toBeNull();
     const feed = doc?.querySelector(".td-feed");
     expect(feed).not.toBeNull();
@@ -657,7 +664,7 @@ describe("TaskDetailPage", () => {
     ];
     setupMocks({ runs });
     const { container } = renderPage();
-    const doc = container.querySelector(".td-doc");
+    const doc = container.querySelector(".dk-detail__doc");
     expect(doc).not.toBeNull();
     const runsList = doc?.querySelector(".td-runs");
     expect(runsList).not.toBeNull();
@@ -730,7 +737,7 @@ describe("TaskDetailPage", () => {
     expect(container.querySelector(".d3-replay")).toBeNull();
 
     fireEvent.click(screen.getByText("Replay"));
-    const doc = container.querySelector(".td-doc");
+    const doc = container.querySelector(".dk-detail__doc");
     expect(doc?.querySelector(".d3-replay")).not.toBeNull();
   });
 
