@@ -86,15 +86,19 @@ import {
 
 // ---------------------------------------------------------------------------
 /**
- * "/command", or the browser path when a route was deep-linked. Tauri serves
- * the app at "/" in dev and "/index.html" when packaged, so both fall through
- * to the default — no Tauri check needed, and none would work anyway since the
- * web mock installs `__TAURI_INTERNALS__` itself.
+ * The landing route, or the browser path when one was deep-linked. Tauri serves
+ * the app at "/" in dev and "/index.html" when packaged; both mean "no deep
+ * link" and land on "/". No Tauri check is needed, and none would work anyway
+ * since the web mock installs `__TAURI_INTERNALS__` itself.
+ *
+ * "/" is the landing route because it is the Deck home (#282). It used to
+ * resolve to "/command", which made the landing page unreachable from a browser
+ * URL — you could only get to it by clicking the rail.
  */
 function deckInitialEntry(): string {
-  if (typeof window === "undefined") return "/command";
+  if (typeof window === "undefined") return "/";
   const p = window.location.pathname;
-  if (p.length <= 1 || p.startsWith("/index")) return "/command";
+  if (p.length <= 1 || p.startsWith("/index")) return "/";
   return p + window.location.search;
 }
 

@@ -71,7 +71,7 @@ import {
   type WorkflowVocabEntry,
 } from "../lib/api";
 import { relativeTime } from "../lib/format-helpers";
-import { Shell } from "../components/layout/shell";
+import { DeckShell } from "../components/deck/deck-shell";
 import { LaunchFromSourceButton } from "../components/launch/launch-from-source-button";
 import { AgentMarkdown } from "../components/terminal/agent-markdown";
 import { ActivityCard } from "../components/task-detail/activity-card";
@@ -102,11 +102,10 @@ const AVATAR_FONT_PX = 9;
 type SavePhase = "idle" | "saving" | "saved";
 const SAVED_INDICATOR_MS = 2_500;
 
-/** The sidecar returns naive UTC with no trailing "Z" — `relativeTime` does
- * not normalise on its own, so every caller appends it (mirrors
- * `task-card.tsx`'s `cardDate`). */
-function withZ(iso: string): string {
-  return iso.endsWith("Z") ? iso : `${iso}Z`;
+/** `relativeTime` normalises naive UTC itself now, separator included, so this
+ * only has to guard the null case its callers pass. */
+function withZ(iso: string | null | undefined): string | null {
+  return iso ?? null;
 }
 
 export function TaskDetailPage(): ReactElement {
@@ -477,13 +476,9 @@ export function TaskDetailPage(): ReactElement {
 
   if (isLoading) {
     return (
-      <Shell scrollable={false}>
-        <div className="td-main">
-          <div style={{ padding: "24px 28px" }}>
-            <span className="td-dim td-sm">Loading task…</span>
-          </div>
-        </div>
-      </Shell>
+      <DeckShell title={`#${taskId}`} crumb="loading">
+        <div className="dk-note">Loading task…</div>
+      </DeckShell>
     );
   }
 
@@ -493,8 +488,7 @@ export function TaskDetailPage(): ReactElement {
     // fetch, so `isError` never resolves either. Same not-found copy.
     const notFound = !task || error?.status === 404;
     return (
-      <Shell scrollable={false}>
-        <div className="td-main">
+      <DeckShell title={`#${taskId}`} crumb="loading">
           <div style={{ padding: "24px 28px" }}>
             {notFound ? (
               <>
@@ -517,9 +511,8 @@ export function TaskDetailPage(): ReactElement {
                 </button>
               </>
             )}
-          </div>
         </div>
-      </Shell>
+      </DeckShell>
     );
   }
 
@@ -533,9 +526,25 @@ export function TaskDetailPage(): ReactElement {
   const blockers = task.blockers ?? [];
 
   return (
-    <Shell scrollable={false}>
-      <div className="td-main">
-        <div className="td-bar">
+    <DeckShell
+      title={`#${taskId}`}
+      crumb={statusLabel.toLowerCase()}
+      actions={
+        <>
+          {savePhase === "saving" && <span className="dim">saving…</span>}
+          {savePhase === "saved" && <span className="dim">✓ saved</span>}
+          <button type="button" className="dk-btn bare" onClick={handleCopyRef}>
+            copy ref
+          </button>
+          <LaunchFromSourceButton kind="task" id={taskId} label="launch agent" variant="primary" />
+          <button type="button" className="dk-btn bare" onClick={() => void handleDelete()}>
+            delete
+          </button>
+        </>
+      }
+    >
+      <>
+        <div className="dk-bar">
           <div className="td-bar__l">
             <Link className="td-back" to="/tasks">
               ← Work Board
@@ -581,8 +590,8 @@ export function TaskDetailPage(): ReactElement {
           </div>
         </div>
 
-        <div className="td-grid">
-          <div className="td-doc">
+        <div className="dk-detail">
+          <div className="dk-detail__doc">
             {editingTitle ? (
               <textarea
                 ref={titleRef}
@@ -742,7 +751,7 @@ export function TaskDetailPage(): ReactElement {
             ) : null}
           </div>
 
-          <div className="td-side">
+          <div>
             <PropertiesCard
               task={task}
               members={members}
@@ -885,7 +894,7 @@ export function TaskDetailPage(): ReactElement {
             </button>
           </div>
         </div>
-      </div>
-    </Shell>
+      </>
+    </DeckShell>
   );
 }

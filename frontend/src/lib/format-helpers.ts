@@ -45,8 +45,20 @@ export function formatDuration(seconds: number): string {
  * The sidecar returns timestamps without a timezone suffix; appending "Z"
  * makes the browser parse them as UTC instead of local time.
  */
+/**
+ * The sidecar does not always emit a `T`: session rows come back as
+ * `2026-09-11T14:10:14`, but task rows come back as `2026-09-29 10:29:46`.
+ * `Date.parse` rejects the space form once a `Z` is appended, which surfaced as
+ * "NaNd ago" on every timestamp on task detail. Normalise the separator before
+ * anything else looks at the string.
+ */
+export function isoNormalise(iso: string): string {
+  return iso.includes("T") ? iso : iso.replace(" ", "T");
+}
+
 export function parseUtcMs(iso: string): number {
-  return Date.parse(iso.endsWith("Z") ? iso : iso + "Z");
+  const s = isoNormalise(iso);
+  return Date.parse(s.endsWith("Z") ? s : s + "Z");
 }
 
 /**
@@ -65,7 +77,8 @@ export function parseUtcMs(iso: string): number {
  * as written instead of being corrupted into an unparseable hybrid. See
  * `lib/task-runs.ts`, which grew its own parser to dodge exactly that.
  */
-function relativeTimeMs(iso: string): number {
+function relativeTimeMs(raw: string): number {
+  const iso = isoNormalise(raw);
   // A designator is `Z`, or a ±HH:MM / ±HHMM offset, and can only appear after
   // the time part — `2026-09-11` alone is a date, not an offset-bearing stamp.
   const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso) && iso.includes("T");
