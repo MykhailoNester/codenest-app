@@ -34,10 +34,16 @@ import { TERMINAL_ROUTE } from "../lib/nav-items";
 import { useTerminalStore } from "../stores/terminal-store";
 import { collectLeaves } from "../lib/layout-tree";
 import { openTerminalsWindow, emitFocusPaneToTerminals } from "../lib/ipc";
-import { Shell } from "../components/layout/shell";
-import { Icon } from "../components/icon";
 import { relativeTime } from "../lib/format-helpers";
-import styles from "./attention.module.css";
+import { DeckShell } from "../components/deck/deck-shell";
+import {
+  DECK_COLS,
+  DeckGrid,
+  DeckGroup,
+  DeckHead,
+  DeckLine,
+  type DeckState,
+} from "../components/deck/deck-grid";
 
 type QueueState = "open" | "resolved" | "muted";
 
@@ -68,10 +74,10 @@ const SEVERITIES: readonly { id: string; label: string; note: string }[] = [
   { id: "queued", label: "Queued", note: "real work, not this minute" },
 ];
 
-const SEV_DOT: Record<string, string> = {
-  blocking: styles.sevBlocking ?? "",
-  stalled: styles.sevStalled ?? "",
-  queued: styles.sevQueued ?? "",
+const SEV_STATE: Record<string, DeckState> = {
+  blocking: "block",
+  stalled: "stall",
+  queued: "wait",
 };
 
 /** Seconds → "3m 12s" / "48s" / "2h 04m". Used for the resolution average. */
@@ -110,53 +116,51 @@ function inspectPath(item: AttentionItem): string | null {
   }
 }
 
-function AttentionRow({
-  item,
-  onInspect,
-  onJump,
-}: {
-  item: AttentionItem;
-  onInspect: (item: AttentionItem) => void;
-  onJump: (paneId: string) => void;
-}): ReactElement {
-  const target = inspectPath(item);
-  const meta = [
-    item.project_name,
-    item.detail,
-    relativeTime(item.first_seen_at),
-    item.seen_count > 1 ? `seen ${item.seen_count}×` : null,
-  ]
+function attentionCells(
+  item: AttentionItem,
+  onInspect: (item: AttentionItem) => void,
+  onJump: (paneId: string) => void,
+) {
+  const meta = [item.project_name, item.detail, item.seen_count > 1 ? `seen ${item.seen_count}×` : null]
     .filter(Boolean)
     .join(" · ");
-  return (
-    <div className={styles.row}>
-      <span className={`${styles.sevDot} ${SEV_DOT[item.severity] ?? ""}`} />
-      <div className={styles.rowBody}>
-        <div className={styles.rowTitle}>{item.title}</div>
-        <div className={styles.rowMeta}>{meta}</div>
-      </div>
-      <div className={styles.rowActions}>
-        {target && (
-          <button
-            type="button"
-            className={styles.action}
-            onClick={() => onInspect(item)}
-          >
-            Inspect
-          </button>
-        )}
-        {item.pane_id && (
-          <button
-            type="button"
-            className={styles.action}
-            onClick={() => onJump(item.pane_id as string)}
-          >
-            Jump to pane
-          </button>
-        )}
-      </div>
-    </div>
-  );
+  const target = inspectPath(item);
+  return [
+    { v: item.title, cls: "sub", title: item.title },
+    meta,
+    relativeTime(item.first_seen_at),
+    {
+      v: (
+        <>
+          {target && (
+            <button
+              type="button"
+              className="dk-btn bare"
+              onClick={(e) => {
+                e.stopPropagation();
+                onInspect(item);
+              }}
+            >
+              inspect
+            </button>
+          )}
+          {item.pane_id && (
+            <button
+              type="button"
+              className="dk-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onJump(item.pane_id as string);
+              }}
+            >
+              jump to pane
+            </button>
+          )}
+        </>
+      ),
+      cls: "r",
+    },
+  ];
 }
 
 export function AttentionPage(): ReactElement {
@@ -209,106 +213,96 @@ export function AttentionPage(): ReactElement {
     [navigate],
   );
 
+  const tiles = (
+    <div className="dk-bigs">
+      <div className="dk-big">
+        <div className="v">{counts?.blocking ?? 0}</div>
+        <div className="l warn">blocking · a session cannot continue</div>
+      </div>
+      <div className="dk-big">
+        <div className="v">{counts?.stalled ?? 0}</div>
+        <div className="l">stalled · no progress &gt; 30m</div>
+      </div>
+      <div className="dk-big">
+        <div className="v">{counts?.queued ?? 0}</div>
+        <div className="l">queued · wants you eventually</div>
+      </div>
+      <div className="dk-big">
+        <div className="v">{counts?.resolved_today ?? 0}</div>
+        {/* "average", not "median": SQLite has no median aggregate and a true
+            one would mean pulling every resolved row into the sidecar on a
+            query this page polls every 30s. The label says which it is. */}
+        <div className="l">
+          resolved today · average {formatDuration(counts?.resolved_today_avg_seconds ?? null)}
+        </div>
+      </div>
+    </div>
+  );
+
+  const tabs = (
+    <div className="dk-seg" role="tablist" aria-label="Queue state">
+      {STATE_TABS.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          aria-selected={state === tab.id}
+          className={state === tab.id ? "on" : undefined}
+          onClick={() => setState(tab.id)}
+        >
+          {tab.label.toLowerCase()}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <Shell>
-      <div className={styles.page}>
-        <div className={styles.tabs} role="tablist" aria-label="Queue state">
-          {STATE_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={state === tab.id}
-              className={`${styles.tab} ${state === tab.id ? styles.tabOn : ""}`}
-              onClick={() => setState(tab.id)}
+    <DeckShell title="needs you" crumb={`${counts?.open ?? 0} open`} actions={tabs}>
+      {tiles}
+
+      {isLoading ? (
+        <div className="dk-note">Loading&hellip;</div>
+      ) : items.length === 0 ? (
+        <div className="dk-note sans">
+          <div style={{ color: "var(--fg-2)" }}>
+            {state === "open" ? "Nothing is waiting on you" : `No ${state} items`}
+          </div>
+          {/* The 30-second re-check is the whole of P1's freshness promise, and
+              it is named here because it is the only thing that makes an empty
+              page trustworthy. No tray notification is promised. */}
+          <div>This page re-checks every 30 seconds while it is open.</div>
+          <div>
+            Stalled sessions, failed scheduled runs, budget thresholds and blocked tasks appear
+            here on their own.
+          </div>
+        </div>
+      ) : (
+        SEVERITIES.map((sev) => {
+          const group = items.filter((it) => it.severity === sev.id);
+          if (group.length === 0) return null;
+          return (
+            <DeckGroup
+              key={sev.id}
+              label={sev.label.toLowerCase()}
+              count={group.length}
+              note={sev.note}
+              state={SEV_STATE[sev.id]}
             >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className={styles.tiles}>
-          <div className={styles.tile}>
-            <span className={styles.tileLabel}>Blocking</span>
-            <span className={styles.tileValue}>{counts?.blocking ?? 0}</span>
-            <span className={styles.tileSub}>a session cannot continue</span>
-          </div>
-          <div className={styles.tile}>
-            <span className={styles.tileLabel}>Stalled</span>
-            <span className={styles.tileValue}>{counts?.stalled ?? 0}</span>
-            <span className={styles.tileSub}>no progress &gt; 30m</span>
-          </div>
-          <div className={styles.tile}>
-            <span className={styles.tileLabel}>Queued</span>
-            <span className={styles.tileValue}>{counts?.queued ?? 0}</span>
-            <span className={styles.tileSub}>wants you eventually</span>
-          </div>
-          <div className={styles.tile}>
-            <span className={styles.tileLabel}>Resolved today</span>
-            <span className={styles.tileValue}>
-              {counts?.resolved_today ?? 0}
-            </span>
-            {/* "average", not "median": SQLite has no median aggregate and
-                computing a true one would mean pulling every resolved row
-                into the sidecar on a query this page polls every 30s. The
-                label says which it is. */}
-            <span className={styles.tileSub}>
-              average{" "}
-              {formatDuration(counts?.resolved_today_avg_seconds ?? null)}
-            </span>
-          </div>
-        </div>
-
-        {isLoading ? (
-          <div className={styles.rowMeta}>Loading&hellip;</div>
-        ) : items.length === 0 ? (
-          <div className={styles.empty}>
-            <span className={styles.emptyMark}>
-              <Icon name="check-circle" size={20} />
-            </span>
-            <div className={styles.emptyTitle}>
-              {state === "open"
-                ? "Nothing is waiting on you"
-                : `No ${state} items`}
-            </div>
-            {/* The 30-second re-check is the whole of P1's freshness promise,
-                and it is named here because it is the only thing that makes an
-                empty page trustworthy. No tray notification is promised: P1
-                builds no tray, and this is the last screen that should
-                overstate what it can do. */}
-            <div className={styles.emptyLine}>
-              This page re-checks every 30 seconds while it is open.
-            </div>
-            <div className={styles.emptyLine}>
-              Stalled sessions, failed scheduled runs, budget thresholds and
-              blocked tasks appear here on their own.
-            </div>
-          </div>
-        ) : (
-          SEVERITIES.map((sev) => {
-            const group = items.filter((it) => it.severity === sev.id);
-            if (group.length === 0) return null;
-            return (
-              <section key={sev.id}>
-                <h2 className={styles.groupHead}>
-                  {sev.label}
-                  <span className={styles.groupNote}>
-                    · {sev.note} · {group.length}
-                  </span>
-                </h2>
+              <DeckGrid cols={DECK_COLS.default} label={sev.label}>
+                <DeckHead cells={["what", "where", "r waiting", "r "]} />
                 {group.map((item) => (
-                  <AttentionRow
+                  <DeckLine
                     key={item.id}
-                    item={item}
-                    onInspect={handleInspect}
-                    onJump={handleJump}
+                    state={SEV_STATE[item.severity] ?? "idle"}
+                    cells={attentionCells(item, handleInspect, handleJump)}
+                    onOpen={inspectPath(item) ? () => handleInspect(item) : undefined}
                   />
                 ))}
-              </section>
-            );
-          })
-        )}
-      </div>
-    </Shell>
+              </DeckGrid>
+            </DeckGroup>
+          );
+        })
+      )}
+    </DeckShell>
   );
 }

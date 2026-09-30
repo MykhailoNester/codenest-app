@@ -190,7 +190,7 @@
 
 /* ── The line, and the grid it lives on ──────────────────────────────── */
 
-.dk-list { --cols: 14px minmax(0, 1fr) 100px 124px 58px 88px; display: block; }
+.dk-list { --cols: 14px minmax(0, 1fr) 110px 150px 62px 96px; display: block; }
 .dk-list.tasks  { --cols: 14px 50px minmax(0, 1fr) 100px 118px 52px 80px; }
 .dk-list.simple { --cols: 14px minmax(0, 1fr) 90px; }
 .dk-list.wide   { --cols: 14px minmax(0, 1fr) 118px 68px 80px 90px; }

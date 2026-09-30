@@ -1,4 +1,11 @@
-import { useMemo, type ReactElement, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   useActiveSessionCounts,
@@ -8,6 +15,9 @@ import {
 } from "../../lib/api";
 import { NAV_ITEMS } from "../../lib/nav-items";
 import { formatUSD } from "../../lib/format-helpers";
+import { OMNI_EVENT_OPEN_LAUNCH, OMNI_EVENT_OPEN_PALETTE } from "../../lib/omni-commands";
+import { LaunchComposerDialog } from "../launch/launch-composer-dialog";
+import { NotificationBell } from "../notification-bell";
 import type { DeckState } from "./deck-grid";
 
 /**
@@ -70,6 +80,22 @@ function DeckStatus(): ReactElement {
       <span className="sep">·</span>
       <span>{spend ? formatUSD(spend.cost_usd) : "—"} today</span>
       <span className="sp" />
+      <button
+        type="button"
+        className="dk-btn bare"
+        onClick={() => document.dispatchEvent(new CustomEvent(OMNI_EVENT_OPEN_PALETTE))}
+        title="Search, commands, jump to a project"
+      >
+        search <kbd style={{ color: "var(--fg-3)" }}>⌘K</kbd>
+      </button>
+      <NotificationBell />
+      <button
+        type="button"
+        className="dk-btn"
+        onClick={() => document.dispatchEvent(new CustomEvent(OMNI_EVENT_OPEN_LAUNCH))}
+      >
+        launch
+      </button>
       <span>{clock}</span>
     </div>
   );
@@ -172,6 +198,16 @@ export function DeckShell({
   children,
   scrollable = true,
 }: DeckShellProps): ReactElement {
+  const [launchOpen, setLaunchOpen] = useState(false);
+  const openLaunch = useCallback(() => setLaunchOpen(true), []);
+
+  // Same contract as the old Shell: the palette's "Launch Project" command
+  // dispatches on `document` rather than threading a callback through pages.
+  useEffect(() => {
+    document.addEventListener(OMNI_EVENT_OPEN_LAUNCH, openLaunch);
+    return () => document.removeEventListener(OMNI_EVENT_OPEN_LAUNCH, openLaunch);
+  }, [openLaunch]);
+
   return (
     <div className="deck">
       <div className="dk-app">
@@ -193,6 +229,15 @@ export function DeckShell({
           </div>
         </main>
       </div>
+
+      {launchOpen && (
+        <LaunchComposerDialog
+          open
+          onClose={() => setLaunchOpen(false)}
+          source={null}
+          seed={null}
+        />
+      )}
     </div>
   );
 }
