@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { relativeTime } from "../format-helpers";
+import { parseUtcMs, relativeTime } from "../format-helpers";
 
 /**
  * `relativeTime` used `new Date(iso)`, which reads a naive ISO string as LOCAL
@@ -67,5 +67,23 @@ describe("relativeTime reads naive sidecar stamps as UTC", () => {
       // The stalled-session ages the Needs You page renders.
       expect(relativeTime("2026-09-04T15:00:00")).toBe("7d ago");
     });
+  });
+});
+
+describe("naive UTC with a space separator", () => {
+  // Task rows come back as "2026-09-29 10:29:46", not "…T10:29:46". Appending
+  // "Z" to the space form gives Date.parse NaN, which rendered as "NaNd ago"
+  // on every timestamp on task detail.
+  it("parses the space form the same as the T form", () => {
+    expect(parseUtcMs("2026-09-29 10:29:46")).toBe(parseUtcMs("2026-09-29T10:29:46"));
+    expect(Number.isNaN(parseUtcMs("2026-09-29 10:29:46"))).toBe(false);
+  });
+
+  it("does not render a relative time as NaN", () => {
+    expect(relativeTime("2026-09-29 10:29:46")).not.toMatch(/NaN/);
+  });
+
+  it("leaves an explicit zone alone", () => {
+    expect(parseUtcMs("2026-09-29T10:29:46Z")).toBe(Date.parse("2026-09-29T10:29:46Z"));
   });
 });

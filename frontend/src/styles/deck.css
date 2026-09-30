@@ -506,3 +506,33 @@
   --shadow-2: none;
   --shadow-3: none;
 }
+
+/* ── Detail layout ───────────────────────────────────────────────────────
+   A record and its properties. The left column is what the thing is; the
+   right is what the app knows about it. Collapses to one column when the
+   window cannot hold both. */
+.dk-detail { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--u6); align-items: start; }
+@media (max-width: 1100px) { .dk-detail { grid-template-columns: minmax(0, 1fr); } }
+
+.dk-bar { display: flex; align-items: center; gap: var(--u2); flex-wrap: wrap;
+  padding: 0 var(--u3) var(--u3); border-bottom: 1px solid var(--line); margin-bottom: var(--u6); }
+.dk-bar .sp { margin-left: auto; }
+.dk-bar__ref { color: var(--fg-3); }
+
+.dk-prose { font-family: var(--sans); font-size: 13px; line-height: 1.65; color: var(--fg-2); max-width: 80ch; }
+.dk-prose p { margin: 0 0 var(--u3); }
+.dk-prose ul, .dk-prose ol { margin: 0 0 var(--u3); padding-left: var(--u4); }
+.dk-prose code { font-family: var(--mono); font-size: var(--fs-s); color: var(--fg); }
+.dk-prose h1, .dk-prose h2, .dk-prose h3 { font: 500 14px/1.4 var(--sans); margin: var(--u4) 0 var(--u2); color: var(--fg); }
+
+.dk-ta { width: 100%; min-height: 120px; padding: var(--u3); border: 1px solid var(--line-2);
+  border-radius: 3px; background: var(--bg-1); color: var(--fg); font-family: var(--sans);
+  font-size: 13px; line-height: 1.6; resize: vertical; }
+.dk-ta:focus { outline: 0; border-color: var(--fg-4); }
+
+/* Key/value rows for a properties panel — the one place a two-column list is
+   narrower than a grid. */
+.dk-kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--u2);
+  align-items: center; min-height: var(--row); padding: 0 var(--u3); font-size: var(--fs-s); }
+.dk-kv > span:first-child { color: var(--fg-3); }
+.dk-kv + .dk-kv { border-top: 1px solid var(--line); }
