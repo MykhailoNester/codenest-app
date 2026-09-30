@@ -181,6 +181,20 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .dk-field input { flex: 1 1 auto; border: 0; outline: 0; background: none; min-width: 0; }
 .dk-field input::placeholder { color: var(--fg-4); }
 
+/* An inline select inside a row — the one control a line carries, for moving a
+   task without leaving the list. */
+.dk-sel { height: 22px; padding: 0 var(--u); border: 1px solid var(--line-2); border-radius: 3px;
+  background: var(--bg-1); color: var(--fg-2); font: inherit; font-size: var(--fs-s); }
+.dk-sel:hover { border-color: var(--fg-4); color: var(--fg); }
+
+/* Below this the fixed columns stop fitting, so the grid scrolls sideways
+   rather than crushing the subject out of readability. */
+@media (max-width: 1100px) {
+  .dk-page > * { max-width: none; }
+  .dk-list { overflow-x: auto; }
+  .dk-head, .dk-line { min-width: 900px; }
+}
+
 .dk-bigs { display: flex; gap: 44px; flex-wrap: wrap; margin-bottom: var(--group-gap); padding: 0 var(--u3) var(--u6); border-bottom: 1px solid var(--line); }
 .dk-big .v { font: 400 26px/30px var(--mono); letter-spacing: -1px; }
 .dk-big .v.na { color: var(--fg-4); }

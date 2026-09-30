@@ -58,8 +58,8 @@ vi.mock("sonner", () => ({
   toast: { error: mockToastError, success: vi.fn() },
 }));
 
-vi.mock("../../components/layout/shell", () => ({
-  Shell: ({ children, actions }: { children: ReactNode; actions?: ReactNode }) => (
+vi.mock("../../components/deck/deck-shell", () => ({
+  DeckShell: ({ children, actions }: { children: ReactNode; actions?: ReactNode }) => (
     <div>
       <div>{actions}</div>
       {children}
@@ -212,7 +212,16 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("TasksPage — board", () => {
+
+/** A DeckGroup heading is chevron + label + count spans; the label is the second. */
+function groupLabels(container: HTMLElement): string[] {
+  return [...container.querySelectorAll("h2")].map((h) => {
+    const spans = h.querySelectorAll("span");
+    return (spans[1]?.textContent ?? "").trim();
+  });
+}
+
+describe("TasksPage — work board", () => {
   it("N opens the composer", () => {
     setupMocks();
     renderPage();
@@ -220,13 +229,16 @@ describe("TasksPage — board", () => {
     screen.getByPlaceholderText("What needs doing?");
   });
 
-  it("N typed into a text input does not open the composer", () => {
+  // The filter row is selects now, so the nearest real text input is the
+  // composer's own. The guard being tested is the same one: N must not act
+  // while focus is in a field.
+  it("N typed into a text input does not reopen the composer", () => {
     setupMocks();
     renderPage();
-    fireEvent.click(screen.getByLabelText("Project: Any project"));
-    const search = screen.getByPlaceholderText(/Search project/i);
-    fireEvent.keyDown(search, { key: "n" });
-    expect(screen.queryByPlaceholderText("What needs doing?")).toBeNull();
+    fireEvent.keyDown(window, { key: "n" });
+    const title = screen.getByPlaceholderText("What needs doing?");
+    fireEvent.keyDown(title, { key: "n" });
+    expect(screen.getAllByPlaceholderText("What needs doing?")).toHaveLength(1);
   });
 
   it("Cmd+N does not open the composer", () => {
@@ -236,30 +248,37 @@ describe("TasksPage — board", () => {
     expect(screen.queryByPlaceholderText("What needs doing?")).toBeNull();
   });
 
-  it("renders one column per active task status, using its label", () => {
-    setupMocks();
+  // #292 replaced the kanban with status groups on one list. One group per
+  // active status, in the taxonomy's order — the same contract the columns had.
+  it("renders one group per active task status, using its label", () => {
+    setupMocks({
+      tasks: ["backlog", "todo", "in-progress", "blocked", "done"].map((status, i) =>
+        makeTask({ id: i + 1, status }),
+      ),
+    });
     const { container } = renderPage();
-    const titles = [...container.querySelectorAll(".tb-col__title")].map(
-      (el) => el.textContent,
-    );
-    expect(titles).toEqual(["Icebox", "Ready", "Doing", "Stuck", "Shipped"]);
+    expect(groupLabels(container)).toEqual(["icebox", "ready", "doing", "stuck", "shipped"]);
   });
 
-  it("falls back to five columns when lookups have not resolved", () => {
-    setupMocks({ lookups: undefined });
+  it("falls back to five groups when lookups have not resolved", () => {
+    setupMocks({
+      lookups: undefined,
+      tasks: ["backlog", "todo", "in-progress", "blocked", "done"].map((status, i) =>
+        makeTask({ id: i + 1, status }),
+      ),
+    });
     const { container } = renderPage();
-    const titles = [...container.querySelectorAll(".tb-col__title")].map(
-      (el) => el.textContent,
-    );
-    expect(titles).toEqual(["Idea", "To do", "In progress", "Blocked", "Done"]);
+    expect(groupLabels(container)).toEqual(["idea", "to do", "in progress", "blocked", "done"]);
   });
 
-  it("buckets a task whose status is not a column into the first column", () => {
+  // A status deactivated while tasks still carry it must not make those tasks
+  // vanish from the board — they fall into the first group, as they did into
+  // the first column.
+  it("buckets a task whose status is not a group into the first group", () => {
     setupMocks({ tasks: [makeTask({ id: 99, status: "no-such-status" })] });
     const { container } = renderPage();
-    const columns = container.querySelectorAll(".tb-col");
-    const firstColumnCount = columns[0]?.querySelector(".tb-col__count")?.textContent;
-    expect(firstColumnCount).toBe("1");
+    expect(screen.getByText("#99")).toBeTruthy();
+    expect(groupLabels(container)[0]).toBe("icebox");
   });
 
   it("the label filter narrows the board client-side", () => {
@@ -275,77 +294,29 @@ describe("TasksPage — board", () => {
       ],
     });
     const { container } = renderPage(["/tasks?label=7"]);
-    expect(container.querySelectorAll(".tb-card").length).toBe(1);
+    expect(container.querySelectorAll(".dk-line").length).toBe(1);
   });
 
   it("a failed status change surfaces a toast", async () => {
     setupMocks({ tasks: [makeTask({ id: 5, status: "todo" })] });
     mockChangeTaskStatus.mockRejectedValueOnce(new Error("boom"));
     renderPage();
-    fireEvent.click(screen.getByLabelText("Status: Ready"));
-    fireEvent.click(screen.getByRole("option", { name: "Doing" }));
+    fireEvent.change(screen.getByLabelText("Status of task 5"), {
+      target: { value: "in-progress" },
+    });
     await waitFor(() => expect(mockChangeTaskStatus).toHaveBeenCalledWith(5, "in-progress"));
     await waitFor(() => expect(mockToastError).toHaveBeenCalled());
   });
 
-  it("list mode still renders the table and the status/sort pickers", () => {
-    setupMocks({
-      tasks: [makeTask({ id: 1 }), makeTask({ id: 2, project_id: 2, project_name: "Beta" })],
-    });
-    const { container } = renderPage(["/tasks?view=list"]);
-    expect(container.querySelector("table")).not.toBeNull();
-    screen.getByLabelText("Status: Any status");
-    screen.getByLabelText("Sort: Newest");
+
+  // The kanban forbade selects because a card moved by dragging. A line cannot
+  // be dragged, so the select is how a task moves — one per row, deliberately.
+  it("gives each line an inline status select", () => {
+    setupMocks({ tasks: [makeTask({ id: 5, status: "todo" })] });
+    renderPage();
+    const sel = screen.getByLabelText("Status of task 5") as HTMLSelectElement;
+    expect(sel.tagName).toBe("SELECT");
+    expect(sel.value).toBe("todo");
   });
 
-  it("no <select> remains in board mode", () => {
-    setupMocks();
-    const { container } = renderPage();
-    expect(container.querySelector("select")).toBeNull();
-  });
-
-  it("a second WIP-limit write fired before the first round-trips builds on the first's result instead of a stale map", async () => {
-    const initialLookups = makeLookups({ board_wip_limits: {} });
-    setupMocks({ lookups: initialLookups });
-
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    qc.setQueryData(["lookups"], initialLookups);
-
-    // Stands in for the sidecar PUT: applies the edit and lands it in the
-    // query cache, mirroring what the real invalidate-then-refetch round
-    // trip would eventually do.
-    mockSetBoardWipLimit.mockImplementation(
-      (current: Record<string, number>, slug: string, limit: number | null) => {
-        const next = { ...current };
-        if (limit === null) delete next[slug];
-        else next[slug] = limit;
-        qc.setQueryData(["lookups"], (old: LookupsOut | undefined) =>
-          old ? { ...old, board_wip_limits: next } : old,
-        );
-        return Promise.resolve({ key: "board_wip_limits", value_json: JSON.stringify(next) });
-      },
-    );
-
-    const { container } = renderPage(["/tasks"], qc);
-    const columns = container.querySelectorAll(".tb-col");
-
-    // Fire both edits synchronously, back to back — neither await lets the
-    // first write's promise settle before the second is issued.
-    fireEvent.click(columns[0]!.querySelector(".tb-col__wip")!);
-    fireEvent.change(document.querySelector(".tb-wip-form__input")!, {
-      target: { value: "3" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Set limit" }));
-
-    fireEvent.click(columns[1]!.querySelector(".tb-col__wip")!);
-    fireEvent.change(document.querySelector(".tb-wip-form__input")!, {
-      target: { value: "5" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Set limit" }));
-
-    await waitFor(() => expect(mockSetBoardWipLimit).toHaveBeenCalledTimes(2));
-
-    expect(mockSetBoardWipLimit).toHaveBeenNthCalledWith(1, {}, "backlog", 3);
-    expect(mockSetBoardWipLimit).toHaveBeenNthCalledWith(2, { backlog: 3 }, "todo", 5);
-  });
 });
