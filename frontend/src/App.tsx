@@ -43,6 +43,7 @@ import { StartupSplash } from "./components/startup-splash";
 import { ToastHost } from "./components/toast-host";
 import { CommandCenterPage } from "./pages/command-center";
 import { DashboardPage } from "./pages/dashboard";
+import { DeckHomePage } from "./pages/deck-home";
 import { AttentionPage } from "./pages/attention";
 import { DeckPreviewPage } from "./pages/deck-preview";
 import { TasksPage } from "./pages/tasks";
@@ -405,7 +406,11 @@ function AppInner(): ReactElement {
       <Routes>
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/command" element={<CommandCenterPage />} />
-        <Route path="/" element={<DashboardPage />} />
+        {/* #282 — the Deck home screen. Mission Control keeps a route of its
+            own until the migration is signed off, so the two can be compared in
+            one window the way /deck let the shell be. */}
+        <Route path="/" element={<DeckHomePage />} />
+        <Route path="/mission-control" element={<DashboardPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route
           path="/projects/:projectId/context"
