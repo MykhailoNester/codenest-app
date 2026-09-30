@@ -468,3 +468,41 @@
 
 .deck .sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* ── Bridge for components not yet converted ─────────────────────────────
+   Deck redefines the token names it shares with the old theme (--bg-1/-2,
+   --fg-2/-3/-4, --line-2, --ok/--warn/--err), but the rest still resolve from
+   :root. A child inside .deck that has not been converted — the transcript,
+   the activity dock, the permission dialogs — therefore drew old-theme blues
+   and greys against Deck's grounds.
+
+   Mapping the remaining names onto Deck's palette removes that seam without
+   converting every child first. Each line here is a debt: delete it when the
+   components using that token have moved to Deck's own names. */
+.deck {
+  --bg-0: var(--bg);
+  --bg-3: var(--bg-2);
+  --bg-4: var(--bg-2);
+  --bg-5: var(--line);
+  --line-1: var(--line);
+  --line-3: var(--line-2);
+  --fg-0: var(--fg);
+  --fg-1: var(--fg);
+
+  --accent: var(--run);
+  --accent-soft: var(--run-bg);
+  --accent-line: var(--line-2);
+  --info: var(--run);
+  --violet: var(--run);
+  --ok-soft: var(--ok-bg);
+  --warn-soft: var(--warn-bg);
+  --err-soft: var(--err-bg);
+
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+
+  /* Deck draws no shadows; an unconverted child must not reintroduce them. */
+  --shadow-1: none;
+  --shadow-2: none;
+  --shadow-3: none;
+}
