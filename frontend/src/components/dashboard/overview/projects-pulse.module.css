@@ -74,7 +74,7 @@
 }
 
 .row.workspace {
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.06), transparent);
+  background: transparent;
   padding-left: 8px;
   border-radius: 8px;
   border: 1px solid rgba(59, 130, 246, 0.2);

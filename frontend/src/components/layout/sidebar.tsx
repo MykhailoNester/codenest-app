@@ -372,7 +372,7 @@ function SidebarInner({
         <div className="d3-side__user">
           <div
             className="d3-avatar"
-            style={{ background: "linear-gradient(135deg,#3b82f6,#a855f7)" }}
+            style={{ background: "var(--bg-4)", border: "1px solid var(--line-2)" }}
           >
             {(lookups?.user_display_name ?? "Operator").charAt(0).toUpperCase()}
           </div>

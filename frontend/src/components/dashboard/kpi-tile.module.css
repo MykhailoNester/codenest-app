@@ -16,34 +16,16 @@
  */
 
 .tile {
-  background: rgba(11, 14, 24, 0.65);
-  border: 1px solid var(--line-1);
+  background: transparent;
+  border: 1px solid var(--line-2);
   border-radius: 12px;
   padding: 14px 16px;
-  backdrop-filter: blur(12px);
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-height: 96px;
-}
-
-/* Per-tile corner radial glow — colour set via the inline `--kpi-glow` var so
-   the severity meaning stays with the caller that knows it. */
-.tile::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 60%;
-  height: 100%;
-  background: radial-gradient(
-    ellipse 120px 80px at 100% 0%,
-    var(--kpi-glow, rgba(59, 130, 246, 0.1)),
-    transparent 70%
-  );
-  pointer-events: none;
 }
 
 .label {

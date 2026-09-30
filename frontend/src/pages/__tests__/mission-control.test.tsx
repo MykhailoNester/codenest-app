@@ -379,7 +379,10 @@ describe("design constraints from §2", () => {
     );
   });
 
-  it("keeps backdrop-filter off every full-size panel", () => {
+  // The ban used to carve out kpi-tile as the one allowed panel. #278 removed
+  // that blur along with the tile's corner glow, so the exception is gone and
+  // the rule is now absolute on this page.
+  it("keeps backdrop-filter off every panel on this page", () => {
     const declarations = grepSrc("backdrop-filter:").filter(
       // A comment explaining the ban is not the ban being broken.
       (hit) => /^(-webkit-)?backdrop-filter:/.test(hit.text),
@@ -389,8 +392,7 @@ describe("design constraints from §2", () => {
         hit.where.includes("/dashboard/") ||
         hit.where.includes("mission-control"),
     );
-    expect(onThisPage, report(onThisPage)).toHaveLength(1);
-    expect(onThisPage[0]?.where).toContain("kpi-tile.module.css");
+    expect(onThisPage, report(onThisPage)).toHaveLength(0);
   });
 
   it("leaves no trace of the overview page it replaced", () => {

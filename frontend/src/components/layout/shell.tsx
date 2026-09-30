@@ -95,9 +95,6 @@ export function Shell({
     <div className="d3-shell">
       <Sidebar activeSessionCount={activeCount} />
       <main className="d3-main">
-        <div className="d3-bg-orb d3-bg-orb--1" />
-        <div className="d3-bg-orb d3-bg-orb--2" />
-        <div className="d3-bg-grid" />
         {/* Top chrome row: OmniBar input expands to fill available width;
             NotificationBell and Launch button are pinned to the right.
             This entire row sits above the Topbar title/crumbs so the two
