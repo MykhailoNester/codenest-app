@@ -170,7 +170,12 @@ export function DeckLine({
       {cells.map((c, i) => {
         const { v, cls: k, title } = cellOf(c);
         return (
-          <span key={i} role="gridcell" className={k} title={title}>
+          <span
+            key={i}
+            role="gridcell"
+            className={k}
+            title={title ?? (typeof v === "string" && v ? v : undefined)}
+          >
             {v}
           </span>
         );
@@ -204,7 +209,7 @@ export function DeckGroup({ label, count, note, state, children }: DeckGroupProp
 
 /** Column templates, so a list's shape is named rather than inlined. */
 export const DECK_COLS = {
-  default: "14px minmax(0, 1fr) 100px 124px 58px 88px",
+  default: "14px minmax(0, 1fr) 110px 150px 62px 96px",
   tasks: "14px 50px minmax(0, 1fr) 100px 118px 52px 80px",
   simple: "14px minmax(0, 1fr) 90px",
   wide: "14px minmax(0, 1fr) 118px 68px 80px 90px",

@@ -32,8 +32,15 @@ vi.mock("../../lib/api", () => ({
   useAttention: (...args: unknown[]) => mockUseAttention(...args),
 }));
 
-vi.mock("../../components/layout/shell", () => ({
-  Shell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+// Stubbed for the same reason the old Shell was: this file tests the queue,
+// not the chrome. `actions` is rendered so the state tabs stay reachable.
+vi.mock("../../components/deck/deck-shell", () => ({
+  DeckShell: ({ children, actions }: { children: ReactNode; actions?: ReactNode }) => (
+    <div>
+      {actions}
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock("react-router-dom", async () => {
@@ -129,8 +136,8 @@ describe("Needs You — rows", () => {
       isLoading: false,
     });
     renderPage();
-    expect(screen.getByText("Inspect")).toBeTruthy();
-    expect(screen.getByText("Jump to pane")).toBeTruthy();
+    expect(screen.getByText(/^inspect$/i)).toBeTruthy();
+    expect(screen.getByText(/^jump to pane$/i)).toBeTruthy();
     expect(screen.queryByText(/Allow/)).toBeNull();
     expect(screen.queryByText(/Deny/)).toBeNull();
   });
@@ -143,7 +150,7 @@ describe("Needs You — rows", () => {
       isLoading: false,
     });
     renderPage();
-    expect(screen.queryByText("Jump to pane")).toBeNull();
+    expect(screen.queryByText(/^jump to pane$/i)).toBeNull();
   });
 
   it("routes Inspect to the subject's own page", () => {
@@ -161,7 +168,7 @@ describe("Needs You — rows", () => {
       isLoading: false,
     });
     renderPage();
-    fireEvent.click(screen.getByText("Inspect"));
+    fireEvent.click(screen.getByText(/^inspect$/i));
     expect(mockNavigate).toHaveBeenCalledWith("/tasks/42");
   });
 
@@ -182,9 +189,9 @@ describe("Needs You — rows", () => {
     const heads = Array.from(container.querySelectorAll("h2")).map((h) =>
       (h.textContent ?? "").trim(),
     );
-    expect(heads[0]).toMatch(/^Blocking/);
-    expect(heads[1]).toMatch(/^Stalled/);
-    expect(heads[2]).toMatch(/^Queued/);
+    expect(heads[0]).toMatch(/^blocking/i);
+    expect(heads[1]).toMatch(/^stalled/i);
+    expect(heads[2]).toMatch(/^queued/i);
   });
 
   it("shows the seen count only once a condition has recurred", () => {
@@ -221,7 +228,7 @@ describe("Needs You — state tabs", () => {
     renderPage();
     expect(mockUseAttention).toHaveBeenLastCalledWith("open");
 
-    fireEvent.click(screen.getByText("Muted"));
+    fireEvent.click(screen.getByText(/^muted$/i));
     expect(mockUseAttention).toHaveBeenLastCalledWith("muted");
     expect(screen.getByText("No muted items")).toBeTruthy();
   });
