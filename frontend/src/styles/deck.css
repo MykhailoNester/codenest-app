@@ -294,11 +294,12 @@
 .dk-field input { flex: 1 1 auto; border: 0; outline: 0; background: none; min-width: 0; }
 .dk-field input::placeholder { color: var(--fg-4); }
 
-/* An inline select inside a row — the one control a line carries, for moving a
-   task without leaving the list. */
-.dk-sel { height: 22px; padding: 0 var(--u); border: 1px solid var(--line-2); border-radius: 3px;
+/* A bare <select> inside a row or a filter — the one control a line carries,
+   for moving a task without leaving the list. Distinct from `.dk-sel`, which
+   wraps a select in composer chrome; these collided on merge. */
+.dk-rowsel { height: 22px; padding: 0 var(--u); border: 1px solid var(--line-2); border-radius: 3px;
   background: var(--bg-1); color: var(--fg-2); font: inherit; font-size: var(--fs-s); }
-.dk-sel:hover { border-color: var(--fg-4); color: var(--fg); }
+.dk-rowsel:hover { border-color: var(--fg-4); color: var(--fg); }
 
 /* Below this the fixed columns stop fitting, so the grid scrolls sideways
    rather than crushing the subject out of readability. */

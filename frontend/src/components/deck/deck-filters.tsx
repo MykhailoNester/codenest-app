@@ -47,7 +47,7 @@ export function DeckFilters({
               {label}
             </span>
             <select
-              className="dk-sel"
+              className="dk-rowsel"
               value={values[key] ?? ""}
               onChange={(e) => onSet(key, e.target.value)}
               aria-label={`Filter by ${label}`}
@@ -69,7 +69,7 @@ export function DeckFilters({
             sort
           </span>
           <select
-            className="dk-sel"
+            className="dk-rowsel"
             value={sort.value}
             onChange={(e) => onSetSort(e.target.value)}
             aria-label="Sort order"

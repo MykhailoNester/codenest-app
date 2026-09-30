@@ -56,7 +56,7 @@ export function TaskLine({
           v: (
             <span className="acts" onClick={(e) => e.stopPropagation()}>
               <select
-                className="dk-sel"
+                className="dk-rowsel"
                 value={t.status}
                 onChange={(e) => onStatus(e.target.value)}
                 aria-label={`Status of task ${t.id}`}
