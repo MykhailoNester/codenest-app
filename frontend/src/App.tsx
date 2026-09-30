@@ -44,6 +44,7 @@ import { ToastHost } from "./components/toast-host";
 import { CommandCenterPage } from "./pages/command-center";
 import { DashboardPage } from "./pages/dashboard";
 import { AttentionPage } from "./pages/attention";
+import { DeckPreviewPage } from "./pages/deck-preview";
 import { TasksPage } from "./pages/tasks";
 import { TaskDetailPage } from "./pages/task-detail";
 import { InProgressPage } from "./pages/in-progress";
@@ -83,6 +84,19 @@ import {
 } from "./lib/window-target";
 
 // ---------------------------------------------------------------------------
+/**
+ * "/command", or the browser path when a route was deep-linked. Tauri serves
+ * the app at "/" in dev and "/index.html" when packaged, so both fall through
+ * to the default — no Tauri check needed, and none would work anyway since the
+ * web mock installs `__TAURI_INTERNALS__` itself.
+ */
+function deckInitialEntry(): string {
+  if (typeof window === "undefined") return "/command";
+  const p = window.location.pathname;
+  if (p.length <= 1 || p.startsWith("/index")) return "/command";
+  return p + window.location.search;
+}
+
 // FeatureRoute — hard-gate guard (Phase 1)
 // ---------------------------------------------------------------------------
 
@@ -397,6 +411,8 @@ function AppInner(): ReactElement {
           path="/projects/:projectId/context"
           element={<ProjectContextPage />}
         />
+        {/* #280 — the Deck shell, reviewable beside the old one. Removed by #281/#282. */}
+        <Route path="/deck" element={<DeckPreviewPage />} />
         <Route
           path="/attention"
           element={
@@ -555,7 +571,10 @@ export function App(): ReactElement {
           a new agent/skill/command file has to reach an already-open composer
           without a restart (#48). */}
       <CatalogFeedHost />
-      <MemoryRouter initialEntries={["/command"]}>
+      {/* MemoryRouter stays — Tauri has no URL bar. But outside Tauri the
+          browser path is the only way to reach a route for review, so it seeds
+          the initial entry. No effect in the packaged app. */}
+      <MemoryRouter initialEntries={[deckInitialEntry()]}>
         <AppInner />
       </MemoryRouter>
       <Toaster theme="dark" position="bottom-right" richColors />
