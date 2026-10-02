@@ -14,8 +14,12 @@ post-reset state:
 from __future__ import annotations
 
 import pathlib
+import re
 
+import aiosqlite
 import pytest
+
+from app.routers import command_center
 
 BUNDLE_DIR = (
     pathlib.Path(__file__).parents[2] / "src-tauri" / "resources" / "org-agents"
@@ -276,3 +280,64 @@ async def test_factory_reset_wipes_user_data_and_restores_seed(
         app_config.settings.ORG_AGENTS_DIR = orig_org
         app_config.settings.APP_DATA_DIR = orig_app_data
         app_config.settings.BUNDLE_RESOURCES = orig_bundle
+
+
+@pytest.mark.asyncio
+async def test_wipe_list_names_only_tables_that_exist(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Every name in `_WIPE_TABLES` is a real table in a migrated database.
+
+    `factory_reset` swallows a failed DELETE and logs a warning, so a name left
+    behind for a dropped table — eight were dropped in #276 — would never fail
+    anything, it would just log once per reset forever. This is the assertion
+    that noticing was supposed to be.
+    """
+    cur = await migrated_db.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+    )
+    existing = {str(r["name"]) for r in await cur.fetchall()}
+    missing = [t for t in command_center._WIPE_TABLES if t not in existing]
+    assert not missing, f"wipe list names tables that do not exist: {missing}"
+
+
+@pytest.mark.asyncio
+async def test_every_user_data_table_is_wiped(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """No user-data table escapes the wipe.
+
+    The other direction of the same contract: a table added by a later
+    migration and forgotten here leaves the user's data in place after a reset
+    they were told was a reset. `task_comments` (migration 021) was exactly
+    that — it only came out by FK cascade, and only while
+    `PRAGMA foreign_keys=ON` holds. Anything deliberately kept is named below
+    with a reason.
+    """
+    cur = await migrated_db.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+    )
+    existing = {str(r["name"]) for r in await cur.fetchall()}
+
+    # FTS5 shadow tables (`x_fts`, `_data`, `_idx`, `_docsize`, `_config`) are
+    # maintained by AFTER INSERT/DELETE/UPDATE triggers on their base table —
+    # all five indexes have one — so wiping the base table empties the index.
+    # Named by rule rather than enumerated so a new FTS index needs no edit.
+    shadows = {
+        t for t in existing if re.search(r"_fts(_(data|idx|docsize|config))?$", t)
+    }
+
+    kept = {
+        # SQLite's own AUTOINCREMENT bookkeeping, not user data.
+        "sqlite_sequence",
+        # The migration ledger. Created by the runner (`app/database.py`), not
+        # by a migration, so it is absent here but present in a real database.
+        # Clearing it would make every migration re-apply on the next boot.
+        "schema_migrations",
+    }
+
+    unwiped = existing - set(command_center._WIPE_TABLES) - shadows - kept
+    assert not unwiped, (
+        "these tables survive a factory reset and are not declared as kept: "
+        f"{sorted(unwiped)}"
+    )

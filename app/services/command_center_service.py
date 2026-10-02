@@ -392,7 +392,6 @@ _REFERENCE_SEED_TABLES = (
     "projects",
     "app_settings",
     "taxonomies",
-    "integration_catalog",
     "workspace_state",
 )
 
