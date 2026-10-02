@@ -298,9 +298,10 @@ function Configured({ report }: { report: ProjectContextReport }): ReactElement 
       <div className="dk-kv">
         <span>mcp servers</span>
         {configured.mcp_servers.length === 0 ? (
-          <span className="dim">
-            No server is scoped to this repo. Servers with no scope at all apply
-            everywhere and are not listed here.
+          <span className="dim" title="the MCP manager page was removed in #274">
+            — nothing writes this any more. The rows came from the MCP manager
+            page, which the cut removed; a repo&rsquo;s own{" "}
+            <code>.mcp.json</code> is where its servers live now.
           </span>
         ) : (
           <span>
