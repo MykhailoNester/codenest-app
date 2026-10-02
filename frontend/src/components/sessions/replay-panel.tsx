@@ -1,7 +1,7 @@
 /**
  * The session replay panel (#283), converted from the old `d3-*` shell onto
  * Deck and moved out of `components/command-center/` — the directory the fold
- * in #269 left behind. Nothing in that directory imported it; its two mount
+ * in #269 left behind and #283 has since retired entirely. Its two mount
  * points are `sessions/session-detail.tsx` (the `replay` tab) and
  * `task-detail/run-replay.tsx` (inline under the runs card).
  *
@@ -26,8 +26,8 @@ import type { AgentSession, AgentEvent, ProfileOut } from "../../lib/api";
 import { profileColor } from "../../lib/profile-utils";
 import { Icon } from "../icon";
 import { DeckGrid, DeckGroup, DeckHead, DeckLine } from "../deck/deck-grid";
-import { EventDetailModal } from "../command-center/event-detail-modal";
-import { eventLabel } from "../command-center/status-utils";
+import { EventDetailModal } from "./event-detail-modal";
+import { eventLabel } from "./status-utils";
 
 interface ReplayPanelProps {
   session: AgentSession;
