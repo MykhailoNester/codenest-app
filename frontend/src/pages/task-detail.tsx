@@ -72,6 +72,8 @@ import {
 } from "../lib/api";
 import { relativeTime } from "../lib/format-helpers";
 import { DeckShell } from "../components/deck/deck-shell";
+import { DeckMenu } from "../components/deck/deck-menu";
+import { taskState } from "../components/deck/deck-cols";
 import { LaunchFromSourceButton } from "../components/launch/launch-from-source-button";
 import { AgentMarkdown } from "../components/terminal/agent-markdown";
 import { ActivityCard } from "../components/task-detail/activity-card";
@@ -518,7 +520,6 @@ export function TaskDetailPage(): ReactElement {
 
   const statusEntry = statusVocab.find((e) => e.slug === task.status);
   const statusLabel = statusEntry?.label ?? task.status;
-  const statusColor = statusEntry?.color ?? "var(--fg-4)";
   const assigneeMember =
     task.assignee_id != null
       ? members.find((m) => m.id === task.assignee_id)
@@ -530,64 +531,34 @@ export function TaskDetailPage(): ReactElement {
       title={`#${taskId}`}
       crumb={statusLabel.toLowerCase()}
       actions={
-        <>
+        <span className="dk-actions">
           {savePhase === "saving" && <span className="dim">saving…</span>}
           {savePhase === "saved" && <span className="dim">✓ saved</span>}
-          <button type="button" className="dk-btn bare" onClick={handleCopyRef}>
-            copy ref
-          </button>
           <LaunchFromSourceButton kind="task" id={taskId} label="launch agent" variant="primary" />
-          <button type="button" className="dk-btn bare" onClick={() => void handleDelete()}>
-            delete
-          </button>
-        </>
+          <DeckMenu
+            label="Task actions"
+            items={[
+              { label: "Copy reference", onSelect: handleCopyRef },
+              {
+                label: "Delete task",
+                danger: true,
+                separated: true,
+                onSelect: () => void handleDelete(),
+              },
+            ]}
+          />
+        </span>
       }
     >
       <>
         <div className="dk-bar">
-          <div className="td-bar__l">
-            <Link className="td-back" to="/tasks">
-              ← Work Board
-            </Link>
-            <span className="td-bar__sep">/</span>
-            <span className="td-bar__ref">#{taskId}</span>
-            <span
-              className="td-badge"
-              style={{ ["--c" as string]: statusColor }}
-            >
-              <span className="td-badge__dot" />
-              {statusLabel}
-            </span>
-          </div>
-          <div className="td-bar__r">
-            {savePhase === "saving" ? (
-              <span className="td-saved td-dim">Saving…</span>
-            ) : null}
-            {savePhase === "saved" ? (
-              <span className="td-saved">✓ Saved</span>
-            ) : null}
-            <button
-              type="button"
-              className="d3-btn d3-btn--ghost"
-              onClick={handleCopyRef}
-            >
-              Copy ref
-            </button>
-            <LaunchFromSourceButton
-              kind="task"
-              id={taskId}
-              label="Launch agent"
-              variant="primary"
-            />
-            <button
-              type="button"
-              className="d3-btn d3-btn--ghost"
-              style={{ color: "var(--err)" }}
-              onClick={() => void handleDelete()}
-            >
-              Delete
-            </button>
-          </div>
+          <Link className="dk-btn bare" to="/tasks">
+            ← work board
+          </Link>
+          <span className="dk-bar__ref">#{taskId}</span>
+          <span className="dk-tag" data-s={taskState(task.status)}>
+            {statusLabel.toLowerCase()}
+          </span>
         </div>
 
         <div className="dk-detail">
@@ -884,14 +855,6 @@ export function TaskDetailPage(): ReactElement {
                 </div>
               </div>
             </div>
-
-            <button
-              type="button"
-              className="td-danger"
-              onClick={() => void handleDelete()}
-            >
-              Delete task
-            </button>
           </div>
         </div>
       </>

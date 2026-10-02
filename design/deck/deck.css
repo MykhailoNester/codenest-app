@@ -95,6 +95,9 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .dk-line:hover { background: var(--sel); color: var(--fg); }
 .dk-line.on { background: var(--sel-2); color: var(--fg); }
 .dk-line > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* A cell that holds an overflow menu must not clip it — the truncation rule
+   above cut the menu off at the cell edge. */
+.dk-line > *:has(.dk-more) { overflow: visible; }
 .dk-line .sub { color: var(--fg); }
 .dk-line .r { text-align: right; }
 .dk-line .acts { display: inline-flex; gap: 4px; justify-content: flex-end; align-items: center; }
@@ -168,6 +171,26 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .dk-btn.bare { border-color: transparent; }
 .dk-btn.bare:not(:disabled):hover { border-color: var(--line); }
 .dk-btn:disabled { color: var(--fg-4); border-color: var(--line); background: none; cursor: not-allowed; }
+
+/* Destructive. The only button that carries colour, because it is the only one
+   whose mistake cannot be undone — `delete` must never look like `copy ref`. */
+.dk-btn.danger { color: var(--err); }
+.dk-btn.danger:not(:disabled):hover { color: var(--err); border-color: var(--err); background: var(--err-bg); }
+.dk-btn.danger.pri { background: var(--err); border-color: var(--err); color: var(--bg); }
+.dk-btn.danger.pri:not(:disabled):hover { background: var(--err); border-color: var(--err); filter: brightness(1.1); }
+
+/* Square, for one glyph — an overflow trigger or a close. */
+.dk-btn.icon { width: 24px; padding: 0; justify-content: center; }
+
+/* An action cluster. Buttons with no gap read as one word: the Activity and
+   Comments tabs rendered as "ActivityComments" before this existed. */
+.dk-actions { display: inline-flex; align-items: center; gap: var(--u2); flex-wrap: wrap; }
+.dk-actions .sep { width: 1px; height: 14px; background: var(--line-2); margin: 0 var(--u); flex: none; }
+.dk-actions.end { justify-content: flex-end; }
+
+/* The overflow a row uses instead of a seventh button. */
+.dk-more { position: relative; display: inline-flex; }
+.dk-more .dk-menu { top: 26px; right: 0; }
 
 .dk-seg { display: inline-flex; height: 26px; border: 1px solid var(--line-2); border-radius: 3px; overflow: hidden; }
 .dk-seg button { padding: 0 var(--u2); font-size: var(--fs-s); color: var(--fg-3); }
@@ -271,13 +294,16 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .dk-side__rail { color: var(--fg-3); font-size: var(--fs-xs); padding: 2px; line-height: 1; }
 .dk-side__rail:hover { color: var(--fg); }
 
-.dk-menu { position: absolute; top: 26px; right: var(--u2); z-index: 20; min-width: 190px; padding: var(--u) 0;
+.dk-menu { position: absolute; top: 26px; right: var(--u2); z-index: 20; min-width: 190px; padding: var(--u) 0; text-align: left;
   background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 3px;
   letter-spacing: 0; text-transform: none; }
 .dk-menu button { display: block; width: 100%; height: 26px; padding: 0 var(--u3); text-align: left;
   font-size: var(--fs-s); color: var(--fg-2); }
 .dk-menu button:hover:not(:disabled) { background: var(--sel); color: var(--fg); }
 .dk-menu button:disabled { color: var(--fg-4); cursor: not-allowed; }
+.dk-menu button.danger { color: var(--err); }
+.dk-menu button.danger:hover:not(:disabled) { background: var(--err-bg); color: var(--err); }
+.dk-menu hr { border: 0; border-top: 1px solid var(--line); margin: var(--u) 0; }
 
 /* The tree is the list primitive on a tighter row: a 262px panel holds forty
    paths only at 24px, and the indent lives inside the name cell so the

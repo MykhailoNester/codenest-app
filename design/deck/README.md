@@ -129,3 +129,34 @@ it is. The `state` column header is present for the grid but wrapped in `.sr`, s
 **The 10px floor is gone.** The whole small end moved up a point — `--fs` 12→13, `--fs-s` 11→12,
 `--fs-xs` 10→11, `--lh` 16→18, `--row` 28→30. Nothing renders below 11px any more. The fixed
 columns were widened to match (13px type clipped ids and `DailyMotivation` at the old widths).
+
+## Where an action goes
+
+Deck had three button shapes and no rule, so a delete looked exactly like a copy, rows grew
+seven buttons each, and two tabs with no gap rendered as one word — `ActivityComments`. The
+vocabulary below is the fix; the placement rule is the part that keeps it fixed.
+
+| Shape | Class | Use |
+|---|---|---|
+| Primary | `.dk-btn.pri` | **One per surface.** The thing you came to do — launch, create. |
+| Default | `.dk-btn` | A named secondary action. |
+| Bare | `.dk-btn.bare` | Inside a row or a dense cluster, where a border would be noise. |
+| Destructive | `.dk-btn.danger` | The only button that carries colour, because it is the only one whose mistake cannot be undone. |
+| Icon | `.dk-btn.icon` | Square, one glyph — an overflow trigger or a close. |
+| Overflow | `<DeckMenu>` | Everything that did not fit. |
+
+**The rules:**
+
+1. **One primary per surface**, in the title bar. If a screen seems to need two, one of them is
+   secondary.
+2. **A row carries at most two inline actions.** The third onward goes in `<DeckMenu>`. Projects
+   carried seven, which is how this rule was found.
+3. **Destructive actions are never adjacent to the primary**, and on a row they live in the
+   overflow, last, behind a separator (`separated: true`).
+4. **Every action lives in a container.** "Delete task" used to float below the Timestamps card
+   in nothing at all.
+5. **Clusters use `.dk-actions`**, never bare siblings — without its gap, buttons butt together
+   and read as one word.
+
+`DeckMenu` closes on outside click and on Escape, and returns focus to its trigger, so opening
+one does not break the roving tabindex the grid sets up.

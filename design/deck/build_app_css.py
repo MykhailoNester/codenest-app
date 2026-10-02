@@ -15,18 +15,24 @@ HERE = pathlib.Path(__file__).parent
 OUT = HERE.parent.parent / "frontend" / "src" / "styles" / "deck.css"
 
 # Selectors that would otherwise apply to the whole document.
+#
+# Element resets are scoped through `:where(.deck)`, which contributes no
+# specificity, so they land at (0,0,1) and stay *below* the component classes.
+# Written as a plain `.deck button` they are (0,1,1) and beat `.dk-btn` (0,1,0)
+# — which silently stripped the padding, border and background from every
+# button in the design system.
 GLOBAL = {
-    "* ": ".deck *, .deck ",
+    "* ": ":where(.deck) *, .deck ",
     "html, body ": None,  # the app owns these
     "body ": ".deck ",
-    "button, input ": ".deck button, .deck input ",
-    "button ": ".deck button ",
-    "a ": ".deck a ",
+    "button, input ": ":where(.deck) button, :where(.deck) input ",
+    "button ": ":where(.deck) button ",
+    "a ": ":where(.deck) a ",
     ":focus-visible ": ".deck :focus-visible ",
-    "::-webkit-scrollbar ": ".deck ::-webkit-scrollbar ",
-    "::-webkit-scrollbar-track ": ".deck ::-webkit-scrollbar-track ",
-    "::-webkit-scrollbar-thumb ": ".deck ::-webkit-scrollbar-thumb ",
-    "::-webkit-scrollbar-thumb:hover ": ".deck ::-webkit-scrollbar-thumb:hover ",
+    "::-webkit-scrollbar ": ":where(.deck) ::-webkit-scrollbar ",
+    "::-webkit-scrollbar-track ": ":where(.deck) ::-webkit-scrollbar-track ",
+    "::-webkit-scrollbar-thumb ": ":where(.deck) ::-webkit-scrollbar-thumb ",
+    "::-webkit-scrollbar-thumb:hover ": ":where(.deck) ::-webkit-scrollbar-thumb:hover ",
     ":root ": ".deck ",
     ".sans ": ".deck .sans ",
     ".dim ": ".deck .dim ",
