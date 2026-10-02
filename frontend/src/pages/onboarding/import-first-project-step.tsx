@@ -6,23 +6,25 @@ import {
   useRichImportProjects,
   type DiscoveryCandidate,
 } from "../../lib/api";
-import styles from "./onboarding-page.module.css";
+import { DeckGrid, DeckHead, DeckLine } from "../../components/deck/deck-grid";
+import { StepHead, StepField, StepHint, Lit } from "./step-chrome";
 
 interface Props {
   registerCommit: (fn: () => Promise<void>) => void;
 }
 
-const TICK_SVG = (
-  <svg viewBox="0 0 12 12" fill="none" width={11} height={11} aria-hidden>
-    <path
-      d="M2 6.5l2.5 2.5 5.5-6"
-      stroke="#fff"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+/**
+ * Deck has no fixed-height list — a page scrolls as one. The scan can return
+ * 200 repos, which would push Continue off the end of a flow whose footer is
+ * the only way forward, so this list keeps the cap the pre-Deck `.scrollList`
+ * had. Same number, no mask.
+ */
+const CANDIDATE_LIST_STYLE: React.CSSProperties = {
+  maxHeight: 380,
+  overflowY: "auto",
+};
+
+const CANDIDATE_COLS = "14px minmax(0, 1fr) 220px";
 
 export function ImportFirstProjectStep({
   registerCommit,
@@ -127,174 +129,141 @@ export function ImportFirstProjectStep({
     });
   };
 
-  const claudeCount = candidates.filter((c) => c.tools.includes("claude")).length;
+  const claudeCount = candidates.filter((c) =>
+    c.tools.includes("claude"),
+  ).length;
 
   return (
     <>
-      <div className={styles.kicker}>Step 02 &middot; Discover</div>
-      <h1 className={styles.title}>Import your projects</h1>
-      <p className={styles.lead}>
+      <StepHead kicker="step 02 · discover" title="Import your projects">
         Point us at a root folder. We recursively find{" "}
-        <strong>git repositories</strong> &mdash; including ones nested inside
-        another repo &mdash; detect which AI tooling each one uses, and let you
-        choose what to bring into the workspace.
-      </p>
+        <strong>git repositories</strong> — including ones nested inside another
+        repo — detect which AI tooling each one uses, and let you choose what to
+        bring into the workspace.
+      </StepHead>
 
-      <div className={styles.card}>
-        <label className={styles.fieldLabel}>Root folder to scan</label>
-        <div style={{ display: "flex", gap: 10 }}>
-          <input
-            className={`${styles.fld} ${styles.fldMono}`}
-            value={rootPath}
-            onChange={(e) => setRootPath(e.target.value)}
-            placeholder="/Users/you/Code"
-          />
-          <button
-            type="button"
-            className={`${styles.btn} ${styles.btnGhost}`}
-            onClick={() => void pickFolder()}
-            disabled={scan.isPending}
+      <div className="dk-group">
+        <h2 className="dk-group__h">
+          <span>Scan</span>
+        </h2>
+        <div className="dk-form">
+          <StepField
+            label="Root folder to scan"
+            htmlFor="ob-scan-root"
+            hint={
+              <>
+                Recursive walk for <Lit>.git</Lit> repos → per-repo tool
+                detection (<Lit>.claude/</Lit> ⇒ Claude). Other tools coming via
+                an extensible registry.
+              </>
+            }
           >
-            Browse…
-          </button>
-          <button
-            type="button"
-            className={`${styles.btn} ${styles.btnPrimary}`}
-            onClick={() => void runScan()}
-            disabled={scan.isPending || !rootPath.trim()}
-          >
-            {scan.isPending ? "⟳ Scanning…" : "⟲ Scan"}
-          </button>
+            <div
+              style={{ display: "flex", gap: "var(--u2)", alignItems: "center" }}
+            >
+              <input
+                id="ob-scan-root"
+                className="dk-ctl"
+                value={rootPath}
+                onChange={(e) => setRootPath(e.target.value)}
+                placeholder="/path/to/your/code"
+                spellCheck={false}
+              />
+              <span className="dk-actions">
+                <button
+                  type="button"
+                  className="dk-btn"
+                  onClick={() => void pickFolder()}
+                  disabled={scan.isPending}
+                >
+                  Browse…
+                </button>
+                <button
+                  type="button"
+                  className="dk-btn pri"
+                  onClick={() => void runScan()}
+                  disabled={scan.isPending || !rootPath.trim()}
+                >
+                  {scan.isPending ? "⟳ Scanning…" : "⟲ Scan"}
+                </button>
+              </span>
+            </div>
+          </StepField>
         </div>
-        <p className={styles.hint}>
-          Recursive walk for{" "}
-          <code
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "10px",
-              background: "rgba(255,255,255,.06)",
-              border: "1px solid var(--line-2)",
-              borderRadius: 4,
-              padding: "1px 5px",
-              color: "var(--fg-2)",
-            }}
-          >
-            .git
-          </code>{" "}
-          repos &rarr; per-repo tool detection (
-          <code
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "10px",
-              background: "rgba(255,255,255,.06)",
-              border: "1px solid var(--line-2)",
-              borderRadius: 4,
-              padding: "1px 5px",
-              color: "var(--fg-2)",
-            }}
-          >
-            .claude/
-          </code>{" "}
-          &rArr; Claude). Other tools coming via an extensible registry.
-        </p>
       </div>
 
       {scanDone && (
-        <>
-          <div className={styles.sectionH}>
-            Discovered repositories
-            <span className={styles.sectionHLine} />
-            <span
-              className={styles.muted}
-              style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}
-            >
-              {candidates.length} git repos &middot; {claudeCount} with Claude
+        <div className="dk-group">
+          <h2 className="dk-group__h">
+            <span>Discovered repositories</span>
+            <span className="n">{candidates.length}</span>
+            <span className="note">
+              {claudeCount} with Claude · {selected.size} selected for import
             </span>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 10,
-            }}
-          >
-            <button
-              type="button"
-              className={`${styles.btn} ${styles.btnGhost} ${styles.btnSm}`}
-              onClick={toggleAll}
-            >
-              Toggle all
-            </button>
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 10.5,
-                color: "var(--fg-4)",
-              }}
-            >
-              {selected.size} of {candidates.length} selected for import
+            <span className="sp" />
+            <span className="dk-actions">
+              <button type="button" className="dk-btn" onClick={toggleAll}>
+                Toggle all
+              </button>
             </span>
+          </h2>
+          <div style={CANDIDATE_LIST_STYLE}>
+            <DeckGrid cols={CANDIDATE_COLS} label="Discovered repositories">
+              <DeckHead cells={["repository", "r tools"]} />
+              {candidates.map((c) => {
+                const isSel = selected.has(c.path);
+                const hasClaude = c.tools.includes("claude");
+                return (
+                  <DeckLine
+                    key={c.path}
+                    state={isSel ? "done" : "idle"}
+                    selected={isSel}
+                    onOpen={() => toggle(c.path)}
+                    cells={[
+                      {
+                        v: (
+                          <>
+                            <span className="sub">{c.name}</span>{" "}
+                            <span className="dim">{c.path}</span>
+                          </>
+                        ),
+                        title: c.path,
+                      },
+                      {
+                        cls: "r",
+                        v: (
+                          <span className="dk-actions end">
+                            <span className="dk-tag" data-s={hasClaude ? "run" : undefined}>
+                              {hasClaude ? "claude" : "no ai tool"}
+                            </span>
+                            {c.git && <span className="dk-tag">git</span>}
+                            {(c.agents ?? 0) > 0 && (
+                              <span className="dk-tag">{c.agents} agents</span>
+                            )}
+                            {(c.skills ?? 0) > 0 && (
+                              <span className="dk-tag">{c.skills} skills</span>
+                            )}
+                            {c.already_imported && (
+                              <span className="dk-tag" data-s="done">
+                                imported
+                              </span>
+                            )}
+                          </span>
+                        ),
+                      },
+                    ]}
+                  />
+                );
+              })}
+            </DeckGrid>
           </div>
-
-          <div className={styles.scrollList}>
-            {candidates.map((c) => {
-              const isSel = selected.has(c.path);
-              const hasClaude = c.tools.includes("claude");
-              return (
-                <div
-                  key={c.path}
-                  className={`${styles.row} ${isSel ? styles.rowSel : ""}`}
-                  onClick={() => toggle(c.path)}
-                >
-                  <div className={`${styles.chk} ${isSel ? styles.chkOn : ""}`}>
-                    {isSel && TICK_SVG}
-                  </div>
-                  <div className={styles.rowGrow}>
-                    <div className={styles.rowName}>{c.name}</div>
-                    <div className={styles.rowPath}>{c.path}</div>
-                  </div>
-                  <div className={styles.tags}>
-                    {hasClaude ? (
-                      <span className={`${styles.tag} ${styles.tagClaude}`}>
-                        ⌁ Claude &middot; .claude/
-                      </span>
-                    ) : (
-                      <span className={styles.tag}>no AI tool</span>
-                    )}
-                    {c.git && (
-                      <span className={`${styles.tag} ${styles.tagGit}`}>
-                        git
-                      </span>
-                    )}
-                    {(c.agents ?? 0) > 0 && (
-                      <span className={styles.tag}>{c.agents} agents</span>
-                    )}
-                    {(c.skills ?? 0) > 0 && (
-                      <span className={styles.tag}>{c.skills} skills</span>
-                    )}
-                    {c.already_imported && (
-                      <span className={`${styles.tag} ${styles.tagOk}`}>
-                        already imported
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className={styles.listMeta}>
-            {candidates.length} repos found &middot; scroll for more
-          </div>
-        </>
+        </div>
       )}
 
       {!scanDone && (
-        <p className={styles.muted} style={{ marginTop: 0 }}>
+        <StepHint>
           Scan a folder to discover projects, or continue to skip this step.
-        </p>
+        </StepHint>
       )}
     </>
   );

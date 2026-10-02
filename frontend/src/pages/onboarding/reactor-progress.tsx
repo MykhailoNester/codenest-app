@@ -1,5 +1,4 @@
 import type { ReactElement } from "react";
-import styles from "./reactor-progress.module.css";
 
 export interface ReactorStep {
   code: string;
@@ -11,33 +10,32 @@ interface Props {
   steps: ReactorStep[];
   /** Index of the current step. */
   current: number;
-  /** Highest step index reached (controls which tiles are clickable). */
+  /** Highest step index reached (controls which rows are clickable). */
   maxReached: number;
   onSelect?: (index: number) => void;
 }
 
-// Geometry for the segmented reactor ring (viewBox 188x188).
-const CX = 94;
-const CY = 94;
-const R = 80;
-const GAP_DEG = 7;
+/**
+ * Deck has no rail-width gauge: `.dk-meter` is a 46px row gauge, deliberately
+ * fixed so forty of them align in a column. The setup rail needs one that
+ * spans the rail, which is a width override and nothing else.
+ */
+const RAIL_METER_STYLE: React.CSSProperties = { width: "100%" };
 
-function polar(deg: number): [number, number] {
-  const a = ((deg - 90) * Math.PI) / 180;
-  return [CX + R * Math.cos(a), CY + R * Math.sin(a)];
-}
+/** Glyph + word per step state. `.dk-s` draws the character from `data-s`. */
+const STEP_STATE = {
+  done: { s: "done", word: "done" },
+  current: { s: "run", word: "current step" },
+  pending: { s: "todo", word: "pending" },
+} as const;
 
-function arcPath(startDeg: number, endDeg: number): string {
-  const [sx, sy] = polar(startDeg);
-  const [ex, ey] = polar(endDeg);
-  const large = endDeg - startDeg > 180 ? 1 : 0;
-  return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${R} ${R} 0 ${large} 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
-}
+type StepState = keyof typeof STEP_STATE;
 
 /**
- * Mission-control progress rail: a segmented "reactor" ring that charges
- * blue→violet as the user advances, plus a hex-status mission list. Replaces a
- * conventional dot/line stepper.
+ * Setup progress rail: a proportional `.dk-meter` plus the step list as rail
+ * rows. Replaces the segmented SVG "reactor" ring — the ring, its gradients
+ * and both of its pulse animations are gone, so there is no motion left for
+ * `prefers-reduced-motion` to suppress.
  */
 export function ReactorProgress({
   steps,
@@ -46,75 +44,52 @@ export function ReactorProgress({
   onSelect,
 }: Props): ReactElement {
   const n = steps.length;
-  const seg = 360 / n;
   const pct = n > 1 ? Math.round((current / (n - 1)) * 100) : 0;
+  const total = String(n).padStart(2, "0");
 
   return (
-    <div className={styles.rail}>
-      <div className={styles.reactor}>
-        <svg viewBox="0 0 188 188" aria-hidden="true">
-          <defs>
-            <linearGradient id="rp-done" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor="#3b82f6" />
-              <stop offset="1" stopColor="#5b9bff" />
-            </linearGradient>
-            <linearGradient id="rp-active" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor="#a855f7" />
-              <stop offset="1" stopColor="#3b82f6" />
-            </linearGradient>
-          </defs>
-          {steps.map((s, i) => {
-            const state =
-              i < current ? "done" : i === current ? "active" : "pending";
-            return (
-              <path
-                key={s.code}
-                d={arcPath(i * seg + GAP_DEG / 2, (i + 1) * seg - GAP_DEG / 2)}
-                className={`${styles.seg} ${styles[state]}`}
-              />
-            );
-          })}
-        </svg>
-        <div className={styles.core}>
-          <div className={styles.pct}>
-            {pct}
-            <small>%</small>
-          </div>
-          <div className={styles.coreLabel}>Setup</div>
-          <div className={styles.phase}>
-            {steps[current]?.code ?? "--"} / {String(n).padStart(2, "0")}
-          </div>
+    <div className="dk-grp">
+      <div className="dk-grp__h">Setup</div>
+
+      <div style={{ padding: "0 var(--u2) var(--u2)" }}>
+        <span
+          className="dk-meter"
+          style={RAIL_METER_STYLE}
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Setup progress"
+        >
+          <i style={{ width: `${pct}%` }} />
+        </span>
+        <div className="dk-meta" style={{ marginTop: "var(--u)" }}>
+          {pct}% &middot; {steps[current]?.code ?? "--"} / {total}
         </div>
       </div>
 
-      <div className={styles.missionsHead}>Mission Sequence</div>
-      <ol className={styles.missions}>
+      <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {steps.map((s, i) => {
-          const state =
-            i < current ? "done" : i === current ? "active" : "locked";
+          const state: StepState =
+            i < current ? "done" : i === current ? "current" : "pending";
+          const { s: glyph, word } = STEP_STATE[state];
           const reachable = i <= maxReached && onSelect != null;
           return (
-            <li
-              key={s.code}
-              className={`${styles.tile} ${styles[state]}`}
-              {...(reachable
-                ? {
-                    role: "button",
-                    tabIndex: 0,
-                    onClick: () => onSelect(i),
-                    onKeyDown: (e: React.KeyboardEvent) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onSelect(i);
-                      }
-                    },
-                  }
-                : {})}
-            >
-              <span className={styles.hex} aria-hidden="true" />
-              <span className={styles.code}>{s.code}</span>
-              <span className={styles.tileTitle}>{s.title}</span>
-              {s.optional && <span className={styles.opt}>opt</span>}
+            <li key={s.code}>
+              <button
+                type="button"
+                className={`dk-nav${state === "current" ? " on" : ""}`}
+                disabled={!reachable}
+                aria-current={state === "current" ? "step" : undefined}
+                onClick={reachable ? () => onSelect(i) : undefined}
+                style={reachable ? undefined : { opacity: 0.55 }}
+              >
+                <span className="dk-s" data-s={glyph} role="img" aria-label={word} />
+                <span className="trunc">
+                  <span className="dim">{s.code}</span> {s.title}
+                </span>
+                {s.optional === true && <span className="dk-tag">opt</span>}
+              </button>
             </li>
           );
         })}

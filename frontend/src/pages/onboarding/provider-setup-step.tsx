@@ -17,7 +17,18 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchSidecar } from "../../lib/api";
 import { pickDirectory } from "../../lib/ipc";
 import { TIERS, DEFAULT_MODELS, tiersFromModels } from "./provider-tiers";
-import styles from "./onboarding-page.module.css";
+import { DeckGrid, DeckHead, DeckLine } from "../../components/deck/deck-grid";
+import { StepHead, StepField, StepHint, StepNote, Lit } from "./step-chrome";
+
+const PROVIDER_COLS = "14px minmax(0, 1fr) 160px";
+
+/** The provider picker was four tiles; only one of them was ever selectable. */
+const PROVIDERS: { name: string; available: boolean; note: string }[] = [
+  { name: "Anthropic", available: true, note: "Claude · tested" },
+  { name: "OpenAI", available: false, note: "coming soon" },
+  { name: "Google", available: false, note: "coming soon" },
+  { name: "Local", available: false, note: "coming soon" },
+];
 
 /** Extract the leading binary token from a command_template string. */
 function commandAlias(template: string): string {
@@ -454,316 +465,220 @@ export function ProviderSetupStep({ registerCommit }: Props): ReactElement {
 
   return (
     <>
-      <div className={styles.kicker}>
-        Step 03 &middot; Connect &middot; Required
-      </div>
-      <h1 className={styles.title}>Configure an AI provider</h1>
-      <p className={styles.lead}>
+      <StepHead
+        kicker="step 03 · connect · required"
+        title="Configure an AI provider"
+      >
         Add one or more Anthropic aliases — each with its own config home and
-        command name. Model IDs are{" "}
-        <strong>entered manually</strong> — you own keeping them current.
-      </p>
+        command name. Model IDs are <strong>entered manually</strong> — you own
+        keeping them current.
+      </StepHead>
 
-      {/* Provider picker grid — 4 columns */}
-      <div className={styles.providers}>
-        {/* Anthropic — active / selectable */}
-        <div className={`${styles.prov} ${styles.provSel}`}>
-          <div className={styles.provPick} aria-hidden>
-            <svg viewBox="0 0 12 12" fill="none" width={9} height={9}>
-              <path
-                d="M2 6.5l2.5 2.5 5.5-6"
-                stroke="#fff"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-          <div
-            className={styles.provLogo}
-            style={{
-              background: "linear-gradient(135deg, #a855f7, #3b82f6)",
-            }}
-          >
-            ✳
-          </div>
-          <div className={styles.provName}>Anthropic</div>
-          <div className={styles.provSoon} style={{ color: "var(--ok)" }}>
-            Claude &middot; tested
-          </div>
-        </div>
-
-        {/* OpenAI — coming soon */}
-        <div className={`${styles.prov} ${styles.provDisabled}`}>
-          <div
-            className={styles.provLogo}
-            style={{ background: "var(--bg-4, #1d2330)" }}
-          >
-            ○
-          </div>
-          <div className={styles.provName}>OpenAI</div>
-          <div className={styles.provSoon}>Coming soon</div>
-        </div>
-
-        {/* Google — coming soon */}
-        <div className={`${styles.prov} ${styles.provDisabled}`}>
-          <div
-            className={styles.provLogo}
-            style={{ background: "var(--bg-4, #1d2330)" }}
-          >
-            ◐
-          </div>
-          <div className={styles.provName}>Google</div>
-          <div className={styles.provSoon}>Coming soon</div>
-        </div>
-
-        {/* Local — coming soon */}
-        <div className={`${styles.prov} ${styles.provDisabled}`}>
-          <div
-            className={styles.provLogo}
-            style={{ background: "var(--bg-4, #1d2330)" }}
-          >
-            ⌂
-          </div>
-          <div className={styles.provName}>Local</div>
-          <div className={styles.provSoon}>Coming soon</div>
-        </div>
+      <div className="dk-group">
+        <h2 className="dk-group__h">
+          <span>Provider</span>
+          <span className="note">one supported today</span>
+        </h2>
+        <DeckGrid cols={PROVIDER_COLS} label="Providers">
+          <DeckHead cells={["provider", "r status"]} />
+          {PROVIDERS.map((p) => (
+            <DeckLine
+              key={p.name}
+              state={p.available ? "done" : "idle"}
+              selected={p.available}
+              cells={[
+                { v: p.name, cls: "sub" },
+                {
+                  cls: "r",
+                  v: (
+                    <span
+                      className="dk-tag"
+                      data-s={p.available ? "done" : undefined}
+                    >
+                      {p.note}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          ))}
+        </DeckGrid>
       </div>
 
       {providersQ.isError && (
-        <p className={styles.muted} style={{ marginBottom: 12 }}>
+        <StepHint tone="warn">
           Could not load existing providers — you can configure them later in
           Settings.
-        </p>
+        </StepHint>
       )}
 
       {/* ── Multi-alias entry list ──────────────────────────────────── */}
       {entries.map((entry, idx) => (
-        <div
-          key={entry.key}
-          className={styles.card}
-          style={{ marginBottom: 16 }}
-        >
-          {/* Entry header */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 14,
-            }}
-          >
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "var(--fg-3)",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-              }}
-            >
-              Account {idx + 1}
-            </span>
+        <div className="dk-group" key={entry.key}>
+          <h2 className="dk-group__h">
+            <span>Account {idx + 1}</span>
             {entries.length > 1 && (
-              <button
-                type="button"
-                onClick={() => removeEntry(entry.key)}
-                style={{
-                  fontSize: 11,
-                  color: "var(--err, #f87171)",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "2px 6px",
-                }}
-              >
-                Remove
-              </button>
+              <>
+                <span className="sp" />
+                <span className="dk-actions">
+                  <button
+                    type="button"
+                    className="dk-btn bare danger"
+                    onClick={() => removeEntry(entry.key)}
+                  >
+                    Remove
+                  </button>
+                </span>
+              </>
             )}
-          </div>
+          </h2>
 
-          {/* Alias + Config home */}
-          <div className={styles.grid2} style={{ marginBottom: 16 }}>
-            <div>
-              <label className={styles.fieldLabel}>Alias / command</label>
-              <input
-                className={`${styles.fld} ${styles.fldMono}`}
-                value={entry.alias}
-                onChange={(e) =>
-                  updateEntry(entry.key, "alias", e.target.value)
-                }
-                placeholder="claude"
-                spellCheck={false}
-              />
-              <p className={styles.hint}>The CLI the session invokes.</p>
-            </div>
-
-            <div>
-              <label className={styles.fieldLabel}>Config home</label>
-              <div
-                style={{ display: "flex", gap: 6, alignItems: "stretch" }}
+          <div className="dk-form">
+            <div className="dk-form__grid">
+              <StepField
+                label="Alias / command"
+                htmlFor={`ob-alias-${entry.key}`}
+                hint="The CLI the session invokes."
               >
                 <input
-                  className={`${styles.fld} ${styles.fldMono}`}
-                  style={{ flex: 1 }}
-                  value={entry.configHome}
-                  onChange={(e) => {
-                    updateEntry(entry.key, "configHome", e.target.value);
-                    scheduleValidate(entry.key, e.target.value);
-                  }}
-                  placeholder="/Users/you/.claude"
+                  id={`ob-alias-${entry.key}`}
+                  className="dk-ctl"
+                  value={entry.alias}
+                  onChange={(e) =>
+                    updateEntry(entry.key, "alias", e.target.value)
+                  }
+                  placeholder="claude"
                   spellCheck={false}
                 />
-                <button
-                  type="button"
-                  className={styles.btn}
-                  style={{ whiteSpace: "nowrap", flexShrink: 0 }}
-                  onClick={() => void handleBrowse(entry.key)}
+              </StepField>
+
+              <StepField
+                label="Config home"
+                htmlFor={`ob-home-${entry.key}`}
+                hint={
+                  <>
+                    Selects which Claude config &amp; auth the session uses (
+                    <Lit>CLAUDE_CONFIG_DIR</Lit>).
+                  </>
+                }
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "var(--u2)",
+                    alignItems: "center",
+                  }}
                 >
-                  Browse…
-                </button>
-              </div>
-              {entry.pathChecking && (
-                <p className={styles.hint} style={{ marginTop: 4 }}>
-                  Checking…
-                </p>
-              )}
-              {!entry.pathChecking &&
-                entry.pathValid === true &&
-                entry.configHome && (
-                  <p
-                    className={styles.hint}
-                    style={{ color: "var(--ok)", marginTop: 4 }}
-                  >
-                    Path exists.
-                  </p>
+                  <input
+                    id={`ob-home-${entry.key}`}
+                    className="dk-ctl"
+                    value={entry.configHome}
+                    onChange={(e) => {
+                      updateEntry(entry.key, "configHome", e.target.value);
+                      scheduleValidate(entry.key, e.target.value);
+                    }}
+                    placeholder="~/.claude"
+                    spellCheck={false}
+                  />
+                  <span className="dk-actions">
+                    <button
+                      type="button"
+                      className="dk-btn"
+                      onClick={() => void handleBrowse(entry.key)}
+                    >
+                      Browse…
+                    </button>
+                  </span>
+                </div>
+                {entry.pathChecking && <StepHint>Checking…</StepHint>}
+                {!entry.pathChecking &&
+                  entry.pathValid === true &&
+                  entry.configHome !== "" && (
+                    <StepHint tone="ok">Path exists.</StepHint>
+                  )}
+                {!entry.pathChecking && entry.pathValid === false && (
+                  <StepHint tone="err">
+                    Path not found — the directory must exist.
+                  </StepHint>
                 )}
-              {!entry.pathChecking && entry.pathValid === false && (
-                <p
-                  className={styles.hint}
-                  style={{ color: "var(--err, #f87171)", marginTop: 4 }}
+              </StepField>
+            </div>
+
+            {entry.saveError !== null && (
+              <StepHint tone="err">{entry.saveError}</StepHint>
+            )}
+
+            <div>
+              <div className="dk-label" style={{ marginBottom: "var(--u2)" }}>
+                Models — manual IDs{" "}
+                <span className="dim">(★ = workspace default)</span>
+              </div>
+              {TIERS.map((t) => (
+                <div
+                  key={t.key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--u2)",
+                    marginBottom: "var(--u)",
+                  }}
                 >
-                  Path not found — the directory must exist.
-                </p>
-              )}
-              <p className={styles.hint}>
-                Selects which Claude config &amp; auth the session uses
-                (<code>CLAUDE_CONFIG_DIR</code>).
-              </p>
+                  <span
+                    className="dim"
+                    style={{ width: 64, flex: "none", fontSize: "var(--fs-s)" }}
+                  >
+                    {t.label}
+                  </span>
+                  <input
+                    className="dk-ctl"
+                    aria-label={`${t.label} model ID for account ${idx + 1}`}
+                    value={entry.models[t.key] ?? ""}
+                    onChange={(e) =>
+                      updateEntry(entry.key, "models", {
+                        ...entry.models,
+                        [t.key]: e.target.value,
+                      })
+                    }
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Set ${t.label} as default for account ${idx + 1}`}
+                    aria-pressed={entry.defaultTier === t.key}
+                    onClick={() => updateEntry(entry.key, "defaultTier", t.key)}
+                    className={`dk-btn icon${entry.defaultTier === t.key ? " pri" : " bare"}`}
+                  >
+                    ★
+                  </button>
+                </div>
+              ))}
+              <StepHint>
+                Enter the exact IDs you want available; you maintain them as new
+                models ship. The ★ tier is the workspace default for this
+                account. Clear a row to leave that tier out — Fable needs 30-day
+                data retention, so remove it if your account is not eligible.
+              </StepHint>
             </div>
           </div>
-
-          {/* Save error */}
-          {entry.saveError && (
-            <p
-              style={{
-                fontSize: 12,
-                color: "var(--err, #f87171)",
-                marginBottom: 10,
-              }}
-            >
-              {entry.saveError}
-            </p>
-          )}
-
-          {/* Models */}
-          <label className={styles.fieldLabel}>
-            Models — manual IDs{" "}
-            <span className={styles.muted}>(★ = workspace default)</span>
-          </label>
-          {TIERS.map((t) => (
-            <div key={t.key} className={styles.modelRow}>
-              <span className={styles.modelTier}>
-                <span
-                  className={styles.tierDot}
-                  style={{ color: t.dotColor, background: t.dotColor }}
-                />
-                {t.label}
-              </span>
-              <input
-                className={`${styles.fld} ${styles.fldMono}`}
-                value={entry.models[t.key] ?? ""}
-                onChange={(e) =>
-                  updateEntry(entry.key, "models", {
-                    ...entry.models,
-                    [t.key]: e.target.value,
-                  })
-                }
-              />
-              <button
-                type="button"
-                aria-label={`Set ${t.label} as default for account ${idx + 1}`}
-                onClick={() => updateEntry(entry.key, "defaultTier", t.key)}
-                className={`${styles.star} ${entry.defaultTier === t.key ? styles.starOn : ""}`}
-              >
-                ★
-              </button>
-            </div>
-          ))}
-          <p className={styles.hint}>
-            Enter the exact IDs you want available; you maintain them as new
-            models ship. The ★ tier is the workspace default for this account.
-            Clear a row to leave that tier out — Fable needs 30-day data
-            retention, so remove it if your account is not eligible.
-          </p>
         </div>
       ))}
 
-      {/* Add another account */}
-      <button
-        type="button"
-        className={`${styles.btn} ${styles.btnGhost}`}
-        style={{ marginBottom: 20 }}
-        onClick={addEntry}
-      >
-        + Add another Anthropic account
-      </button>
-
-      <div className={`${styles.infoBar} ${styles.infoBarViol}`}>
-        <span className={styles.infoBarIc} aria-hidden="true">
-          🔑
-        </span>
-        <div>
-          <strong>Auth is handled by the config home.</strong> The command
-          center just launches{" "}
-          <code
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "11px",
-              background: "rgba(255,255,255,.06)",
-              border: "1px solid var(--line-2)",
-              borderRadius: 4,
-              padding: "1px 5px",
-            }}
-          >
-            claude
-          </code>{" "}
-          sessions — they sign in through the selected config home (run{" "}
-          <code
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "11px",
-              background: "rgba(255,255,255,.06)",
-              border: "1px solid var(--line-2)",
-              borderRadius: 4,
-              padding: "1px 5px",
-            }}
-          >
-            claude /login
-          </code>{" "}
-          there once). <strong>No API key is collected.</strong>
-        </div>
+      <div className="dk-actions" style={{ padding: "0 var(--u3)" }}>
+        <button type="button" className="dk-btn" onClick={addEntry}>
+          ＋ Add another Anthropic account
+        </button>
       </div>
 
-      <div className={styles.infoBar}>
-        <span className={styles.infoBarIc} aria-hidden="true">
-          ℹ
-        </span>
-        <div>
-          More providers (OpenAI, Google, local models) arrive in a later
-          release — the registry is built to drop them in without rework.
-        </div>
-      </div>
+      <StepNote glyph="⚿">
+        <strong>Auth is handled by the config home.</strong> The command center
+        just launches <Lit>claude</Lit> sessions — they sign in through the
+        selected config home (run <Lit>claude /login</Lit> there once).{" "}
+        <strong>No API key is collected.</strong>
+      </StepNote>
+
+      <StepNote glyph="ℹ">
+        More providers (OpenAI, Google, local models) arrive in a later release —
+        the registry is built to drop them in without rework.
+      </StepNote>
     </>
   );
 }

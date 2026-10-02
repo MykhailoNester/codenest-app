@@ -1,9 +1,13 @@
 import { useEffect, type ReactElement } from "react";
-import styles from "./onboarding-page.module.css";
+import { DeckGrid, DeckHead, DeckLine } from "../../components/deck/deck-grid";
+import { StepHead, StepNote } from "./step-chrome";
 
 interface Props {
   registerCommit: (fn: () => Promise<void>) => void;
 }
+
+/** The two launch modes, as rows rather than the pair of cards they were. */
+const MODE_COLS = "14px 64px minmax(0, 1fr) 190px";
 
 export function WelcomeStep({ registerCommit }: Props): ReactElement {
   // Purely informational — no commit work needed.
@@ -13,61 +17,50 @@ export function WelcomeStep({ registerCommit }: Props): ReactElement {
   }, []);
   return (
     <>
-      <div className={styles.kicker}>Initialize</div>
-      <h1 className={styles.title}>Your command center workspace</h1>
-      <p className={styles.lead}>
+      <StepHead kicker="initialize" title="Your command center workspace">
         Codenest runs every AI session from a single{" "}
         <strong>app-managed workspace</strong> — a control room that knows about
         all your projects, agents, and skills. We&apos;ll set it up in a few
         steps. The workspace is one unit today, built to grow into many later.
-      </p>
+      </StepHead>
 
-      <div className={styles.modes}>
-        <div className={styles.mode}>
-          <h3 className={styles.modeTitle}>
-            <span className={`${styles.modeBadge} ${styles.modeBadge1}`}>
-              Mode 01
-            </span>{" "}
-            Workspace session
-          </h3>
-          <p className={styles.modeDesc}>
-            Launch from the workspace root with access to{" "}
-            <strong>every imported project</strong>, all promoted agents, and
-            the full project path registry.
-          </p>
-          <div className={styles.modePath}>
-            cwd &rarr; /workspace &middot; all agents visible
-          </div>
-        </div>
-        <div className={`${styles.mode} ${styles.modeViolet}`}>
-          <h3 className={styles.modeTitle}>
-            <span className={`${styles.modeBadge} ${styles.modeBadge2}`}>
-              Mode 02
-            </span>{" "}
-            Project session
-          </h3>
-          <p className={styles.modeDesc}>
-            Launch scoped to a single project. Only{" "}
-            <strong>that project&apos;s</strong> agents load; cwd is the project
-            folder for exact context.
-          </p>
-          <div className={styles.modePath}>
-            cwd &rarr; /project &middot; scoped agents
-          </div>
-        </div>
+      <div className="dk-group">
+        <h2 className="dk-group__h">
+          <span>Session modes</span>
+          <span className="n">2</span>
+        </h2>
+        <DeckGrid cols={MODE_COLS} label="Session modes">
+          <DeckHead cells={["mode", "scope", "cwd"]} />
+          <DeckLine
+            state="run"
+            cells={[
+              "01",
+              {
+                v: "Workspace session — every imported project, all promoted agents, the full path registry",
+                cls: "sub",
+              },
+              "/workspace · all agents",
+            ]}
+          />
+          <DeckLine
+            state="todo"
+            cells={[
+              "02",
+              {
+                v: "Project session — scoped to one project; only that project's agents load",
+                cls: "sub",
+              },
+              "/project · scoped agents",
+            ]}
+          />
+        </DeckGrid>
       </div>
 
-      <div className={`${styles.infoBar} ${styles.infoBarViol}`}>
-        <span className={styles.infoBarIc} aria-hidden="true">
-          ◇
-        </span>
-        <div>
-          Your projects are treated as <strong>read-only sources</strong>.
-          Nothing is ever written into their folders — their git history stays
-          clean. All links live inside the workspace.
-        </div>
-      </div>
+      <StepNote glyph="◇">
+        Your projects are treated as <strong>read-only sources</strong>. Nothing
+        is ever written into their folders — their git history stays clean. All
+        links live inside the workspace.
+      </StepNote>
     </>
   );
 }
-

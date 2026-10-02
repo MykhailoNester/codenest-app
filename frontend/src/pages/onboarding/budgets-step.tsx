@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ReactElement } from "react";
 import { useCreateBudget, useWorkspaceProjects } from "../../lib/api";
-import styles from "./onboarding-page.module.css";
+import { StepHead, StepField, StepHint } from "./step-chrome";
 
 interface ProjectLimit {
   uid: number;
@@ -9,6 +9,38 @@ interface ProjectLimit {
 }
 
 let _rowSeq = 0;
+
+/**
+ * Deck has no switch. The pre-Deck control was a `div[role="switch"]` with its
+ * own key handling; this keeps the same ARIA contract on a real button, where
+ * Enter and Space activate natively, and shows the state as text so it reads
+ * with colour off.
+ */
+function Switch({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      className={`dk-btn${checked ? " pri" : ""}`}
+      onClick={() => onChange(!checked)}
+    >
+      {checked ? "on" : "off"}
+    </button>
+  );
+}
 
 /** Step 6 (optional) — workspace + per-project monthly budgets. */
 export function BudgetsStep({
@@ -78,119 +110,136 @@ export function BudgetsStep({
 
   return (
     <>
-      <div className={styles.kicker}>Step 06 &middot; Optional</div>
-      <h1 className={styles.title}>
-        Set budgets{" "}
-        <span className={styles.muted} style={{ fontSize: 16, fontWeight: 400 }}>
-          — optional
-        </span>
-      </h1>
-      <p className={styles.lead}>
-        Thanks to per-file-path attribution, cost can be tracked per project
-        even from workspace sessions. Set limits now or continue and configure
-        later in Settings.
-      </p>
+      <StepHead
+        kicker="step 06 · optional"
+        title={
+          <>
+            Set budgets <span className="dim">— optional</span>
+          </>
+        }
+      >
+        Thanks to per-file-path attribution, cost can be tracked per project even
+        from workspace sessions. Set limits now or continue and configure later
+        in Settings.
+      </StepHead>
 
-      <div className={styles.card}>
-        <div className={styles.budHead}>
-          <label className={styles.fieldLabel} style={{ margin: 0 }}>
-            Workspace monthly limit
-          </label>
-          <div
-            className={`${styles.switch} ${wsEnabled ? styles.switchOn : ""}`}
-            onClick={() => setWsEnabled((v) => !v)}
-            role="switch"
-            aria-checked={wsEnabled}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === " " || e.key === "Enter") setWsEnabled((v) => !v);
-            }}
-          />
-        </div>
-        <div className={styles.money}>
-          <input
-            className={`${styles.fld} ${styles.fldMono}`}
-            inputMode="decimal"
-            value={wsLimit}
-            placeholder="0.00"
-            disabled={!wsEnabled}
-            onChange={(e) => setWsLimit(e.target.value)}
-          />
-        </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 9,
-            marginTop: 12,
-          }}
-        >
-          <div
-            className={`${styles.switch} ${hardStop ? styles.switchOn : ""}`}
-            onClick={() => setHardStop((v) => !v)}
-            role="switch"
-            aria-checked={hardStop}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === " " || e.key === "Enter") setHardStop((v) => !v);
-            }}
-          />
-          <span className={styles.hint} style={{ margin: 0 }}>
-            Hard-stop sessions when the limit is reached
+      <div className="dk-group">
+        <h2 className="dk-group__h">
+          <span>Workspace limit</span>
+          <span className="sp" />
+          <span className="dk-actions">
+            <Switch
+              checked={wsEnabled}
+              onChange={setWsEnabled}
+              label="Workspace monthly limit"
+            />
           </span>
+        </h2>
+        <div className="dk-form">
+          <div className="dk-form__grid">
+            <StepField label="Monthly limit (USD)" htmlFor="ob-ws-limit">
+              <input
+                id="ob-ws-limit"
+                className="dk-ctl"
+                inputMode="decimal"
+                value={wsLimit}
+                placeholder="0.00"
+                disabled={!wsEnabled}
+                onChange={(e) => setWsLimit(e.target.value)}
+              />
+            </StepField>
+            <StepField label="Hard stop">
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--u2)",
+                }}
+              >
+                <Switch
+                  checked={hardStop}
+                  onChange={setHardStop}
+                  label="Hard-stop sessions when the limit is reached"
+                />
+                <StepHint>
+                  Hard-stop sessions when the limit is reached
+                </StepHint>
+              </div>
+            </StepField>
+          </div>
         </div>
       </div>
 
-      <div className={styles.sectionH}>
-        Per-project limits
-        <span className={styles.sectionHLine} />
-        <span
-          className={styles.muted}
-          style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}
-        >
-          accurate via hooks
-        </span>
-      </div>
+      <div className="dk-group">
+        <h2 className="dk-group__h">
+          <span>Per-project limits</span>
+          <span className="n">{rows.length}</span>
+          <span className="note">accurate via hooks</span>
+          <span className="sp" />
+          <span className="dk-actions">
+            <button
+              type="button"
+              className="dk-btn"
+              onClick={addRow}
+              disabled={rows.length >= projects.length && projects.length > 0}
+            >
+              ＋ Add project limit
+            </button>
+          </span>
+        </h2>
 
-      {rows.length === 0 && (
-        <p className={styles.hint}>
-          No per-project limits yet — add one below, or continue and set them
-          later in Settings.
-        </p>
-      )}
+        {rows.length === 0 && (
+          <StepHint>
+            No per-project limits yet — add one above, or continue and set them
+            later in Settings.
+          </StepHint>
+        )}
 
-      {rows.map((r, i) => (
-        <div key={r.uid} className={styles.budgetRow}>
-          <select
-            className={styles.fld}
-            value={r.projectId}
-            onChange={(e) =>
-              setRows((prev) =>
-                prev.map((x, j) =>
-                  j === i
-                    ? {
-                        ...x,
-                        projectId: e.target.value ? Number(e.target.value) : "",
-                      }
-                    : x,
-                ),
-              )
-            }
+        {rows.map((r, i) => (
+          <div
+            key={r.uid}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--u2)",
+              padding: "var(--u) var(--u3)",
+            }}
           >
-            <option value="">Select project…</option>
-            {projects.map((p) => (
-              <option
-                key={p.id}
-                value={p.id}
-                disabled={usedIds.has(p.id) && p.id !== r.projectId}
+            <span className="dk-sel">
+              <select
+                aria-label={`Project for limit ${i + 1}`}
+                value={r.projectId}
+                onChange={(e) =>
+                  setRows((prev) =>
+                    prev.map((x, j) =>
+                      j === i
+                        ? {
+                            ...x,
+                            projectId: e.target.value
+                              ? Number(e.target.value)
+                              : "",
+                          }
+                        : x,
+                    ),
+                  )
+                }
               >
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <div className={styles.money} style={{ width: 130, flexShrink: 0 }}>
+                <option value="">Select project…</option>
+                {projects.map((p) => (
+                  <option
+                    key={p.id}
+                    value={p.id}
+                    disabled={usedIds.has(p.id) && p.id !== r.projectId}
+                  >
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </span>
             <input
-              className={`${styles.fld} ${styles.fldMono}`}
+              className="dk-ctl"
+              style={{ width: 130, flex: "none" }}
+              aria-label={`Monthly limit ${i + 1} (USD)`}
               inputMode="decimal"
               value={r.amount}
               placeholder="0.00"
@@ -202,27 +251,17 @@ export function BudgetsStep({
                 )
               }
             />
+            <button
+              type="button"
+              aria-label="Remove limit"
+              className="dk-btn bare danger icon"
+              onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
+            >
+              ✕
+            </button>
           </div>
-          <button
-            type="button"
-            aria-label="Remove limit"
-            className={`${styles.btn} ${styles.btnSm} ${styles.delBtn}`}
-            onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
-          >
-            ✕
-          </button>
-        </div>
-      ))}
-
-      <button
-        type="button"
-        className={`${styles.btn} ${styles.btnSm}`}
-        onClick={addRow}
-        disabled={rows.length >= projects.length && projects.length > 0}
-        style={{ marginTop: 11, alignSelf: "flex-start" }}
-      >
-        ＋ Add project limit
-      </button>
+        ))}
+      </div>
     </>
   );
 }
