@@ -16,7 +16,7 @@ import { useState, type ReactElement } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useProfiles, useSessionReplay } from "../../lib/api";
 import { NO_PROFILES } from "../../lib/profile-utils";
-import { ReplayPanel } from "../command-center/replay-panel";
+import { ReplayPanel } from "./replay-panel";
 import { SessionInspect } from "./session-inspect";
 
 export interface SessionDetailProps {

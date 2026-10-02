@@ -32,7 +32,7 @@ import { DeckGrid, DeckGroup, DeckHead, DeckLine } from "../deck/deck-grid";
  * renders "0 calls"; a row with no `agent_sessions` match at all omits the
  * calls/cost segments rather than zero-filling them.
  *
- * Replay reuses `components/command-center/replay-panel.tsx` (mounted by
+ * Replay reuses `components/sessions/replay-panel.tsx` (mounted by
  * the page's `<TaskRunReplay>`, not this component) — no second replay
  * implementation.
  */
