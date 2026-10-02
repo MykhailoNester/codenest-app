@@ -56,27 +56,28 @@ import {
   useProjects,
   useProviders,
   type EffectiveHookEvent,
-  type EffectiveHookSourceBucket,
   type EffectiveHooksReport,
   type HookInstallReport,
   type HookInstallResult,
 } from "../lib/api";
-import { Shell } from "../components/layout/shell";
+import { DeckShell } from "../components/deck/deck-shell";
+import { DeckGrid, DeckGroup, DeckHead, DeckLine } from "../components/deck/deck-grid";
+
+const COLS_SOURCE = "14px 220px minmax(0, 1fr) 90px";
+const COLS_HOOK = "14px minmax(0, 1fr) 320px 90px";
 import {
-  CONTRIBUTOR_SOURCE_COUNT,
   commandLabel,
+  redactionNote,
+  timeoutLabel,
+  CONTRIBUTOR_SOURCE_COUNT,
   eventTotal,
   eventTotalLabel,
   planHeadline,
   planSummary,
-  redactionNote,
   scanCopy,
   scanIsIncomplete,
-  sourceCountLabel,
   staleFindings,
-  timeoutLabel,
 } from "./hooks-copy";
-import styles from "./hooks.module.css";
 
 /** The sidecar resolves an empty config home to `~/.claude`. */
 const DEFAULT_CONFIG_HOME = "";
@@ -137,10 +138,25 @@ export function HooksPage(): ReactElement {
   const plan = useHookInstallPlan([configHome]);
 
   return (
-    <Shell>
-      <div className={styles.page}>
+    <DeckShell
+      title="hooks"
+      crumb="the lane needs you depends on"
+      actions={
+        <span className="dk-actions">
+          <button
+            type="button"
+            className="dk-btn"
+            onClick={() => void plan.refetch()}
+            disabled={plan.isFetching}
+          >
+            {plan.isFetching ? "verifying…" : "verify"}
+          </button>
+        </span>
+      }
+    >
+      <>
         <header>
-          <p className={styles.subtitle}>
+          <p className="dk-note sans">
             Hook blocks from every source are merged, and at event time every
             hook that was collected runs. So what matters is not where an
             event&rsquo;s hooks come from but how many separate programs sit on
@@ -151,14 +167,14 @@ export function HooksPage(): ReactElement {
           </p>
         </header>
 
-        <div className={styles.scope}>
-          <div className={styles.field}>
-            <label className={styles.fieldLabel} htmlFor="hooks-config-home">
+        <div className="dk-actions">
+          <div className="dk-actions">
+            <label className="dim" htmlFor="hooks-config-home">
               Config home
             </label>
             <select
               id="hooks-config-home"
-              className={styles.select}
+              className="dk-rowsel"
               value={configHome}
               onChange={(e) => setConfigHomeOverride(e.target.value)}
             >
@@ -169,13 +185,13 @@ export function HooksPage(): ReactElement {
               ))}
             </select>
           </div>
-          <div className={styles.field}>
-            <label className={styles.fieldLabel} htmlFor="hooks-project-root">
+          <div className="dk-actions">
+            <label className="dim" htmlFor="hooks-project-root">
               Project
             </label>
             <select
               id="hooks-project-root"
-              className={styles.select}
+              className="dk-rowsel"
               value={projectRoot}
               onChange={(e) => setProjectRootOverride(e.target.value)}
             >
@@ -187,10 +203,10 @@ export function HooksPage(): ReactElement {
               ))}
             </select>
           </div>
-          <div className={styles.actions}>
+          <div className="dk-actions">
             <button
               type="button"
-              className={`${styles.btn} ${styles.btnGhost}`}
+              className="dk-btn"
               onClick={() => {
                 void effective.refetch();
                 void plan.refetch();
@@ -200,7 +216,7 @@ export function HooksPage(): ReactElement {
               {effective.isFetching ? "Reading…" : "Re-read files"}
             </button>
           </div>
-          <p className={styles.sectionNote}>
+          <p className="dk-note sans">
             One config home and one project at a time: that pair is what a real
             session runs under. Adding several together would count hooks no
             single session ever runs.
@@ -210,28 +226,28 @@ export function HooksPage(): ReactElement {
         <StaleInstallBanner plan={plan.data} />
 
         {effective.isError ? (
-          <div className={`${styles.banner} ${styles.bannerWarn}`}>
-            <div className={styles.bannerTitle}>
+          <div className="dk-note sans" style={{ borderLeft: "2px solid var(--warn)" }}>
+            <div className="sub">
               Could not read the hook configuration
             </div>
-            <div className={styles.bannerBody}>{effective.error.message}</div>
+            <div className="dim">{effective.error.message}</div>
           </div>
         ) : null}
 
         {effective.isPending ? (
-          <div className={styles.empty}>Reading the config files…</div>
+          <div className="dk-note">Reading the config files…</div>
         ) : effective.data ? (
           <>
             <Counters report={effective.data} />
             <section>
-              <h2 className={styles.sectionTitle}>Events</h2>
-              <p className={styles.sectionNote}>
+              <h2 className="dk-group__h">Events</h2>
+              <p className="dk-note sans">
                 Every event this app ingests, with the number of hooks found on
                 it. The number is a floor, not a ceiling: one of the{" "}
                 {CONTRIBUTOR_SOURCE_COUNT} sources is a settings file named on
                 the command line, which this app cannot read.
               </p>
-              <div className={styles.list}>
+              <div className="">
                 {effective.data.events.map((event) => (
                   <EventRow key={event.event} event={event} />
                 ))}
@@ -247,8 +263,8 @@ export function HooksPage(): ReactElement {
             <SourceLegend report={effective.data} />
           </>
         ) : null}
-      </div>
-    </Shell>
+      </>
+    </DeckShell>
   );
 }
 
@@ -263,166 +279,107 @@ function Counters({ report }: { report: EffectiveHooksReport }): ReactElement {
   const unreadable = report.sources.filter((s) => !s.observable);
 
   return (
-    <div className={styles.counters}>
-      <div className={styles.counter}>
-        <div className={styles.counterValue}>{found}</div>
-        <div className={styles.counterLabel}>
-          hooks found across {report.events.length} events
-        </div>
-        {unreadable.length > 0 ? (
-          <div className={styles.counterNote}>
-            plus an unknown number from{" "}
-            {unreadable.map((s) => s.label).join(", ")}
-          </div>
-        ) : null}
+    <div className="dk-bigs">
+      <div className="dk-big">
+        <div className="v">{found}</div>
+        <div className="l">hooks found across {report.events.length} events</div>
       </div>
-      <div className={styles.counter}>
-        <div className={styles.counterValue}>
-          {busiest && busiest.total > 0 ? busiest.total : 0}
-        </div>
-        <div className={styles.counterLabel}>
-          {busiest && busiest.total > 0
-            ? `on ${busiest.event}, the busiest event`
-            : "on the busiest event"}
+      <div className="dk-big">
+        <div className="v">{busiest && busiest.total > 0 ? busiest.total : 0}</div>
+        <div className="l">
+          {busiest && busiest.total > 0 ? `busiest · ${busiest.event}` : "busiest event"}
         </div>
       </div>
-      <div className={styles.counter}>
-        <div className={styles.counterValue}>{CONTRIBUTOR_SOURCE_COUNT}</div>
-        <div className={styles.counterLabel}>
-          places a hook can come from, {unreadable.length} of them not readable
-          from disk
+      <div className="dk-big">
+        <div className={unreadable.length > 0 ? "v" : "v na"}>{unreadable.length}</div>
+        <div className={unreadable.length > 0 ? "l warn" : "l"}>
+          {unreadable.length > 0
+            ? `unreadable · ${unreadable.map((s2) => s2.label).join(", ")}`
+            : "every source readable"}
         </div>
       </div>
     </div>
   );
 }
-
-// ─── one event ───────────────────────────────────────────────────────────────
 
 function EventRow({ event }: { event: EffectiveHookEvent }): ReactElement {
-  const [open, setOpen] = useState(false);
   const { found } = eventTotal(event);
+  const contributions = event.by_source.flatMap((b) =>
+    b.contributions.map((c) => ({ bucket: b, c })),
+  );
 
   return (
-    <div className={styles.eventRow}>
-      <button
-        type="button"
-        className={styles.eventHead}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className={styles.chevron}>{open ? "▾" : "▸"}</span>
-        <span className={styles.eventName}>{event.event}</span>
-        <span
-          className={
-            event.tier === "core"
-              ? `${styles.tier} ${styles.tierCore}`
-              : styles.tier
-          }
-        >
-          {event.tier}
-        </span>
-        <span
-          className={
-            found === 0
-              ? `${styles.eventTotal} ${styles.eventTotalZero}`
-              : styles.eventTotal
-          }
-        >
-          {eventTotalLabel(event)}
-        </span>
-      </button>
+    <DeckGroup
+      label={event.event}
+      count={eventTotalLabel(event)}
+      note={event.tier}
+      state={found === 0 ? "idle" : "run"}
+      collapsible
+      defaultOpen={false}
+    >
+      {/* Every source is listed, including the empty ones — the point of the
+          page is which files sit on an event's critical path, and a source
+          omitted because it was empty would read as a source that was checked
+          and found clean. An unreadable one says so and never shows a number. */}
+      <DeckGrid cols={COLS_SOURCE} label={`${event.event} sources`}>
+        <DeckHead cells={["source", "contribution", "r hooks"]} />
+        {event.by_source.map((bucket) => (
+          <DeckLine
+            key={bucket.source}
+            state={!bucket.observable ? "fail" : bucket.count > 0 ? "run" : "idle"}
+            cells={[
+              { v: bucket.label, cls: "sub" },
+              { v: bucket.observable ? (bucket.count === 0 ? "nothing" : `${bucket.count} found`) : "unknown — this app cannot read it" },
+              { v: bucket.observable ? bucket.count || "—" : "unknown", cls: "r" },
+            ]}
+          />
+        ))}
+      </DeckGrid>
 
-      {open ? (
-        <div className={styles.eventBody}>
-          <div className={styles.buckets}>
-            {event.by_source.map((bucket) => (
-              <SourceBucket key={bucket.source} bucket={bucket} />
-            ))}
-          </div>
-          {event.by_source.flatMap((b) => b.contributions).length === 0 ? (
-            <div className={styles.meta}>
-              Nothing was found on this event in any source this app can read.
-            </div>
-          ) : (
-            <div className={styles.list}>
-              {event.by_source.flatMap((bucket) =>
-                bucket.contributions.map((c, i) => (
-                  <div
-                    key={`${bucket.source}-${i}-${c.origin}`}
-                    className={styles.contribution}
-                  >
-                    <div className={styles.contribHead}>
-                      <span className={styles.mono}>{commandLabel(c)}</span>
-                      {c.codenest_authored ? (
-                        <span className={`${styles.badge} ${styles.badgeOurs}`}>
-                          written by this app
-                        </span>
-                      ) : (
-                        <span
-                          className={`${styles.badge} ${styles.badgeRedacted}`}
-                        >
-                          {c.hook_type}
-                        </span>
-                      )}
-                      {timeoutLabel(c) ? (
-                        <span className={styles.badge}>{timeoutLabel(c)}</span>
-                      ) : null}
-                    </div>
-                    <div className={styles.meta}>
-                      {bucket.label}
-                      {c.matcher ? ` · matcher ${c.matcher}` : ""} · {c.origin}
-                    </div>
-                    {redactionNote(c) ? (
-                      <div className={styles.meta}>{redactionNote(c)}</div>
-                    ) : null}
-                  </div>
-                )),
-              )}
-            </div>
-          )}
+      {contributions.length === 0 ? (
+        <div className="dk-note">
+          Nothing was found on this event in any source this app can read.
+        </div>
+      ) : (
+        <DeckGrid cols={COLS_HOOK} label={`${event.event} hooks`}>
+          <DeckHead cells={["runs", "from", "r timeout"]} />
+          {contributions.map(({ bucket, c }, i) => (
+            <DeckLine
+              key={`${bucket.source}-${i}-${c.origin}`}
+              state={c.codenest_authored ? "done" : "run"}
+              cells={[
+                {
+                  v: (
+                    <>
+                      <span className="mono">{commandLabel(c)}</span>{" "}
+                      <span className="dk-tag">
+                        {c.codenest_authored ? "written by this app" : c.hook_type}
+                      </span>
+                    </>
+                  ),
+                  title: redactionNote(c) ?? commandLabel(c),
+                },
+                {
+                  v: `${bucket.label}${c.matcher ? ` · matcher ${c.matcher}` : ""} · ${c.origin}`,
+                },
+                { v: timeoutLabel(c) ?? "—", cls: "r" },
+              ]}
+            />
+          ))}
+        </DeckGrid>
+      )}
+
+      {/* Said out loud, because a page about what runs on your machine must not
+          quietly hide a command's arguments without explaining that it did. */}
+      {contributions.some((x) => redactionNote(x.c)) ? (
+        <div className="dk-note sans">
+          {contributions.map((x) => redactionNote(x.c)).find(Boolean)}
         </div>
       ) : null}
-    </div>
+    </DeckGroup>
   );
 }
 
-function SourceBucket({
-  bucket,
-}: {
-  bucket: EffectiveHookSourceBucket;
-}): ReactElement {
-  const label = sourceCountLabel(bucket);
-  const cls = !bucket.observable
-    ? `${styles.bucket} ${styles.bucketUnknown}`
-    : bucket.count === 0
-      ? `${styles.bucket} ${styles.bucketEmpty}`
-      : styles.bucket;
-  return (
-    <div className={cls}>
-      <span className={styles.bucketLabel}>{bucket.label}</span>
-      <span
-        className={
-          bucket.observable ? styles.bucketCount : styles.bucketCountUnknown
-        }
-      >
-        {label}
-      </span>
-    </div>
-  );
-}
-
-// ─── the stale install (#170's repair case) ──────────────────────────────────
-
-/**
- * The most useful thing this page knows.
- *
- * An install made before #172 still carries a `PreToolUse` command that throws
- * its own stdout away — and `PreToolUse` stdout is the channel a permission
- * decision comes back on. Verify grades that file green, so there is no other
- * layer at which a user could find out. The dry run is what spots it, and it
- * runs on load rather than behind a button for exactly that reason.
- */
 function StaleInstallBanner({
   plan,
 }: {
@@ -437,12 +394,12 @@ function StaleInstallBanner({
       {alarming.map((f) => (
         <div
           key={`alarm-${f.settingsPath}`}
-          className={`${styles.banner} ${styles.bannerAlarm}`}
+          className="dk-note sans" style={{ borderLeft: "2px solid var(--err)" }}
         >
-          <div className={styles.bannerTitle}>
+          <div className="sub">
             Your permission decisions are being thrown away
           </div>
-          <div className={styles.bannerBody}>
+          <div className="dim">
             The <code>PreToolUse</code> hook in <code>{f.settingsPath}</code>{" "}
             was written by this app before it learned to read a hook&rsquo;s
             answer back. It still sends every tool call to the app, and the app
@@ -453,7 +410,7 @@ function StaleInstallBanner({
             below.
           </div>
           {f.events.length > 1 ? (
-            <div className={styles.bannerBody}>
+            <div className="dim">
               {f.events.length - 1} other hook
               {f.events.length === 2 ? "" : "s"} in the same file came from the
               same older version (
@@ -469,12 +426,12 @@ function StaleInstallBanner({
         .map((f) => (
           <div
             key={`stale-${f.settingsPath}`}
-            className={`${styles.banner} ${styles.bannerWarn}`}
+            className="dk-note sans" style={{ borderLeft: "2px solid var(--warn)" }}
           >
-            <div className={styles.bannerTitle}>
+            <div className="sub">
               Hooks this app wrote are in an older shape
             </div>
-            <div className={styles.bannerBody}>
+            <div className="dim">
               {f.events.join(", ")} in <code>{f.settingsPath}</code> came from
               an earlier version of this app. They still run; repairing them
               below rewrites them in place and touches nothing else in the file.
@@ -485,18 +442,6 @@ function StaleInstallBanner({
   );
 }
 
-// ─── install / repair, plan first ────────────────────────────────────────────
-
-/**
- * Plan first, always.
- *
- * The plan comes from a route that structurally cannot write (`/install/plan`
- * is its own URL rather than a flag on the writer), it is fetched on load, and
- * the writer is reachable only after the user has seen it and pressed a second,
- * separately-labelled button. The file it writes is the one every hook every
- * tool ever installed lives in, which is why the confirm names the path and
- * says where the backup goes before anything happens.
- */
 function InstallCard({
   configHome,
   planResult,
@@ -510,8 +455,8 @@ function InstallCard({
   if (!planResult) {
     return (
       <section>
-        <h2 className={styles.sectionTitle}>This app&rsquo;s own hooks</h2>
-        <div className={styles.empty}>Checking what would change…</div>
+        <h2 className="dk-group__h">This app&rsquo;s own hooks</h2>
+        <div className="dk-note">Checking what would change…</div>
       </section>
     );
   }
@@ -521,8 +466,8 @@ function InstallCard({
 
   return (
     <section>
-      <h2 className={styles.sectionTitle}>This app&rsquo;s own hooks</h2>
-      <p className={styles.sectionNote}>
+      <h2 className="dk-group__h">This app&rsquo;s own hooks</h2>
+      <p className="dk-note sans">
         A dry run of what installing or repairing would do to{" "}
         <code>{planResult.settings_path}</code>. Nothing below has been written.
       </p>
@@ -534,16 +479,16 @@ function InstallCard({
         cannot be switched off in Features, so the path to turning telemetry
         back off can never disappear. See `telemetry-tab.tsx`'s header.
       */}
-      <p className={styles.sectionNote}>
+      <p className="dk-note sans">
         This app writes one other thing into this same file: the environment
         variables that turn Claude Code telemetry on and point it here. Those
         live in Settings &rarr; Telemetry, with their own dry run, their own
         confirm and a real off switch.
       </p>
-      <div className={styles.card}>
-        <div className={styles.bannerBody}>{planHeadline(planResult)}</div>
+      <div className="dk-group">
+        <div className="dim">{planHeadline(planResult)}</div>
 
-        <div className={styles.meta}>
+        <div className="dim">
           {summary.ok} event{summary.ok === 1 ? "" : "s"} already current ·{" "}
           {summary.add} would be added · {summary.repair} would be rewritten ·{" "}
           {summary.conflict} left alone with a reason · {summary.left} hook
@@ -552,17 +497,17 @@ function InstallCard({
         </div>
 
         {summary.repair > 0 || summary.add > 0 || summary.conflict > 0 ? (
-          <div className={styles.list}>
+          <div className="">
             {planResult.events
               .filter((e) => e.action !== "ok")
               .map((e) => (
-                <div key={e.event} className={styles.contribution}>
-                  <div className={styles.contribHead}>
-                    <span className={styles.mono}>{e.event}</span>
-                    <span className={styles.badge}>{e.action}</span>
+                <div key={e.event} className="dk-kv">
+                  <div className="dim">
+                    <span className="mono">{e.event}</span>
+                    <span className="dk-tag">{e.action}</span>
                   </div>
                   {e.detail ? (
-                    <div className={styles.meta}>{e.detail}</div>
+                    <div className="dim">{e.detail}</div>
                   ) : null}
                 </div>
               ))}
@@ -570,18 +515,18 @@ function InstallCard({
         ) : null}
 
         {planResult.status === "refused" ? (
-          <div className={styles.meta}>
+          <div className="dim">
             This file cannot be written, so there is nothing to confirm.
           </div>
         ) : !summary.changes ? (
-          <div className={styles.meta}>
+          <div className="dim">
             Nothing to do. Running the install would rewrite nothing.
           </div>
         ) : !confirming ? (
-          <div className={styles.actions}>
+          <div className="dk-actions">
             <button
               type="button"
-              className={styles.btn}
+              className="dk-btn"
               onClick={() => setConfirming(true)}
             >
               {summary.repair > 0
@@ -590,21 +535,21 @@ function InstallCard({
             </button>
           </div>
         ) : (
-          <div className={`${styles.banner} ${styles.bannerInfo}`}>
-            <div className={styles.bannerTitle}>
+          <div className="dk-note sans" style={{ borderLeft: "2px solid var(--run)" }}>
+            <div className="sub">
               Write to {planResult.settings_path}?
             </div>
-            <div className={styles.bannerBody}>
+            <div className="dim">
               This is the one file every hook every tool has ever installed
               lives in. A timestamped copy of the current contents is written
               beside it before anything changes, and the path of that copy is
               reported back here. Hooks this app did not write are not moved,
               rewritten or reordered.
             </div>
-            <div className={styles.actions}>
+            <div className="dk-actions">
               <button
                 type="button"
-                className={styles.btn}
+                className="dk-btn"
                 disabled={install.isPending}
                 onClick={() =>
                   install.mutate(
@@ -628,7 +573,7 @@ function InstallCard({
               </button>
               <button
                 type="button"
-                className={`${styles.btn} ${styles.btnGhost}`}
+                className="dk-btn"
                 onClick={() => setConfirming(false)}
                 disabled={install.isPending}
               >
@@ -639,7 +584,7 @@ function InstallCard({
         )}
 
         {applied ? (
-          <div className={styles.meta}>
+          <div className="dim">
             {applied.status === "applied"
               ? `Written. Previous contents saved to ${applied.backup_path ?? "(no backup — the file did not exist)"}.`
               : `No write was needed (${applied.status}).`}
@@ -662,17 +607,17 @@ function ScannedFiles({
 
   return (
     <section>
-      <h2 className={styles.sectionTitle}>Files read</h2>
-      <p className={styles.sectionNote}>
+      <h2 className="dk-group__h">Files read</h2>
+      <p className="dk-note sans">
         {incomplete
           ? "Something in this scan could not be read, so the counts above are missing whatever it declared."
           : "Every file this scan opened, and how that went. A file that is missing and a file that is malformed both produce no hooks and mean very different things."}
       </p>
-      <div className={styles.card}>
-        <div className={styles.actions}>
+      <div className="dk-group">
+        <div className="dk-actions">
           <button
             type="button"
-            className={`${styles.btn} ${styles.btnGhost}`}
+            className="dk-btn"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
           >
@@ -684,18 +629,14 @@ function ScannedFiles({
         {open
           ? report.scanned.map((f, i) => {
               const copy = scanCopy(f);
-              const toneClass =
-                copy.tone === "ok"
-                  ? styles.scanOk
-                  : copy.tone === "warn"
-                    ? styles.scanWarn
-                    : styles.scanInfo;
+              const toneState =
+                copy.tone === "ok" ? "done" : copy.tone === "warn" ? "wait" : "idle";
               return (
-                <div key={`${f.path}-${i}`} className={styles.scanRow}>
-                  <span className={toneClass}>{copy.label}</span>
-                  <span className={styles.mono}>{f.path}</span>
+                <div key={`${f.path}-${i}`} className="dk-kv">
+                  <span className="dk-tag" data-s={toneState}>{copy.label}</span>
+                  <span className="mono">{f.path}</span>
                   {f.detail ? (
-                    <span className={styles.meta}>{f.detail}</span>
+                    <span className="dim">{f.detail}</span>
                   ) : null}
                 </div>
               );
@@ -715,30 +656,26 @@ function SourceLegend({
 }): ReactElement {
   return (
     <section>
-      <h2 className={styles.sectionTitle}>
+      <h2 className="dk-group__h">
         The {CONTRIBUTOR_SOURCE_COUNT} places a hook can come from
       </h2>
-      <p className={styles.sectionNote}>
+      <p className="dk-note sans">
         Five of them are settings files; the other three are not settings files
         at all, which is what makes them easy to miss. Each one adds to what the
         others declared.
       </p>
-      <div className={styles.legend}>
+      <div className="">
         {report.sources.map((s) => (
           <div
             key={s.slug}
-            className={
-              s.observable
-                ? styles.legendItem
-                : `${styles.legendItem} ${styles.legendItemUnknown}`
-            }
+            className="dk-kv"
           >
-            <div className={styles.legendName}>
+            <div className="sub">
               {s.label}
               {s.observable ? "" : " — contribution unknown"}
             </div>
-            <div className={styles.legendWhere}>{s.where}</div>
-            <div className={styles.legendNote}>{s.note}</div>
+            <div className="mono dim">{s.where}</div>
+            <div className="dim">{s.note}</div>
           </div>
         ))}
       </div>

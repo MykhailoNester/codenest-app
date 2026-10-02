@@ -75,8 +75,15 @@ vi.mock("../../lib/api", () => ({
   useProviders: () => mockUseProviders(),
 }));
 
-vi.mock("../../components/layout/shell", () => ({
-  Shell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+// Stubbed for the same reason the old Shell was: this file tests the hook
+// report, not the chrome. `actions` is rendered so Verify stays reachable.
+vi.mock("../../components/deck/deck-shell", () => ({
+  DeckShell: ({ children, actions }: { children: ReactNode; actions?: ReactNode }) => (
+    <div>
+      {actions}
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
