@@ -30,7 +30,6 @@ import {
   ProjectSkills,
 } from "../components/project-agents-panel";
 import { LineChart, Line } from "recharts";
-import css from "./projects.module.css";
 
 
 
@@ -92,24 +91,24 @@ function EditProjectModal({
   }
 
   return (
-    <div className={css.modalOverlay} onClick={onClose}>
-      <div className={css.modalBox} onClick={(e) => e.stopPropagation()}>
-        <div className={css.modalTitle}>Edit "{project.name}"</div>
+    <div className="dk-scrim" onClick={onClose}>
+      <div className="dk-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="dk-modal__h">Edit "{project.name}"</div>
 
-        <div className={css.formGrid2}>
+        <div className="dk-form__grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
           <div>
-            <label className={css.fieldLabel}>Name *</label>
+            <label className="dk-label">Name *</label>
             <input
-              className={css.input}
+              className="dk-ctl"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               autoFocus
             />
           </div>
           <div>
-            <label className={css.fieldLabel}>Status</label>
+            <label className="dk-label">Status</label>
             <select
-              className={css.input}
+              className="dk-ctl"
               value={form.status}
               onChange={(e) => setForm({ ...form, status: e.target.value })}
             >
@@ -120,30 +119,30 @@ function EditProjectModal({
           </div>
         </div>
 
-        <div className={css.formField}>
-          <label className={css.fieldLabel}>Description</label>
+        <div className="dk-form__row">
+          <label className="dk-label">Description</label>
           <input
-            className={css.input}
+            className="dk-ctl"
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
             placeholder="What does this project do?"
           />
         </div>
 
-        <div className={css.formGrid2}>
+        <div className="dk-form__grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
           <div>
-            <label className={css.fieldLabel}>Tech Stack</label>
+            <label className="dk-label">Tech Stack</label>
             <input
-              className={css.input}
+              className="dk-ctl"
               value={form.tech_stack}
               onChange={(e) => setForm({ ...form, tech_stack: e.target.value })}
               placeholder="e.g. Python, FastAPI"
             />
           </div>
           <div>
-            <label className={css.fieldLabel}>Path (absolute)</label>
+            <label className="dk-label">Path (absolute)</label>
             <input
-              className={css.input}
+              className="dk-ctl"
               value={form.path}
               onChange={(e) => setForm({ ...form, path: e.target.value })}
               placeholder="/Users/me/Work/my-project"
@@ -152,10 +151,10 @@ function EditProjectModal({
           </div>
         </div>
 
-        <div className={css.formField}>
-          <label className={css.fieldLabel}>Default provider</label>
+        <div className="dk-form__row">
+          <label className="dk-label">Default provider</label>
           <select
-            className={css.input}
+            className="dk-ctl"
             value={form.default_provider_id ?? ""}
             onChange={(e) =>
               setForm({
@@ -174,10 +173,10 @@ function EditProjectModal({
         </div>
 
         {showProfileSelector && (
-          <div className={css.formField}>
-            <label className={css.fieldLabel}>Profile group</label>
+          <div className="dk-form__row">
+            <label className="dk-label">Profile group</label>
             <select
-              className={css.input}
+              className="dk-ctl"
               value={form.profile_id ?? ""}
               onChange={(e) =>
                 setForm({
@@ -196,23 +195,23 @@ function EditProjectModal({
           </div>
         )}
 
-        {error && <div className={css.errorText}>{error}</div>}
+        {error && <div className="dk-help">{error}</div>}
 
-        <div className={css.modalFooter}>
+        <div className="dk-modal__f">
+          <button
+            className="dk-btn bare"
+            type="button"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
           <button
             className="dk-btn pri"
             type="button"
             onClick={() => void handleSubmit()}
             disabled={updateProject.isPending}
           >
-            {updateProject.isPending ? "Saving..." : "Save"}
-          </button>
-          <button
-            className="dk-btn"
-            type="button"
-            onClick={onClose}
-          >
-            Cancel
+            {updateProject.isPending ? "saving…" : "save"}
           </button>
         </div>
       </div>
@@ -234,13 +233,13 @@ function AgentsPanelModal({
   const [tab, setTab] = useState<"agents" | "skills">("agents");
 
   return (
-    <div className={css.modalOverlay} onClick={onClose}>
+    <div className="dk-scrim" onClick={onClose}>
       <div
-        className={css.modalBox}
+        className="dk-modal"
         style={{ width: 540, maxWidth: "92vw" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className={css.modalTitle}>
+        <div className="dk-modal__h">
           Agents &amp; Skills — {project.name}
         </div>
 
@@ -284,7 +283,7 @@ function AgentsPanelModal({
           )}
         </div>
 
-        <div className={css.modalFooter} style={{ justifyContent: "flex-end" }}>
+        <div className="dk-modal__f" style={{ justifyContent: "flex-end" }}>
           <button
             className="dk-btn"
             type="button"

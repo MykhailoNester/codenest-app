@@ -355,10 +355,10 @@ export function ProvidersTab(): ReactElement {
           marginBottom: 16,
         }}
       >
-        <span className="d3-h">Providers</span>
+        <span className="dk-group__h">Providers</span>
         <button
           type="button"
-          className="d3-btn d3-btn--primary"
+          className="dk-btn pri"
           onClick={startNew}
         >
           + New Provider
@@ -393,7 +393,7 @@ export function ProvidersTab(): ReactElement {
           </div>
           <button
             type="button"
-            className="d3-btn d3-btn--primary"
+            className="dk-btn pri"
             onClick={startNew}
           >
             Add provider
@@ -558,7 +558,7 @@ export function ProvidersTab(): ReactElement {
                       )}
                       <button
                         type="button"
-                        className="d3-btn d3-btn--ghost"
+                        className="dk-btn bare"
                         style={{ marginRight: 8 }}
                         onClick={() => startEdit(p)}
                       >
@@ -567,7 +567,7 @@ export function ProvidersTab(): ReactElement {
                       {confirmDeleteId === p.id && (
                         <button
                           type="button"
-                          className="d3-btn d3-btn--ghost"
+                          className="dk-btn bare"
                           style={{ marginRight: 8, color: "var(--fg-3)" }}
                           onClick={() => setConfirmDeleteId(null)}
                         >
@@ -576,7 +576,7 @@ export function ProvidersTab(): ReactElement {
                       )}
                       <button
                         type="button"
-                        className="d3-btn d3-btn--ghost"
+                        className="dk-btn bare"
                         style={{
                           color: "#ef4444",
                           ...(confirmDeleteId === p.id
@@ -601,8 +601,8 @@ export function ProvidersTab(): ReactElement {
 
       {/* ── Create / Edit form ────────────────────────────────────────── */}
       {editingId !== null && (
-        <div ref={formRef} className="d3-card" style={{ padding: 20 }}>
-          <span className="d3-h" style={{ display: "block", marginBottom: 12 }}>
+        <div ref={formRef} className="dk-group" style={{ padding: 20 }}>
+          <span className="dk-group__h" style={{ display: "block", marginBottom: 12 }}>
             {editingId === "new"
               ? "New Provider"
               : `Edit "${form.display_name}"`}
@@ -716,7 +716,7 @@ export function ProvidersTab(): ReactElement {
                 </div>
                 <button
                   type="button"
-                  className="d3-btn d3-btn--ghost"
+                  className="dk-btn bare"
                   onClick={() => void handleBrowse()}
                   disabled={pickingDir}
                   style={{ flexShrink: 0, whiteSpace: "nowrap" }}
@@ -941,14 +941,14 @@ export function ProvidersTab(): ReactElement {
           <div style={{ display: "flex", gap: 8 }}>
             <button
               type="button"
-              className="d3-btn d3-btn--primary"
+              className="dk-btn pri"
               onClick={() => void save()}
             >
               Save
             </button>
             <button
               type="button"
-              className="d3-btn d3-btn--ghost"
+              className="dk-btn bare"
               onClick={cancel}
             >
               Cancel

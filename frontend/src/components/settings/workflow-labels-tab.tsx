@@ -270,7 +270,7 @@ function GroupSection({
 
   return (
     <section
-      className="d3-card"
+      className="dk-group"
       style={{ marginBottom: 16, padding: "14px 16px" }}
     >
       {/* Group header + toolbar */}
@@ -284,7 +284,7 @@ function GroupSection({
         }}
       >
         <div>
-          <div className="d3-h" style={{ display: "block", marginBottom: 2 }}>
+          <div className="dk-group__h" style={{ display: "block", marginBottom: 2 }}>
             {def.title}
           </div>
           <div style={{ fontSize: 11, color: "var(--fg-4)" }}>
@@ -293,7 +293,7 @@ function GroupSection({
         </div>
         <button
           type="button"
-          className="d3-btn d3-btn--ghost"
+          className="dk-btn bare"
           style={{ fontSize: 11, flexShrink: 0 }}
           onClick={() => void resetDefaults()}
           disabled={update.isPending || reorder.isPending}
@@ -373,7 +373,7 @@ function GroupSection({
           />
           <button
             type="button"
-            className="d3-btn d3-btn--primary"
+            className="dk-btn pri"
             style={{ fontSize: 12, flexShrink: 0 }}
             onClick={handleAdd}
             disabled={!draft.trim() || create.isPending}
@@ -493,7 +493,7 @@ function LabelRow({
       {inactive ? (
         <button
           type="button"
-          className="d3-btn d3-btn--ghost"
+          className="dk-btn bare"
           style={{ fontSize: 11, flexShrink: 0 }}
           onClick={onRestore}
         >
@@ -503,7 +503,7 @@ function LabelRow({
         <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
           <button
             type="button"
-            className="d3-btn d3-btn--ghost"
+            className="dk-btn bare"
             style={{
               fontSize: 12,
               padding: "2px 7px",
@@ -517,7 +517,7 @@ function LabelRow({
           </button>
           <button
             type="button"
-            className="d3-btn d3-btn--ghost"
+            className="dk-btn bare"
             style={{
               fontSize: 12,
               padding: "2px 7px",
@@ -531,7 +531,7 @@ function LabelRow({
           </button>
           <button
             type="button"
-            className="d3-btn d3-btn--ghost"
+            className="dk-btn bare"
             style={{ fontSize: 13, padding: "2px 7px", color: "var(--err)" }}
             onClick={onRemove}
             aria-label={`Remove ${row.display_name}`}
