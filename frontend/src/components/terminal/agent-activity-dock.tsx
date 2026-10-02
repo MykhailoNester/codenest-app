@@ -335,6 +335,13 @@ const ROW_HIGHLIGHT_PAINT: CSSProperties = {
   outlineOffset: -1,
 };
 
+/**
+ * Order matters and is the old cascade's, not a new one: `.rowMain:hover` was
+ * (0,2,0) and `.rowSelected` (0,1,0), so the pointer outranked the selection's
+ * wash while leaving its inset bar standing. Keeping that means a selected row
+ * still reacts to the pointer — and still says it is selected, because the bar
+ * is a `boxShadow` neither of the other two sets.
+ */
 function rowMainStyle(
   selected: boolean,
   highlighted: boolean,
@@ -342,8 +349,8 @@ function rowMainStyle(
 ): CSSProperties {
   return {
     ...ROW_MAIN_STYLE,
-    ...(hover ? ROW_HOVER_PAINT : {}),
     ...(selected ? ROW_SELECTED_PAINT : {}),
+    ...(hover ? ROW_HOVER_PAINT : {}),
     ...(highlighted ? ROW_HIGHLIGHT_PAINT : {}),
   };
 }

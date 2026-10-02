@@ -888,6 +888,43 @@ describe("AgentActivityDock — selection", () => {
     expect(rows[0]?.querySelector("button")?.getAttribute("aria-selected")).toBe("true");
     expect(rows[1]?.querySelector("button")?.getAttribute("aria-selected")).toBe("false");
   });
+
+  // The selection's inset bar and the keyboard cursor's dashed ring are three
+  // separate channels, and hovering must not take any of them away: that was
+  // the old cascade (`.rowMain:hover` outranked `.rowSelected`'s wash only),
+  // and the Deck conversion (#283) had to reproduce it in code because an
+  // inline style has no `:hover` to lose to.
+  it("a hovered row keeps its selection bar and its keyboard ring", () => {
+    const state = withTask(
+      liveState(),
+      "toolu_a",
+      { subagent_type: "planner", description: "p" },
+      1_000,
+    );
+    render(
+      dock(state, {
+        selectedView: { kind: "subagent", id: "toolu_a" },
+        highlightedKey: viewKey({ kind: "subagent", id: "toolu_a" }),
+      }),
+    );
+    fireEvent.click(
+      screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
+    );
+    const row = screen
+      .getAllByTestId("dock-agent-row")[0]!
+      .querySelector("button") as HTMLButtonElement;
+
+    expect(row.style.boxShadow).toBe("inset 2px 0 0 var(--run)");
+    expect(row.style.outline).toBe("1px dashed var(--run)");
+
+    fireEvent.mouseEnter(row);
+    expect(row.style.background).toBe("var(--sel)");
+    expect(row.style.boxShadow).toBe("inset 2px 0 0 var(--run)");
+    expect(row.style.outline).toBe("1px dashed var(--run)");
+
+    fireEvent.mouseLeave(row);
+    expect(row.style.background).toBe("var(--sel-2)");
+  });
 });
 
 describe("AgentActivityDock — collapse state and layout", () => {
