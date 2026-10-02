@@ -20,7 +20,13 @@
  * two `*RowToSuggest` adapters live in `lib/composer-menu.ts` instead.
  */
 
-import { useEffect, useMemo, useRef, type ReactElement } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  type CSSProperties,
+  type ReactElement,
+} from "react";
 import {
   useInvocables,
   useLibraryItems,
@@ -30,7 +36,40 @@ import {
 import type { CommandSource } from "../../lib/composer-commands";
 import type { InvocableSource, MentionSources } from "../../lib/composer-mentions";
 import type { SuggestRow } from "../../lib/composer-menu";
-import styles from "./agent-composer.module.css";
+
+/* ── Local constants ─────────────────────────────────────────────────────
+   Deck has no popover anchored to a caret: `.dk-menu` anchors to its trigger
+   and lays its children out as full-width 26px buttons. The panel's frame is
+   therefore local; its rows, group headings and metas are Deck's own
+   (`.dk-line`, `.dk-grp__h`, `.dk-meta`). Same precedent as the composer's
+   own constants — `components/deck/*` and `design/deck/*` are not touched. */
+
+/** Anchored by the inline `left`/`bottom` the composer computes from the
+ *  caret's mirror position, always opening upward. */
+const SUGGEST_PANEL_STYLE: CSSProperties = {
+  position: "absolute",
+  overflowY: "auto",
+  background: "var(--bg-2)",
+  border: "1px solid var(--line-2)",
+  borderRadius: 3,
+  fontSize: "var(--fs-s)",
+  zIndex: 10,
+  minWidth: 260,
+  maxWidth: 420,
+  maxHeight: 240,
+};
+
+/** Label and meta. The context picker next door is the same shape with an id
+ *  column in front (`PICKER_COLS`); both lists are `.dk-line`s on a grid. */
+const SUGGEST_COLS = "minmax(0, 1fr) auto";
+
+const SUGGEST_FOOTER_STYLE: CSSProperties = {
+  position: "sticky",
+  bottom: 0,
+  padding: "4px 9px",
+  background: "var(--bg-1)",
+  borderTop: "1px solid var(--line)",
+};
 
 export function SuggestPanel({
   rows,
@@ -58,34 +97,39 @@ export function SuggestPanel({
 
   return (
     <div
-      className={styles.suggest}
+      className="dk-list"
       role="listbox"
-      style={{ left: `${anchor.left}px`, bottom: `${anchor.bottom}px` }}
+      style={{
+        ...SUGGEST_PANEL_STYLE,
+        ["--cols" as string]: SUGGEST_COLS,
+        left: `${anchor.left}px`,
+        bottom: `${anchor.bottom}px`,
+      }}
     >
       {rows.map((row, i) => (
         <div key={row.key}>
           {row.group !== null ? (
-            <div className={styles.suggestGroup}>{row.group}</div>
+            <div className="dk-grp__h">{row.group}</div>
           ) : null}
+          {/* `.dk-line.on` is Deck's own "this row is the active one" — the
+              same highlight a selected row carries everywhere else. */}
           <div
             ref={i === activeIndex ? activeRef : undefined}
             role="option"
             aria-selected={i === activeIndex}
             data-active={i === activeIndex ? "true" : undefined}
-            className={
-              i === activeIndex
-                ? `${styles.suggestRow} ${styles.suggestRowActive}`
-                : styles.suggestRow
-            }
+            className={i === activeIndex ? "dk-line on" : "dk-line"}
             onMouseEnter={() => onHover(i)}
             onClick={() => onPick(i)}
           >
-            <span className={styles.suggestLabel}>{row.label}</span>
-            <span className={styles.suggestMeta}>{row.meta}</span>
+            <span className="sub">{row.label}</span>
+            <span className="dk-meta">{row.meta}</span>
           </div>
         </div>
       ))}
-      <div className={styles.suggestFooter}>{footer}</div>
+      <div className="dk-meta" style={SUGGEST_FOOTER_STYLE}>
+        {footer}
+      </div>
     </div>
   );
 }

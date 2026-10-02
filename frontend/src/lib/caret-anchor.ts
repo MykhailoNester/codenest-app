@@ -1,7 +1,7 @@
 /**
  * Left/bottom offsets for a panel that opens upward from the caret line — the
  * composer sits at the bottom of the pane, so a downward-opening menu would
- * be clipped by the pane edge (the existing `.pickerPanel` already opens
+ * be clipped by the pane edge (the existing the context picker already opens
  * upward the same way). Anchoring by `left` + `bottom` removes all flip logic
  * and makes the geometry a single pure function.
  */
@@ -13,7 +13,7 @@ export interface CaretAnchorInput {
   /** The textarea's own scroll offset — subtracted from `markerTop` because
    *  the mirror that produced it does not scroll with the textarea. */
   scrollTop: number;
-  /** The `.editorStack` box the mirror and the panel are both positioned in. */
+  /** The the editor stack box the mirror and the panel are both positioned in. */
   hostWidth: number;
   hostHeight: number;
   /** The mirror's inset inside the host (10/8 today). */

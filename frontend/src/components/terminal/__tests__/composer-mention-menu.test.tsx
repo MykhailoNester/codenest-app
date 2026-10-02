@@ -51,7 +51,7 @@ vi.mock("../../../lib/api", () => ({
 }));
 
 // jsdom implements no layout and so ships no `ResizeObserver`; the composer
-// constructs one over `.editorStack` to re-anchor an open suggestion panel.
+// constructs one over the editor stack to re-anchor an open suggestion panel.
 // Unlike the no-op stubs elsewhere in this directory, this one keeps the live
 // callbacks so a resize can be driven deliberately — the re-anchor is the
 // behaviour under test, not incidental setup.
@@ -80,7 +80,7 @@ class StubResizeObserver {
   StubResizeObserver as unknown as typeof ResizeObserver;
 
 /** Runs every observer the composer has attached, as the browser would after
- *  `.editorStack` has been re-laid-out. */
+ *  the editor stack has been re-laid-out. */
 function fireStackResize(): void {
   act(() => {
     for (const cb of [...resizeCallbacks]) cb([], {} as ResizeObserver);
@@ -121,7 +121,7 @@ function invocable(over: Record<string, unknown>): Record<string, unknown> {
 }
 
 function editor(): HTMLTextAreaElement {
-  return screen.getByPlaceholderText("Message the agent…") as HTMLTextAreaElement;
+  return screen.getByLabelText("Message the agent…") as HTMLTextAreaElement;
 }
 
 function typeDraft(text: string): void {
@@ -338,7 +338,7 @@ describe("@ mention menu", () => {
   });
 
   // The bug: picking a mention attaches a context pill, the pill row grows (a
-  // chip can wrap to a second line), and `.editorStack` gets taller — but the
+  // chip can wrap to a second line), and the editor stack gets taller — but the
   // measuring effect depends only on the draft, the trigger and the row count,
   // so nothing re-ran and the next menu opened against the pre-pill geometry.
   // `caretAnchor` derives `bottom` from the stack's height, so a stale height
@@ -368,5 +368,47 @@ describe("@ mention menu", () => {
       // removing the own property restores jsdom's inherited getter all the same.
       Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
     }
+  });
+
+  // #283 drew this menu on Deck's row primitive. The highlight a user follows
+  // with the arrow keys is `.dk-line.on` — Deck's own "this is the selected
+  // row" — rather than a class this component generated for itself.
+  it("draws its rows as Deck lines, highlighting the active one", async () => {
+    renderComposer();
+    typeDraft("@ali");
+    await screen.findByRole("listbox");
+
+    const rows = [...document.querySelectorAll<HTMLElement>("[role='option']")];
+    expect(rows.length).toBeGreaterThan(1);
+    expect(rows.every((r) => r.classList.contains("dk-line"))).toBe(true);
+    // Exactly one row is active, and it is the one `aria-selected` names.
+    const on = rows.filter((r) => r.classList.contains("on"));
+    expect(on).toHaveLength(1);
+    expect(on[0]?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  // The caret mirror is the surface `caretAnchor` measures against, and it
+  // only works while it wraps exactly as the textarea does. That used to be
+  // guaranteed by sharing one CSS rule group; #283 deleted that stylesheet, so
+  // it now rests on one spread style object. A divergence here does not fail
+  // any other test — it just opens the panel away from the caret.
+  it("measures the caret in a mirror carrying the textarea's own metrics", async () => {
+    renderComposer();
+    typeDraft("@ali");
+    await screen.findByRole("listbox");
+
+    const hidden = [
+      ...document.querySelectorAll<HTMLElement>("[aria-hidden='true']"),
+    ];
+    // The overlay is first in DOM order; the mirror follows it.
+    const mirror = hidden[1] as HTMLElement;
+    expect(mirror).toBeTruthy();
+
+    const metrics = ["font-family", "font-size", "line-height", "white-space", "word-break"];
+    const of = (el: HTMLElement): string[] =>
+      metrics.map((p) => `${p}:${el.style.getPropertyValue(p)}`);
+
+    expect(of(mirror)).toEqual(of(editor()));
+    expect(mirror.style.fontSize).toBe("12px");
   });
 });

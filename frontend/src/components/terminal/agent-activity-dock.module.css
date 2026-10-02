@@ -24,7 +24,7 @@
 
    Together: a pane too short even for the capped dock shrinks the dock's
    *groups* first, then the transcript, never the composer, which stays
-   `flex: 0 0 auto` in `agent-composer.module.css` and is therefore never
+   `flex: none` on Deck's `.dk-comp` and is therefore never
    asked to give up any space at all.
 
    Child order is groups-then-metrics-line, deliberately (#38) — the dock is
@@ -54,7 +54,7 @@
   font-family: var(--mono);
   font-size: var(--fs-s);
   /* No `position`, no `z-index` (D10): the composer's upward popovers
-     (`agent-composer.module.css`'s `@`/`/` suggestion panel and `{}`
+     (the composer's `@`/`/` suggestion panel and `{}`
      preview) must keep painting over this element exactly as they used to
      paint over the transcript — adding either property here would risk
      putting the dock in its own stacking context above them. */

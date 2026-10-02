@@ -157,3 +157,175 @@ describe("composer editor box", () => {
     expect(gutter()).toBe("0 lines · 0 chars");
   });
 });
+
+// The three layers of the stack — the real textarea, the overlay that paints
+// its text, and the hidden mirror that locates the caret — used to share their
+// font metrics by sitting in one CSS rule group. #283 deleted that stylesheet,
+// so the guarantee now rests on one spread object. These pin it, because a
+// divergence here is the whole class of bug the overlay can produce: the
+// highlight drifts off the text, or the suggestion panel opens away from the
+// caret, and neither is visible in a unit test that only checks wiring.
+describe("editor stack — shared metrics", () => {
+  const METRICS = ["font-family", "font-size", "line-height", "white-space", "word-break"];
+
+  function metricsOf(el: HTMLElement): string[] {
+    return METRICS.map((p) => `${p}:${el.style.getPropertyValue(p)}`);
+  }
+
+  it("paints the overlay with the textarea's own font metrics", () => {
+    renderComposer();
+
+    // Not "both are non-empty" — the actual values have to be equal, which is
+    // what keeps a glyph in the overlay over the same glyph in the textarea.
+    expect(metricsOf(overlay())).toEqual(metricsOf(editor()));
+    expect(overlay().style.fontSize).toBe("12px");
+  });
+
+  // The caret mirror is the third layer, and it only mounts with an open menu
+  // — so its half of this guarantee is pinned in `composer-mention-menu`,
+  // which has a catalog to open one with.
+});
+
+// The hint the empty box carries. It used to be the textarea's own
+// `::placeholder`, which #283 could not keep: an inline style cannot set a
+// pseudo-element, and the UA default is not a safe fallback when the
+// textarea's `color` is `transparent` — Chromium derives the placeholder from
+// `currentcolor`, so the hint would vanish on the WebView2 and WebKitGTK
+// targets. It is painted by the overlay now, and carried as the textarea's
+// accessible name so the two cannot disagree.
+describe("editor placeholder", () => {
+  const HINT = "Message the agent…";
+
+  it("paints the hint in the overlay while the draft is empty", () => {
+    renderComposer();
+
+    expect(overlay().textContent).toBe(HINT);
+  });
+
+  it("replaces it with the draft on the first keystroke", () => {
+    renderComposer();
+
+    fireEvent.change(editor(), { target: { value: "x" } });
+
+    expect(overlay().textContent).toBe("x");
+    expect(overlay().textContent).not.toContain("Message");
+  });
+
+  it("names the textarea for assistive tech with the same words", () => {
+    renderComposer();
+
+    expect(editor().getAttribute("aria-label")).toBe(HINT);
+  });
+});
+
+// The `@mention` highlight is the overlay's entire reason to exist, and it had
+// no test before #283 — the conversion moved it from a CSS-module class to an
+// inline style, so this pins the behaviour rather than the class.
+describe("mention highlight", () => {
+  /** The overlay spans carrying their own colour — the highlighted runs. */
+  function highlighted(): string[] {
+    return [...overlay().querySelectorAll<HTMLElement>("span")]
+      .filter((s) => s.style.color !== "")
+      .map((s) => s.textContent ?? "");
+  }
+
+  it("highlights an `@token` and leaves the prose around it alone", () => {
+    renderComposer();
+
+    fireEvent.change(editor(), { target: { value: "ask @oleg about it" } });
+
+    expect(highlighted()).toEqual(["@oleg"]);
+    // The unhighlighted text is still painted — the overlay is the only copy
+    // of the draft the user can see.
+    expect(overlay().textContent).toBe("ask @oleg about it");
+  });
+
+  it("highlights every token, not just the first", () => {
+    renderComposer();
+
+    fireEvent.change(editor(), { target: { value: "@oleg and @igor" } });
+
+    expect(highlighted()).toEqual(["@oleg", "@igor"]);
+  });
+});
+
+// The box's focus ring. It was `.cedit:focus-within`, which an inline style
+// cannot express; it is React focus state now. `onFocus`/`onBlur` are
+// focusin/focusout and bubble, so the ring still answers for the whole box —
+// the picker's search field included — and not only for the textarea.
+describe("editor focus ring", () => {
+  function box(): HTMLElement {
+    return document.querySelector("[data-editor-box]") as HTMLElement;
+  }
+
+  it("is off until something inside the box takes focus", () => {
+    renderComposer();
+
+    expect(box().dataset.focused).toBeUndefined();
+    expect(box().style.borderColor).toBe("var(--line-2)");
+  });
+
+  it("lights when the textarea is focused and clears when it blurs", () => {
+    renderComposer();
+
+    fireEvent.focus(editor());
+    expect(box().dataset.focused).toBe("true");
+    expect(box().style.borderColor).toBe("var(--fg-3)");
+
+    fireEvent.blur(editor());
+    expect(box().dataset.focused).toBeUndefined();
+    expect(box().style.borderColor).toBe("var(--line-2)");
+  });
+});
+
+// The drag affordance over the editor. Untested before #283; the conversion
+// moved it to an inline style, and `pointer-events: none` on it is
+// load-bearing — without it the zone swallows the drop it is advertising.
+describe("editor dropzone", () => {
+  function zone(): HTMLElement | null {
+    const stack = editor().parentElement as HTMLElement;
+    return [...stack.querySelectorAll<HTMLElement>("div")].find((d) =>
+      (d.textContent ?? "").startsWith("drop to insert"),
+    ) ?? null;
+  }
+
+  function dragOver(items: number): void {
+    fireEvent.dragOver(editor(), {
+      dataTransfer: { types: ["text/plain"], items: new Array(items).fill({}) },
+    });
+  }
+
+  it("stays out of the way until a drag arrives", () => {
+    renderComposer();
+    expect(zone()).toBeNull();
+  });
+
+  it("counts the paths being dragged, and never eats the drop", () => {
+    renderComposer();
+
+    dragOver(3);
+
+    expect(zone()?.textContent).toBe("drop to insert3 paths");
+    // Cosmetic only: with pointer events on, this element sits above the
+    // textarea and the drop it is advertising never reaches the caret-precise
+    // handler underneath it.
+    expect(zone()?.style.pointerEvents).toBe("none");
+  });
+
+  it("says `1 path`, not `1 paths`", () => {
+    renderComposer();
+
+    dragOver(1);
+
+    expect(zone()?.textContent).toBe("drop to insert1 path");
+  });
+
+  it("goes away when the drag leaves", () => {
+    renderComposer();
+    dragOver(2);
+
+    fireEvent.dragLeave(editor());
+
+    expect(zone()).toBeNull();
+  });
+});

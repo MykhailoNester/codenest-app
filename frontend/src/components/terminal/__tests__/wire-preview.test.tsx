@@ -66,7 +66,7 @@ function panel(): HTMLElement | null {
 }
 
 function textarea(): HTMLTextAreaElement {
-  return screen.getByPlaceholderText("Message the agent…") as HTMLTextAreaElement;
+  return screen.getByLabelText("Message the agent…") as HTMLTextAreaElement;
 }
 
 function openPreview(): void {
