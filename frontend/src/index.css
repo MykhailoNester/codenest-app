@@ -33,7 +33,8 @@ body {
  * resolve: it is measured against the initial containing block, which *is* the
  * viewport, and `lib/viewport-lock.ts` re-asserts it in pixels on every resize
  * as the belt to this brace. Same construction the detached terminals window
- * has always used (`terminal-window-root.module.css`). */
+ * has always used (`WINDOW_STYLE` in `pages/terminal-window-root.tsx`, which
+ * is where that box moved when #283 retired its stylesheet). */
 #root {
   position: fixed;
   inset: 0;
