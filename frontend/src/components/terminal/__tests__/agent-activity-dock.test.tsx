@@ -237,13 +237,32 @@ describe("AgentActivityDock — presence and the metrics line", () => {
     );
   });
 
-  // #38's other half — `.dock`'s `min-height: min-content` floor, which is what
+  // #38's other half — the dock's `min-height: min-content` floor, which is what
   // stops a tall transcript's shrink deficit from crushing the strip until it
-  // overflows and the composer paints over it — has no test here on purpose.
-  // Vitest does not process CSS modules for this project (`styles.dock` is a
-  // stub) and the frontend tsconfig ships no Node types, so neither the
-  // computed rule nor the stylesheet's text is reachable from a case in this
-  // file. The rule carries the reasoning in its own comment instead.
+  // overflows and the composer paints over it. This used to have no test on
+  // purpose: vitest does not process CSS modules for this project (`styles.dock`
+  // was a stub), so neither the computed rule nor the stylesheet's text was
+  // reachable from here. The Deck conversion (#283) made it an inline style, so
+  // it is finally assertable.
+  it("keeps the floor that stops a tall transcript crushing the metrics strip", () => {
+    render(dock(liveState()));
+    const el = screen.getByTestId("agent-activity-dock");
+    expect(el.style.minHeight).toBe("min-content");
+    // Sizes to its content and may shrink, but never grows to fight the
+    // viewport for the pane's height.
+    expect(el.style.flex).toBe("0 1 auto");
+  });
+
+  it("caps and contains the group stack rather than the whole dock", () => {
+    let state = liveState();
+    state = applyFrame(state, toolUseFrame("t1", { command: "ls" }), 3_000);
+    render(dock(state));
+    const stack = screen.getByTestId("dock-group-tools").parentElement as HTMLElement;
+    expect(stack.style.maxHeight).toBe("220px");
+    expect(stack.style.overflowY).toBe("auto");
+    // Without this the wheel chains into the transcript once the cap is hit.
+    expect(stack.style.overscrollBehavior).toBe("contain");
+  });
 });
 
 describe("AgentActivityDock — Tools group", () => {

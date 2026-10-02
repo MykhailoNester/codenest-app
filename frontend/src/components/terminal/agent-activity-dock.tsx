@@ -58,7 +58,7 @@
  * already has.
  *
  * Sizes to its own content and caps at a max height past which its group
- * stack — not the whole dock — scrolls internally (`agent-activity-dock.module.css`),
+ * stack — not the whole dock — scrolls internally (`GROUPS_STYLE` below),
  * so a session with a large workflow can never push the composer off screen.
  *
  * **Keyboard surface (#22).** The dock is also a `role="listbox"` (two of
@@ -101,9 +101,11 @@
  */
 
 import {
+  cloneElement,
   Fragment,
   useEffect,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement,
   type ReactNode,
@@ -136,7 +138,276 @@ import type { DeckState } from "../deck/deck-grid";
 import { agentStopTask } from "../../lib/ipc";
 import { AgentSessionHud } from "./agent-session-hud";
 import { elapsedSecondsSinceMs, formatElapsed, formatTokens } from "./session-hud-format";
-import styles from "./agent-activity-dock.module.css";
+
+/* ── Local constants ─────────────────────────────────────────────────────
+   Chrome for Zone B — the activity dock, a *sibling* of the pane's viewport
+   inside `agent-pane.tsx`'s body, pinned directly above the composer.
+
+   On Deck: the dock sits on `--bg-1` like the rest of the pane, group headers
+   use the uppercase section-label idiom, rows carry the state glyph in column
+   one (`.dk-s`, set in the TSX), and the Workflow Stop button is
+   `.dk-btn bare danger`. Only the two flex layers below are load-bearing
+   geometry. Declared here rather than in `components/deck/*` or
+   `design/deck/*`, which #283 does not touch — the precedent is the composer's
+   `EDITOR_*` constants. */
+
+/**
+ * `DOCK_STYLE` and `GROUPS_STYLE` are what make "the composer never moves"
+ * true even in a busy session:
+ *
+ * - the dock is `flex: 0 1 auto` with a `min-content` floor — it sizes to its
+ *   own content and *can* shrink, but never grows to fight the viewport
+ *   (`flex: 1 1 auto`) for the pane's height, and never shrinks below its
+ *   always-on metrics line;
+ * - the group stack caps at 220px (roughly 8-10 mono rows — a couple of
+ *   collapsed groups plus one expanded phase tree, not a whole 30-agent
+ *   workflow) and scrolls internally past that, with `overscrollBehavior:
+ *   contain` so the wheel never chains into the transcript once the cap is hit.
+ *
+ * Together: a pane too short even for the capped dock shrinks the dock's
+ * *groups* first, then the transcript, never the composer, which stays
+ * `flex: none` on Deck's `.dk-comp` and is never asked to give up any space.
+ *
+ * The floor is the whole of #38's first half. It was `minHeight: 0`, which let
+ * the flex algorithm crush the dock to a sliver: a shrink deficit inside the
+ * pane body is distributed by *scaled* shrink factor (flex-shrink × flex-basis),
+ * so a tall transcript's viewport and this dock shared the squeeze
+ * proportionally rather than the dock being squeezed last — an 800pt transcript
+ * in a 300pt pane left the dock ~4pt while the viewport still had ~136pt. The
+ * metrics strip is `flex: 0 0 auto` and will not shrink, so it overflowed the
+ * dock's box and the composer, a later sibling with an opaque background,
+ * painted over the bottom half of its glyphs. `min-content` resolves to exactly
+ * the metrics line's height — the group stack contributes 0, being a scroll
+ * container with `minHeight: 0` — so the deficit lands on the viewport and on
+ * the groups, both of which can absorb it, and the strip is always whole.
+ *
+ * No `position`, no `zIndex` (D10): the composer's upward popovers (its `@`/`/`
+ * suggestion panel and `{}` preview) must keep painting over this element
+ * exactly as they paint over the transcript, and either property would risk
+ * putting the dock in its own stacking context above them.
+ */
+const DOCK_STYLE: CSSProperties = {
+  flex: "0 1 auto",
+  minHeight: "min-content",
+  display: "flex",
+  flexDirection: "column",
+  background: "var(--bg-1)",
+  borderTop: "1px solid var(--line)",
+  fontFamily: "var(--mono)",
+  fontSize: "var(--fs-s)",
+};
+
+const GROUPS_STYLE: CSSProperties = {
+  flex: "0 1 auto",
+  minHeight: 0,
+  maxHeight: 220,
+  overflowY: "auto",
+  overscrollBehavior: "contain",
+  // `borderBottom`, not `borderTop`: the groups sit above the metrics line, and
+  // the dock's own top border already rules the seam against the transcript. A
+  // top border here would double that rule into a 2px line and leave the
+  // groups/metrics seam unruled.
+  borderBottom: "1px solid var(--line)",
+};
+
+const GROUP_STYLE: CSSProperties = { display: "flex", flexDirection: "column" };
+
+/** `.group + .group` as data — an adjacent-sibling rule has no inline form, so
+ *  the divider comes from the group's position in the stack. */
+const GROUP_DIVIDED_STYLE: CSSProperties = {
+  ...GROUP_STYLE,
+  borderTop: "1px solid var(--line)",
+};
+
+const GROUP_HEAD_STYLE: CSSProperties = {
+  width: "100%",
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--u2)",
+  height: 26,
+  padding: "0 var(--u3)",
+  textAlign: "left",
+  color: "var(--fg-2)",
+};
+
+const GROUP_HEAD_HOVER_STYLE: CSSProperties = {
+  ...GROUP_HEAD_STYLE,
+  background: "var(--sel)",
+};
+
+const GROUP_TWISTY_STYLE: CSSProperties = {
+  color: "var(--fg-4)",
+  width: 9,
+  flex: "none",
+};
+
+/** Deck's section-label idiom — uppercase, dim, small — so a group header reads
+ *  as a label first and a sentence second. */
+const GROUP_LABEL_STYLE: CSSProperties = {
+  color: "var(--fg-3)",
+  fontSize: "var(--fs-xs)",
+  letterSpacing: "1.1px",
+  textTransform: "uppercase",
+  flex: "none",
+};
+
+const GROUP_SUMMARY_STYLE: CSSProperties = {
+  color: "var(--fg)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  flex: "1 1 auto",
+  minWidth: 0,
+};
+
+const GROUP_META_STYLE: CSSProperties = {
+  color: "var(--fg-3)",
+  flex: "none",
+  whiteSpace: "nowrap",
+};
+
+const GROUP_BODY_STYLE: CSSProperties = { padding: "0 var(--u3) var(--u2)" };
+
+/** The Tools group's "what now" row — mirrors the transcript's own run headline
+ *  (`agent-conversation.tsx`). The dock and the transcript agree on the wording
+ *  via `toolRunHeadline`, not on a shared style. */
+const TOOL_HEAD_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--u2)",
+  color: "var(--fg-3)",
+  minWidth: 0,
+};
+
+const TOOL_HEAD_TICK_STYLE: CSSProperties = { color: "var(--fg-4)", flex: "none" };
+
+/* Agents/Workflows group bodies (#21) — one row per delegation/run/phase-agent,
+   all sharing the same `<DockRow/>` shape so the three kinds cannot drift into
+   three different layouts. */
+
+const ROWS_STYLE: CSSProperties = { display: "flex", flexDirection: "column" };
+
+const ROW_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--u2)",
+  minWidth: 0,
+};
+
+const ROW_INDENT_STYLE: CSSProperties = { ...ROW_STYLE, paddingLeft: "var(--u4)" };
+
+/** The line. Shares `.dk-line`'s height and gap without being one: a dock row is
+ *  not a cell grid, and `.dk-line`'s `grid-template-columns` would collapse the
+ *  five variable-width parts below into fixed tracks. */
+const ROW_MAIN_STYLE: CSSProperties = {
+  font: "inherit",
+  color: "var(--fg-2)",
+  textAlign: "left",
+  cursor: "pointer",
+  height: 24,
+  padding: "0 var(--u)",
+  borderRadius: 2,
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--u2)",
+  flex: "1 1 auto",
+  minWidth: 0,
+};
+
+const ROW_HOVER_PAINT: CSSProperties = {
+  background: "var(--sel)",
+  color: "var(--fg)",
+};
+
+/** Selected: the inset bar plus a wash. */
+const ROW_SELECTED_PAINT: CSSProperties = {
+  background: "var(--sel-2)",
+  color: "var(--fg)",
+  boxShadow: "inset 2px 0 0 var(--run)",
+};
+
+/** The keyboard cursor — deliberately a different channel from the selection
+ *  above: a dashed ring, so a row that is both highlighted and selected reads as
+ *  both. Painted regardless of focus, because the cursor must stay visible after
+ *  Enter hands focus back to the composer. */
+const ROW_HIGHLIGHT_PAINT: CSSProperties = {
+  outline: "1px dashed var(--run)",
+  outlineOffset: -1,
+};
+
+function rowMainStyle(
+  selected: boolean,
+  highlighted: boolean,
+  hover: boolean,
+): CSSProperties {
+  return {
+    ...ROW_MAIN_STYLE,
+    ...(hover ? ROW_HOVER_PAINT : {}),
+    ...(selected ? ROW_SELECTED_PAINT : {}),
+    ...(highlighted ? ROW_HIGHLIGHT_PAINT : {}),
+  };
+}
+
+/** The state glyph is one character and must never be the thing a crowded row
+ *  shrinks; `.dk-s` itself sets no width, because on a Deck grid the column
+ *  does and a dock row is a flex line. */
+const ROW_GLYPH_STYLE: CSSProperties = { flex: "none", width: 10 };
+
+/** A pathologically long `subagent_type` must not stretch a row past the dock's
+ *  own width; the full value stays in the row's `aria-label`. */
+const ROW_NAME_STYLE: CSSProperties = {
+  color: "var(--fg)",
+  flex: "none",
+  maxWidth: "22ch",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const ROW_DESC_STYLE: CSSProperties = {
+  color: "var(--fg-3)",
+  flex: "1 1 auto",
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const ROW_META_STYLE: CSSProperties = {
+  color: "var(--fg-3)",
+  flex: "none",
+  whiteSpace: "nowrap",
+};
+
+const ROW_LIVE_STYLE: CSSProperties = {
+  color: "var(--run)",
+  flex: "none",
+  whiteSpace: "nowrap",
+};
+
+const PHASE_STYLE: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  paddingLeft: "var(--u2)",
+};
+
+const PHASE_TITLE_STYLE: CSSProperties = {
+  color: "var(--fg-3)",
+  fontSize: "var(--fs-xs)",
+  letterSpacing: "1.1px",
+  textTransform: "uppercase",
+  padding: "var(--u) var(--u)",
+};
+
+/** `:hover` has no inline form, and the dock's two clickable shapes both need
+ *  one — a row that does not react to the pointer does not read as openable. */
+function useHover(): [boolean, { onMouseEnter: () => void; onMouseLeave: () => void }] {
+  const [hover, setHover] = useState(false);
+  return [
+    hover,
+    { onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false) },
+  ];
+}
 
 interface AgentActivityDockProps {
   state: ConversationState;
@@ -251,7 +522,15 @@ function deckState(status: DockRowStatus): DeckState {
  *  word on hover; the row's own `aria-label` already carries it for assistive
  *  tech, so the glyph itself stays `aria-hidden`. */
 function StatusGlyph({ status, word }: { status: DockRowStatus; word: string }): ReactElement {
-  return <span className="dk-s" data-s={deckState(status)} title={word} aria-hidden="true" />;
+  return (
+    <span
+      className="dk-s"
+      style={ROW_GLYPH_STYLE}
+      data-s={deckState(status)}
+      title={word}
+      aria-hidden="true"
+    />
+  );
 }
 
 /** A row's elapsed column: the literal word `running` in flight, an exact
@@ -265,9 +544,9 @@ function RowElapsed({
   ms: number | null;
   running: boolean;
 }): ReactElement | null {
-  if (running) return <span className={styles.rowLive}>running</span>;
+  if (running) return <span style={ROW_LIVE_STYLE}>running</span>;
   if (ms === null) return null;
-  return <span className={styles.rowElapsed}>{formatDuration(ms)}</span>;
+  return <span style={ROW_META_STYLE}>{formatDuration(ms)}</span>;
 }
 
 /**
@@ -348,18 +627,19 @@ function DockRow(props: {
     onHighlight,
   } = props;
   const metaText = meta.join(" · ");
+  const [hover, hoverProps] = useHover();
   const body = (
     <>
       <StatusGlyph status={status} word={word} />
-      <span className={styles.rowName}>{name}</span>
-      {description !== null ? <span className={styles.rowDesc}>{description}</span> : null}
-      {metaText !== "" ? <span className={styles.rowMeta}>{metaText}</span> : null}
+      <span style={ROW_NAME_STYLE}>{name}</span>
+      {description !== null ? <span style={ROW_DESC_STYLE}>{description}</span> : null}
+      {metaText !== "" ? <span style={ROW_META_STYLE}>{metaText}</span> : null}
       <RowElapsed ms={elapsedMs} running={running} />
     </>
   );
   return (
     <div
-      className={`${styles.row}${indent === true ? ` ${styles.rowIndent}` : ""}`}
+      style={indent === true ? ROW_INDENT_STYLE : ROW_STYLE}
       data-testid={testId}
       data-view-key={view === null ? undefined : viewKey(view)}
       role={trailing !== undefined ? "group" : "presentation"}
@@ -370,7 +650,7 @@ function DockRow(props: {
           type="button"
           id={optionId}
           role="option"
-          className={`${styles.rowMain}${selected ? ` ${styles.rowSelected}` : ""}${highlighted ? ` ${styles.rowHighlighted}` : ""}`}
+          style={rowMainStyle(selected, highlighted, hover)}
           aria-selected={selected}
           aria-label={`${name} — ${word}`}
           data-highlighted={highlighted ? "true" : undefined}
@@ -380,11 +660,12 @@ function DockRow(props: {
             onSelect(view);
             onHighlight?.(viewKey(view));
           }}
+          {...hoverProps}
         >
           {body}
         </button>
       ) : (
-        <div className={styles.rowMain} role="option" aria-disabled="true" aria-label={`${name} — ${word}`}>
+        <div style={ROW_MAIN_STYLE} role="option" aria-disabled="true" aria-label={`${name} — ${word}`}>
           {body}
         </div>
       )}
@@ -412,6 +693,7 @@ function DockGroup({
   expanded,
   onToggle,
   children,
+  divided,
 }: {
   id: DockGroupKey;
   label: string;
@@ -421,22 +703,30 @@ function DockGroup({
   expanded: boolean;
   onToggle: () => void;
   children: ReactNode;
+  /** Set by the dock when this is not the first group in the stack — the old
+   *  `.group + .group` rule, which has no inline form. */
+  divided?: boolean;
 }): ReactElement {
+  const [headHover, headHoverProps] = useHover();
   return (
-    <section className={styles.group} data-testid={`dock-group-${id}`}>
+    <section
+      style={divided === true ? GROUP_DIVIDED_STYLE : GROUP_STYLE}
+      data-testid={`dock-group-${id}`}
+    >
       <button
         type="button"
         aria-expanded={expanded}
-        className={styles.groupHead}
+        style={headHover ? GROUP_HEAD_HOVER_STYLE : GROUP_HEAD_STYLE}
         onClick={onToggle}
+        {...headHoverProps}
       >
-        <span className={styles.groupTwisty}>{expanded ? "▾" : "▸"}</span>
-        <span className={styles.groupLabel}>{label}</span>
-        <span className={styles.groupSummary}>{summary}</span>
-        {meta !== undefined ? <span className={styles.groupMeta}>{meta}</span> : null}
-        {elapsed !== null ? <span className={styles.groupMeta}>{elapsed}</span> : null}
+        <span style={GROUP_TWISTY_STYLE}>{expanded ? "▾" : "▸"}</span>
+        <span style={GROUP_LABEL_STYLE}>{label}</span>
+        <span style={GROUP_SUMMARY_STYLE}>{summary}</span>
+        {meta !== undefined ? <span style={GROUP_META_STYLE}>{meta}</span> : null}
+        {elapsed !== null ? <span style={GROUP_META_STYLE}>{elapsed}</span> : null}
       </button>
-      {expanded ? <div className={styles.groupBody}>{children}</div> : null}
+      {expanded ? <div style={GROUP_BODY_STYLE}>{children}</div> : null}
     </section>
   );
 }
@@ -641,7 +931,9 @@ export function AgentActivityDock({
   // an element on others without breaking React's hook-order contract.
   if (!dockHasContent(state)) return null;
 
-  const groups: ReactElement[] = [];
+  // Typed with the one prop the dock sets after the fact: `divided` says this
+  // group is not the first in the stack, which only the completed list knows.
+  const groups: ReactElement<{ divided?: boolean }>[] = [];
 
   // Tools — the live grouped run, exactly as the transcript would group it
   // (`liveToolRun` already folds in the exited-session honesty rule).
@@ -663,8 +955,8 @@ export function AgentActivityDock({
         onToggle={() => toggle("tools")}
       >
         {headline !== null ? (
-          <div className={styles.toolHead} data-testid="dock-tool-run">
-            <span className={styles.toolHeadTick}>└</span>
+          <div style={TOOL_HEAD_STYLE} data-testid="dock-tool-run">
+            <span style={TOOL_HEAD_TICK_STYLE}>└</span>
             <span>{headline.name}</span>
             <span>{headline.argSummary}</span>
           </div>
@@ -698,7 +990,7 @@ export function AgentActivityDock({
         onToggle={() => toggle("agents")}
       >
         <div
-          className={styles.rows}
+          style={ROWS_STYLE}
           data-testid="dock-agent-rows"
           role="listbox"
           aria-label="Sub-agents"
@@ -762,7 +1054,7 @@ export function AgentActivityDock({
         onToggle={() => toggle("workflows")}
       >
         <div
-          className={styles.rows}
+          style={ROWS_STYLE}
           data-testid="dock-workflow-rows"
           role="listbox"
           aria-label="Workflow runs"
@@ -822,12 +1114,12 @@ export function AgentActivityDock({
                 />
                 {row.phases.map((phase) => (
                   <div
-                    className={styles.phase}
+                    style={PHASE_STYLE}
                     key={phase.key}
                     role="group"
                     aria-label={phase.title}
                   >
-                    <span className={styles.phaseTitle}>{phase.title}</span>
+                    <span style={PHASE_TITLE_STYLE}>{phase.title}</span>
                     {phase.agents.map((agent) => (
                       <DockRow
                         key={agent.key}
@@ -862,8 +1154,12 @@ export function AgentActivityDock({
   }
 
   return (
-    <div className={styles.dock} data-testid="agent-activity-dock" data-agent-dock>
-      {groups.length > 0 ? <div className={styles.groups}>{groups}</div> : null}
+    <div style={DOCK_STYLE} data-testid="agent-activity-dock" data-agent-dock>
+      {groups.length > 0 ? (
+        <div style={GROUPS_STYLE}>
+          {groups.map((g, i) => cloneElement(g, { divided: i > 0 }))}
+        </div>
+      ) : null}
       <AgentSessionHud state={state} cwd={cwd} />
     </div>
   );
