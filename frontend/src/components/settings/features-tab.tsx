@@ -34,19 +34,6 @@ const FEATURE_META: Record<string, { label: string; description: string }> = {
     label: "Schedules",
     description: "Cron and event-triggered agent schedules.",
   },
-  parallel: {
-    label: "Parallel Runs",
-    description:
-      "Launch multiple agent attempts in parallel and compare results.",
-  },
-  preview: {
-    label: "Preview",
-    description: "Embedded dev-server preview pane with browser-like controls.",
-  },
-  feed: {
-    label: "Feed",
-    description: "Live activity feed of agent events and system notifications.",
-  },
   budgets: {
     label: "Budgets",
     description: "Cost budget tracking by workspace, project, or agent.",
@@ -55,30 +42,6 @@ const FEATURE_META: Record<string, { label: string; description: string }> = {
     label: "Hooks",
     description:
       "How many hooks run on each Claude Code event and which file put each one there, across all eight contributor sources — plus installing and repairing this app's own hook block.",
-  },
-  sync: {
-    label: "Sync",
-    description: "External sync targets and snapshot management.",
-  },
-  snippets: {
-    label: "Snippets",
-    description: "Reusable prompt and command snippet library.",
-  },
-  gallery: {
-    label: "Gallery",
-    description: "Marketplace of templates, agents, and skills.",
-  },
-  mcp: {
-    label: "MCP",
-    description: "Model Context Protocol server management.",
-  },
-  integrations: {
-    label: "Integrations",
-    description: "External service integrations and webhooks.",
-  },
-  plugins: {
-    label: "Plugins",
-    description: "Custom plugins and extensions.",
   },
 };
 

@@ -153,7 +153,7 @@ async def _schedule_tick_loop() -> None:
     import asyncio as _asyncio
 
     from .database import get_db
-    from .services import event_retention_service, mcp_servers_service, schedule_service
+    from .services import event_retention_service, schedule_service
 
     tick_count = 0
     # Tick at which the next Lane C scan is due. Starts at 0 so the first
@@ -172,10 +172,6 @@ async def _schedule_tick_loop() -> None:
             swept = await schedule_service.sweep_stale_runs(db)
             if swept:
                 logger.warning("schedule tick swept %d stale run(s)", swept)
-            # GC stale MCP config temp files.
-            removed = mcp_servers_service.cleanup_old_mcp_configs()
-            if removed:
-                logger.debug("mcp config gc: removed %d stale file(s)", removed)
             # Transcript blob prune: run on startup (tick_count==0) and
             # then once every ~24 h (approximately _PRUNE_TICK_SECONDS /
             # _SCHEDULE_TICK_SECONDS ticks).
@@ -318,23 +314,6 @@ def create_app() -> FastAPI:
             insights_task = asyncio.create_task(_insights_tick_loop())
             logger.info("insights tick loop armed (%.1fs)", _INSIGHTS_TICK_SECONDS)
 
-        # Plugin scan — runs in the background so a slow or
-        # network-mounted plugins root can't keep /health from going
-        # green. Subsequent refreshes are user-triggered via
-        # POST /api/v1/plugins/refresh.
-        async def _initial_plugin_scan() -> None:
-            try:
-                from .database import get_db
-                from .services import plugin_service
-
-                db = await get_db()
-                summary = await plugin_service.scan_and_load(db)
-                logger.info("plugin scan: %s", summary)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("plugin scan failed at startup (continuing): %s", exc)
-
-        asyncio.create_task(_initial_plugin_scan())
-
         # Deferred Command Center bootstrap (see note above init_db). Runs after
         # the server is accepting requests so it never blocks /health. Idempotent.
         async def _deferred_bootstrap() -> None:
@@ -399,24 +378,15 @@ def create_app() -> FastAPI:
         dashboard,
         dashboard_trends,
         documents,
-        feed,
         inbox,
-        insights,
-        integrations,
         intent,
         launch_overrides,
         launch_presets,
         launch_seed,
         library,
-        markdown_editor,
-        marketplace,
-        mcp_servers,
         metrics,
         notifications,
         otlp,
-        parallel_runs,
-        plugins,
-        preview,
         profiles,
         project_discovery,
         projects,
@@ -425,12 +395,10 @@ def create_app() -> FastAPI:
         search,
         sessions,
         settings,
-        sync,
         system,
         tasks,
         taxonomies,
         team,
-        traces,
         usage,
         workspace,
     )
@@ -446,7 +414,6 @@ def create_app() -> FastAPI:
     app.include_router(projects.router)
     app.include_router(project_discovery.router)
     app.include_router(taxonomies.router)
-    app.include_router(markdown_editor.router)
     app.include_router(agents.router)
     app.include_router(sessions.router)
     app.include_router(profiles.router)
@@ -459,24 +426,13 @@ def create_app() -> FastAPI:
     app.include_router(launch_overrides.router)
     app.include_router(launch_seed.router)
     app.include_router(system.router)
-    app.include_router(marketplace.router)
-    app.include_router(parallel_runs.router)
-    app.include_router(mcp_servers.router)
-    app.include_router(mcp_servers.launches_router)
     app.include_router(agent_overrides.router)
     app.include_router(schedules.router)
     app.include_router(intent.router)
-    app.include_router(preview.router)
     app.include_router(attachments.router)
     app.include_router(library.router)
     app.include_router(budgets.router)
-    app.include_router(feed.router)
-    app.include_router(insights.router)
-    app.include_router(plugins.router)
-    app.include_router(integrations.router)
-    app.include_router(sync.router)
     app.include_router(workspace.router)
-    app.include_router(traces.router)
     app.include_router(usage.router)
     # Lane B ingest (#175). Mounted last and, unlike every other router here,
     # outside `/api/v1` — the OTLP/HTTP spec fixes the path an exporter posts

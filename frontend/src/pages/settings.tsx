@@ -17,7 +17,6 @@
 
 import {
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type ReactElement,
@@ -37,7 +36,6 @@ import {
   useTerminalSettings,
   useFactoryReset,
   TERMINAL_SETTING_DEFAULTS,
-  SCREENSHOT_HOTKEY_DEFAULT,
   type ProfileOut,
   type SidecarError,
   type TerminalSettings,
@@ -74,15 +72,6 @@ import { TelemetryTab } from "../components/settings/telemetry-tab";
 // "same" empty list as different on every pass and cycle indefinitely.
 const NO_STRINGS: string[] = [];
 const NO_COLORS: Record<string, string> = {};
-
-// Validates a global-shortcut accelerator string.  Requires at least one
-// recognised modifier (Ctrl, Cmd/Command, Alt/Option, Shift, Super, Meta)
-// followed by a + and a non-whitespace key token.  Examples that pass:
-//   "Ctrl+Shift+2", "Cmd+Shift+S", "Super+K", "Alt+F4"
-// Examples that fail (and are rejected before persist):
-//   "asdf", "Ctrl", "Shift+Shift", ""
-const HOTKEY_RE =
-  /^(Ctrl|Cmd|Command|Alt|Option|Shift|Super|Meta)(\+(Ctrl|Cmd|Command|Alt|Option|Shift|Super|Meta))*\+\S+$/i;
 
 /* ── Shared Deck pieces ──────────────────────────────────────────────── */
 
@@ -1280,9 +1269,7 @@ function TerminalTab(): ReactElement {
   const qc = useQueryClient();
   const { data: saved } = useTerminalSettings();
 
-  // TERMINAL_SETTING_DEFAULTS already contains screenshot_hotkey so no override needed.
   const [form, setForm] = useState<TerminalSettings>(TERMINAL_SETTING_DEFAULTS);
-  const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<TerminalSettings | undefined>(
     undefined,
   );
@@ -1297,36 +1284,8 @@ function TerminalTab(): ReactElement {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved_, setSaved_] = useState(false);
 
-  // When App.tsx's registration catch fires (shortcut taken or malformed), it
-  // dispatches "screenshot:hotkey-error" so the error reaches the settings UI.
-  useEffect(() => {
-    function onHotkeyError(e: Event): void {
-      const msg = (e as CustomEvent<string>).detail;
-      setHotkeyError(
-        msg ||
-          "That shortcut is unavailable — it may be in use by another app.",
-      );
-    }
-    document.addEventListener("screenshot:hotkey-error", onHotkeyError);
-    return () =>
-      document.removeEventListener("screenshot:hotkey-error", onHotkeyError);
-  }, []);
-
   async function saveAll(): Promise<void> {
     setSaveError(null);
-    setHotkeyError(null);
-
-    const hotkey = form.screenshot_hotkey.trim();
-
-    // Format validation: must be at least one modifier (Ctrl|Cmd|Command|Alt|
-    // Option|Shift|Super|Meta) followed by + and a non-whitespace key token.
-    // Catches "asdf", "Ctrl", "Shift+Shift", etc. before they are persisted.
-    if (!HOTKEY_RE.test(hotkey)) {
-      setHotkeyError(
-        'Invalid format. Use modifier+key, e.g. "Ctrl+Shift+2" or "Cmd+Shift+S".',
-      );
-      return;
-    }
 
     try {
       await Promise.all([
@@ -1334,7 +1293,6 @@ function TerminalTab(): ReactElement {
         upsertSetting("terminal.font_size", form.font_size),
         upsertSetting("terminal.scrollback", form.scrollback),
         upsertSetting("terminal.copy_on_select", form.copy_on_select ? 1 : 0),
-        upsertSetting("screenshot.hotkey", hotkey),
       ]);
       void qc.invalidateQueries({ queryKey: ["settings", "terminal"] });
       setSaved_(true);
@@ -1343,10 +1301,6 @@ function TerminalTab(): ReactElement {
       document.dispatchEvent(
         new CustomEvent("terminal:settings-changed", { detail: form }),
       );
-      // App.tsx re-registers the hotkey automatically when screenshotHotkey
-      // changes (driven by the query invalidation above).  On registration
-      // failure it dispatches "screenshot:hotkey-error" which the useEffect
-      // above receives and routes to setHotkeyError.
     } catch (e: unknown) {
       setSaveError(e instanceof Error ? e.message : "Failed to save");
     }
@@ -1425,27 +1379,7 @@ function TerminalTab(): ReactElement {
             />
           </span>
         </Field>
-        <Field label="screenshot ring hotkey">
-          <span className="dk-field">
-            <input
-              value={form.screenshot_hotkey}
-              onChange={(e) =>
-                setForm({ ...form, screenshot_hotkey: e.target.value })
-              }
-              placeholder={SCREENSHOT_HOTKEY_DEFAULT}
-              spellCheck={false}
-              aria-label="Screenshot ring hotkey"
-            />
-          </span>
-        </Field>
       </FieldGrid>
-
-      <div className="dk-note sans">
-        The global shortcut that opens the screenshot ring (e.g. Ctrl+Shift+2).
-        It takes effect after saving; if the combo is already taken by another
-        app the previous binding is kept.
-      </div>
-      {hotkeyError && <ErrorNote message={hotkeyError} />}
 
       <label
         style={{

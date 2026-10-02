@@ -39,18 +39,8 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
         "attention",  # Needs You — the attention queue (slug: attention)
         "work",  # Work board — tasks kanban with triage (slug: tasks)
         "schedules",  # Agent schedules (slug: schedules)
-        "parallel",  # Parallel agent runs (slug: parallel)
-        "preview",  # Dev-server preview pane (slug: preview)
-        "feed",  # Activity feed (slug: feed)
         "budgets",  # Cost budgets (slug: budgets)
         "hooks",  # Hooks — what is on each hook event (slug: hooks)
-        "latency",  # Tool & hook latency from the trace receiver (slug: latency)
-        "sync",  # Sync targets (slug: sync)
-        "snippets",  # Snippet library (slug: library)
-        "gallery",  # Template/agent gallery (slug: marketplace)
-        "mcp",  # MCP servers (slug: mcp)
-        "integrations",  # External integrations (slug: integrations)
-        "plugins",  # Plugins (slug: plugins)
     }
 )
 
@@ -69,7 +59,29 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
 # bell in the chrome — which this slug never gated — keeps the history on every
 # screen. A slug with no page behind it cannot be a toggle, and for the same
 # reason as above it is still accepted on write.
-_RETIRED_FEATURES: frozenset[str] = frozenset({"composer", "explorer", "notifications"})
+#
+# #274 retires ten more on the same terms: ``parallel``, ``preview``, ``feed``,
+# ``latency``, ``sync``, ``snippets``, ``gallery``, ``mcp``, ``integrations``
+# and ``plugins``. Every page they gated is deleted, so none of them can be a
+# toggle any more — but an install seeded before the cut still holds them in
+# its stored ``enabled_features`` and must be able to PUT that map back.
+_RETIRED_FEATURES: frozenset[str] = frozenset(
+    {
+        "composer",
+        "explorer",
+        "notifications",
+        "parallel",
+        "preview",
+        "feed",
+        "latency",
+        "sync",
+        "snippets",
+        "gallery",
+        "mcp",
+        "integrations",
+        "plugins",
+    }
+)
 
 # Default payload used when the ``enabled_features`` setting is absent. Core
 # modules (plus Schedules) are ON; the remaining extras are OFF (hidden from
@@ -81,8 +93,6 @@ _FEATURES_DEFAULT: dict[str, bool] = {
     # not shipped.
     "attention": True,
     "work": True,
-    "parallel": True,
-    "preview": True,
     "budgets": True,
     "schedules": True,
     # ON by default (#171): the Hooks page is the only place a user can be told
@@ -90,17 +100,6 @@ _FEATURES_DEFAULT: dict[str, bool] = {
     # permission decision it is handed. Verify grades that file "ok", so a page
     # that ships off is a user who is never told.
     "hooks": True,
-    # ON by default (#178): the only surface that shows hook and tool latency
-    # at all, and it says on its face when nothing has been received yet — so
-    # a user who has not enabled telemetry sees why rather than nothing.
-    "latency": True,
-    "snippets": False,
-    "gallery": False,
-    "feed": False,
-    "mcp": False,
-    "integrations": False,
-    "plugins": False,
-    "sync": False,
 }
 
 

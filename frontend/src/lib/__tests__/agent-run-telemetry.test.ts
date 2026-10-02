@@ -12,7 +12,6 @@ import {
 import {
   currentPaneTarget,
   isTerminalsWindow,
-  isScreenshotRingWindow,
   TERMINALS_WINDOW_HASH,
 } from "../window-target";
 
@@ -133,7 +132,6 @@ describe("window-target", () => {
     window.location.hash = TERMINALS_WINDOW_HASH;
 
     expect(isTerminalsWindow()).toBe(true);
-    expect(isScreenshotRingWindow()).toBe(false);
     expect(currentPaneTarget()).toBe("popout");
   });
 
@@ -145,10 +143,9 @@ describe("window-target", () => {
   });
 
   it("does not mistake another routed window for the terminals one", () => {
-    window.location.hash = "#/window/screenshot-ring";
+    window.location.hash = "#/window/something-else";
 
     expect(isTerminalsWindow()).toBe(false);
-    expect(isScreenshotRingWindow()).toBe(true);
     expect(currentPaneTarget()).toBe("embedded");
   });
 });

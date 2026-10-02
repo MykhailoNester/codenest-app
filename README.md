@@ -49,50 +49,34 @@ lives, and how to reset the app.
 ## Features
 
 Codenest's sidebar is organized into groups. The features below ship today and
-are visible by default; individual features can be toggled under
-**Settings → Features**.
+are visible by default; Needs You, Work Board, Schedules, Budgets and Hooks can
+be toggled under **Settings → Features**.
 
-**Workspace**
+**Attention**
 
-- **Sessions** — two halves of one surface: **panes**, where a session runs, and
-  **runs**, where every run is listed, filtered, focused, stopped and inspected.
-- **Overview** — a dashboard of current activity and status.
-- **Projects** — the repositories and workspaces your agents work in.
+- **Mission Control** — current activity and status at a glance.
+- **Needs You** — the intervention queue: stalled sessions, failed scheduled
+  runs, budget thresholds and blocked tasks in one list.
 - **Work Board** — a kanban board of tasks and workflow items.
-- **Notifications** — in-app alerts.
+
+**Record**
+
+- **Projects** — the repositories and workspaces your agents work in.
 
 **Agents**
 
 - **Agents** — your team of agent definitions.
 - **Schedules** — cron-scheduled agent runs.
-- **Terminal** — embedded xterm.js terminals backed by real PTYs.
-
-**Knowledge**
-
-- **Knowledge** — a document library.
-
-**Tools**
-
-- **Preview** — an embedded webview preview pane.
+- **Run a session** — two halves of one surface: **panes**, where a session runs
+  (native agent panes and PTY-backed xterm.js terminals), and **runs**, where
+  every run is listed, filtered, focused, stopped and inspected.
 
 **System**
 
+- **Hooks** — what is on each Claude Code hook event, and which file put it
+  there.
 - **Budgets** — usage and cost budgets.
-- **Settings** — app and feature configuration.
-
-### Planned (not yet available)
-
-These are placeholders for features we intend to build. They are **disabled by
-default and hidden from the sidebar** until they are ready — the details below
-are provisional and may change:
-
-- **Snippets** — a snippet library.
-- **Gallery** — a gallery of reusable items.
-- **Feed** — an activity feed.
-- **MCP** — manage MCP (Model Context Protocol) servers.
-- **Integrations** — external integrations.
-- **Plugins** — plugin management.
-- **Sync** — synchronization settings.
+- **Settings** — app, provider and feature configuration.
 
 ## Screenshots
 
@@ -170,7 +154,7 @@ A Tauri 2 (Rust) shell is the process supervisor. On launch it spawns a FastAPI
 `127.0.0.1:8002`, then waits for the sidecar's health check before showing the
 UI. The React/TypeScript frontend talks to the sidecar over HTTP/SSE and uses
 Tauri `invoke` for shell-level work — PTY-backed xterm.js terminals, windows,
-the preview webview, and screenshots. Agent process spawning lives in the Rust
+the filesystem watcher and git. Agent process spawning lives in the Rust
 shell; the sidecar queues due scheduled runs and the shell dispatches them.
 Everything runs on your machine: the sidecar is loopback-only and the app sends
 no telemetry.

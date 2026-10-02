@@ -587,73 +587,6 @@ export async function readFileText(
 }
 
 // ---------------------------------------------------------------------------
-// Preview embedded webview commands (plan-1-fix-preview-tab)
-// ---------------------------------------------------------------------------
-
-/**
- * Logical-pixel bounds reported by `getBoundingClientRect()`, plus the
- * current viewport dimensions so Rust can derive the WebKit content inset.
- *
- * `window.innerWidth/Height` measure the *inset* web content area (excluding
- * the title-bar region on full-size-content-view windows), while the main
- * webview's NSView frame covers the full window. The difference is the inset
- * that must be added to the CSS-space origin before writing NSView coordinates.
- */
-export interface PreviewBounds {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  /** Width of the CSS viewport (`window.innerWidth`). */
-  vw: number;
-  /** Height of the CSS viewport (`window.innerHeight`). */
-  vh: number;
-}
-
-/**
- * Open (or reuse) the embedded preview webview and navigate to `url`.
- * Positions it to cover `bounds` in the main window.
- * Rejects if the URL is invalid.
- */
-export async function previewOpen(
-  url: string,
-  bounds: PreviewBounds,
-): Promise<void> {
-  return invoke<void>("preview_open", { url, bounds });
-}
-
-/**
- * Reposition and resize the preview webview to `bounds`.
- * No-op if the webview has not been created yet.
- */
-export async function previewSetBounds(bounds: PreviewBounds): Promise<void> {
-  return invoke<void>("preview_set_bounds", { bounds });
-}
-
-/**
- * Navigate the existing preview webview to a new URL without changing its bounds.
- */
-export async function previewNavigate(url: string): Promise<void> {
-  return invoke<void>("preview_navigate", { url });
-}
-
-/**
- * Show (`visible = true`) or hide (`visible = false`) the preview webview.
- * Used to reveal the History dropdown and to respond to app backgrounding.
- */
-export async function previewShow(visible: boolean): Promise<void> {
-  return invoke<void>("preview_show", { visible });
-}
-
-/**
- * Close and destroy the preview webview. Idempotent — safe to call even
- * if the webview was never opened (e.g., unmount without a navigate).
- */
-export async function previewClose(): Promise<void> {
-  return invoke<void>("preview_close");
-}
-
-// ---------------------------------------------------------------------------
 // Workspace path queries (Phase 1)
 // ---------------------------------------------------------------------------
 
@@ -845,53 +778,6 @@ export interface PathCheck {
  */
 export async function pathsExist(paths: string[]): Promise<PathCheck[]> {
   return invoke<PathCheck[]>("paths_exist", { paths });
-}
-
-// ---------------------------------------------------------------------------
-// Screenshot ring overlay
-// ---------------------------------------------------------------------------
-
-/**
- * Payload returned by a successful `capture_screenshot` Rust command.
- *
- * The production entry point is the global hotkey → ring window → `ring_capture`
- * flow.  `capture_screenshot` is a pure primitive retained for devtools use
- * (`invoke("capture_screenshot")` in the browser console).
- */
-export interface CaptureResult {
-  /** Absolute path to the saved PNG in `$TMPDIR/codenest-shots/`. */
-  path: string;
-  /** Cursor X in Tauri logical points, top-left origin. */
-  cursorX: number;
-  /** Cursor Y in Tauri logical points, top-left origin. */
-  cursorY: number;
-}
-
-/**
- * Open the screenshot-ring overlay window at the cursor position.
- * Idempotent: focuses the existing window rather than creating a second one.
- */
-export async function openScreenshotRing(): Promise<void> {
-  return invoke<void>("open_screenshot_ring");
-}
-
-/**
- * Close the screenshot-ring overlay window.  Idempotent.
- */
-export async function closeScreenshotRing(): Promise<void> {
-  return invoke<void>("close_screenshot_ring");
-}
-
-/**
- * Trigger a screen-region capture from within the ring window.
- *
- * The Rust side runs `screencapture -i` and emits `screenshot-ready` (with
- * `CaptureResult`) or `screenshot-cancelled` (with an error string) to the
- * ring window when done.  The ring page drives the ring→thumbnail transition
- * by listening for those events.
- */
-export async function ringCapture(): Promise<void> {
-  return invoke<void>("ring_capture");
 }
 
 // ---------------------------------------------------------------------------

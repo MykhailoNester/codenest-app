@@ -42,12 +42,12 @@ function installLocalStorage(): Map<string, string> {
 
 describe("nav restructure (#165) — registry shape", () => {
   it("declares the attention-first group order", () => {
+    // `knowledge` and `tools` went with #274 — every row they held was a
+    // dropped page, so the groups could never render again.
     expect(NAV_GROUPS.map((g) => g.id)).toEqual([
       "attention",
       "record",
       "agents",
-      "knowledge",
-      "tools",
       "system",
     ]);
   });
@@ -81,7 +81,11 @@ describe("nav restructure (#165) — registry shape", () => {
     //        keeps its history on every screen.
     //   #269 folds `command` into the Sessions row; `/command` still resolves,
     //        as a redirect to `/terminal?view=runs`.
-    expect(NAV_ITEMS).toHaveLength(20);
+    // 20 → 10 with #274, which is a deliberate feature cut rather than a
+    // reordering: docs, library, marketplace, feed, preview, mcp,
+    // integrations, plugins, latency and sync are deleted pages, so a rail row
+    // for any of them would point at nothing.
+    expect(NAV_ITEMS).toHaveLength(10);
     expect(NAV_ITEMS.map((i) => i.slug)).not.toContain("notifications");
     expect(NAV_ITEMS.map((i) => i.slug)).not.toContain("command");
   });
@@ -122,18 +126,18 @@ describe("nav restructure (#165) — persisted group overrides", () => {
   it("ignores a stale group key without crashing, and still honours a live one", async () => {
     const store = installLocalStorage();
     // What an existing user's browser actually holds after the rename.
-    store.set(STORAGE_KEY, JSON.stringify({ workspace: false, tools: true }));
+    store.set(STORAGE_KEY, JSON.stringify({ workspace: false, system: true }));
 
     const { useNavGroups } = await import("../../stores/nav-group-store");
     // The store reads localStorage at module scope, so importing it after the
     // payload is in place is what exercises `readInitial`.
     expect(typeof useNavGroups).toBe("function");
 
-    // `tools` defaults closed; the stored `true` must win. `workspace` is not
+    // `system` defaults closed; the stored `true` must win. `workspace` is not
     // a group any more and must simply not participate.
     const { result } = renderHook(() => useNavGroups());
     const { isOpen } = result.current;
-    expect(isOpen("tools", false)).toBe(true);
+    expect(isOpen("system", false)).toBe(true);
     expect(isOpen("attention", true)).toBe(true);
   });
 

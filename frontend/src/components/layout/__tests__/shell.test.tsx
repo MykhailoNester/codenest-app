@@ -3,7 +3,7 @@
  *
  * The top-bar and OmniBar Launch entry points (task #35): both must reach
  * `LaunchComposerDialog` with no source. The heavy chrome siblings
- * (`Sidebar`, `Topbar`, `OmniBar`, `NotificationBell`, `ScreenshotButton`)
+ * (`Sidebar`, `Topbar`, `OmniBar`, `NotificationBell`)
  * are stubbed — this file's job is the Launch button and the
  * `OMNI_EVENT_OPEN_LAUNCH` listener, not the rest of the shell's chrome
  * (which has no test of its own today and is out of scope here).
@@ -41,9 +41,6 @@ vi.mock("../sidebar", () => ({ Sidebar: () => null }));
 vi.mock("../topbar", () => ({ Topbar: () => null }));
 vi.mock("../../omni-bar", () => ({ OmniBar: () => null }));
 vi.mock("../../notification-bell", () => ({ NotificationBell: () => null }));
-vi.mock("../../screenshot/screenshot-button", () => ({
-  ScreenshotButton: () => null,
-}));
 
 beforeEach(() => {
   mockUseActiveSessionCounts.mockReturnValue({ activeCount: 0 });

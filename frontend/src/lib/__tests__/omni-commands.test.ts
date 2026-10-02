@@ -51,8 +51,6 @@ const KNOWN_ICONS = new Set([
 const EXTRA_PATHS = [
   "/terminal?view=runs",
   "/tasks?status=in-progress",
-  "/editor",
-  "/parallel",
   "/settings/workspace",
 ];
 
@@ -61,11 +59,14 @@ describe("OMNI_COMMANDS shape", () => {
   // 28 → 29 with #178's `latency` slug. Then two folds landed together:
   // #270 removed the `notifications` nav row (29 → 28), and #269 removed the
   // `command` nav row while adding `extra:/terminal?view=runs` in its place
-  // (no net change). 28.
+  // (no net change). #274 then dropped ten nav rows (docs, library,
+  // marketplace, feed, preview, mcp, integrations, plugins, latency, sync) and
+  // the two extras whose pages went with them (`/editor`, `/parallel`):
+  // 28 → 16 = 3 actions + 10 nav + 3 extras.
   // The registry derives its nav-entries from NAV_ITEMS, so this number is the
   // guard that a new nav row was a decision rather than an accident.
-  it("has exactly 28 entries", () => {
-    expect(OMNI_COMMANDS.length).toBe(28);
+  it("has exactly 16 entries", () => {
+    expect(OMNI_COMMANDS.length).toBe(16);
   });
 
   it("has unique ids", () => {
@@ -105,8 +106,8 @@ describe("OMNI_COMMANDS order (D5a)", () => {
     expect(OMNI_COMMANDS[3]?.id).toBe("nav:mission");
   });
 
-  it("the last four ids are all extras", () => {
-    for (const c of OMNI_COMMANDS.slice(-4)) {
+  it("the last three ids are all extras", () => {
+    for (const c of OMNI_COMMANDS.slice(-3)) {
       expect(c.id.startsWith("extra:")).toBe(true);
     }
   });
@@ -144,11 +145,6 @@ describe("buildCommandRows — bare `/` surfaces the named actions", () => {
     expect(all).toContain("extra:/terminal?view=runs");
   });
 
-  it("does not contain nav:library (snippets: false by default)", () => {
-    const ids = buildCommandRows("", FEATURE_DEFAULTS).map((r) => r.id);
-    expect(ids).not.toContain("nav:library");
-  });
-
   // Property pinned: scope item 3's two named actions are visible without
   // typing, under the app's real default feature set.
 });
@@ -175,17 +171,8 @@ describe("buildCommandRows — gating", () => {
     expect(ids).toContain("action:new-task");
   });
 
-  it("snippets:false omits nav:library; snippets:true includes it", () => {
-    const off = buildCommandRows("", { snippets: false }, 100).map(
-      (r) => r.id,
-    );
-    expect(off).not.toContain("nav:library");
-    const on = buildCommandRows("", { snippets: true }, 100).map((r) => r.id);
-    expect(on).toContain("nav:library");
-  });
-
   it("an unknown feature map hides nothing", () => {
-    expect(buildCommandRows("", {}, 100).length).toBe(28);
+    expect(buildCommandRows("", {}, 100).length).toBe(16);
   });
 
   // Property pinned: a disabled feature can never yield a command that

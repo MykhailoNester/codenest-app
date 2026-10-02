@@ -73,7 +73,9 @@ async def test_a_stored_retired_slug_is_accepted_but_dropped(test_app) -> None:
                     "composer": False,
                     "explorer": False,
                     "notifications": True,
+                    # Retired by #274 along with its page; still accepted on write.
                     "feed": True,
+                    "hooks": True,
                 }
             )
         },
@@ -84,7 +86,9 @@ async def test_a_stored_retired_slug_is_accepted_but_dropped(test_app) -> None:
     assert "composer" not in features
     assert "explorer" not in features
     assert "notifications" not in features
-    assert features["feed"] is True
+    assert "feed" not in features
+    # A live slug in the same payload still round-trips.
+    assert features["hooks"] is True
 
 
 @pytest.mark.asyncio

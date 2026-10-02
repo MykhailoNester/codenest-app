@@ -3,7 +3,7 @@
 Codenest is a desktop app for running and supervising AI agent teams: a Tauri 2 (Rust)
 shell hosting a React/TypeScript frontend, with a FastAPI (Python) sidecar owning all state in
 SQLite. Embedded terminals run real `claude` sessions; the app tracks their tasks, telemetry,
-schedules, and MCP configuration. The stack is cross-platform (macOS, Windows, Linux); today it
+schedules and cost. The stack is cross-platform (macOS, Windows, Linux); today it
 is built and tested only on macOS (Apple Silicon).
 
 ## Setup (fresh clone)
@@ -66,7 +66,7 @@ The Rust shell is the process supervisor. On launch it spawns the sidecar (dev: 
 uvicorn on port 8002, no `--reload`; release: PyInstaller onedir extracted once per version
 into app-data) and polls `GET /health` — a 200 means migrations have applied and the app is
 ready. The frontend talks HTTP/SSE to the sidecar at `127.0.0.1:8002` and uses Tauri `invoke`
-for shell things: PTYs (xterm.js terminals), windows, preview webview, screenshots, git.
+for shell things: PTYs (xterm.js terminals), windows, the filesystem watcher, git.
 Scheduling is split by design: the sidecar queues due cron runs in SQLite; the Rust scheduler
 polls for pending runs and spawns headless `claude` processes. The Command Center bootstrap
 (deferred, idempotent) creates the app-data workspace and installs the bundled org-agents.
@@ -122,9 +122,9 @@ derive that directory independently and must agree: `DEV_APP_DATA_DIR_NAME` in
   frontend hot-reloads.
 - **Process spawning lives in the Rust shell, never the sidecar.** The sidecar owns state and
   queues; the shell owns child processes. Bridged by poll-dispatch.
-- **The sidecar binds `127.0.0.1` only** and is deliberately unauthenticated; the MCP manager's
-  trust model (registering a server executes a local command) depends on loopback-only binding.
-  Never widen the bind address or CORS allowlist.
+- **The sidecar binds `127.0.0.1` only** and is deliberately unauthenticated. Every endpoint
+  it exposes acts on the user's own machine with the user's own privileges, so the whole trust
+  model is "nothing off this host can reach it". Never widen the bind address or CORS allowlist.
 - **Frontend chrome renders only from known-good state.** `FEATURE_DEFAULTS` in
   `frontend/src/lib/nav-items.ts` must mirror `_FEATURES_DEFAULT` in
   `app/services/settings_service.py`, and `KNOWN_FEATURES_ORDERED` (same file) must mirror

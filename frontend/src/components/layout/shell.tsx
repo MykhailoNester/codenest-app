@@ -10,7 +10,6 @@ import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { OmniBar } from "../omni-bar";
 import { NotificationBell } from "../notification-bell";
-import { ScreenshotButton } from "../screenshot/screenshot-button";
 import { Icon } from "../icon";
 import { LaunchComposerDialog } from "../launch/launch-composer-dialog";
 import { useActiveSessionCounts } from "../../lib/api";
@@ -101,7 +100,6 @@ export function Shell({
             never share the same vertical space. */}
         <div className="d3-omni-row">
           <OmniBar />
-          <ScreenshotButton />
           <NotificationBell />
           <button
             className="d3-btn d3-btn--primary"

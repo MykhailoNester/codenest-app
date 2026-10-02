@@ -23,20 +23,10 @@ import {
   useTerminalSettings,
   useEnabledFeatures,
   useOnboardingState,
-  SCREENSHOT_HOTKEY_DEFAULT,
 } from "./lib/api";
 import { FEATURES, TERMINAL_ROUTE } from "./lib/nav-items";
 import { OMNI_EVENT_OPEN_PALETTE } from "./lib/omni-commands";
-import {
-  isRegistered as isShortcutRegistered,
-  register as registerShortcut,
-  unregister as unregisterShortcut,
-} from "@tauri-apps/plugin-global-shortcut";
-import {
-  openScreenshotRing,
-  requestNotificationPermission,
-  useSidecarState,
-} from "./lib/ipc";
+import { requestNotificationPermission, useSidecarState } from "./lib/ipc";
 
 import { CatalogFeedHost } from "./components/catalog-feed-host";
 import { CommandPalette } from "./components/command-palette";
@@ -48,37 +38,18 @@ import { AttentionPage } from "./pages/attention";
 import { DeckPreviewPage } from "./pages/deck-preview";
 import { TasksPage } from "./pages/tasks";
 import { TaskDetailPage } from "./pages/task-detail";
-// InboxPage is kept in the codebase for a future workflow_items/tasks table merge.
-// The /inbox route now redirects to /tasks; InboxPage is no longer mounted.
-// TODO: remove InboxPage and its import once workflow_items is merged into tasks.
 import { TeamPage } from "./pages/team";
 import { AgentDetailPage } from "./pages/agent-detail";
-import { DocsPage } from "./pages/docs";
 import { TerminalPage } from "./pages/terminal";
 import { TerminalWindowRoot } from "./pages/terminal-window-root";
-import { ScreenshotRingPage } from "./pages/screenshot-ring";
 import { SettingsPage } from "./pages/settings";
 import { ProjectsPage } from "./pages/projects";
-import { MarkdownEditorPage } from "./pages/markdown-editor";
-import { MarketplacePage } from "./pages/marketplace";
-import { ParallelRunsPage } from "./pages/parallel-runs";
-import { McpServersPage } from "./pages/mcp-servers";
 import { HooksPage } from "./pages/hooks";
-import { LatencyPage } from "./pages/latency";
 import { SchedulesPage } from "./pages/schedules";
-import { PreviewPage } from "./pages/preview";
-import { LibraryPage } from "./pages/library";
 import { BudgetsPage } from "./pages/budgets";
-import { FeedPage } from "./pages/feed";
-import { PluginsPage } from "./pages/plugins";
-import { IntegrationsPage } from "./pages/integrations";
-import { SyncPage } from "./pages/sync";
 import { OnboardingPage } from "./pages/onboarding";
 import { WorkspaceSettingsPage } from "./pages/settings/workspace-settings";
-import {
-  isTerminalsWindow as isTerminalsWindowHash,
-  isScreenshotRingWindow as isScreenshotRingWindowHash,
-} from "./lib/window-target";
+import { isTerminalsWindow as isTerminalsWindowHash } from "./lib/window-target";
 
 // ---------------------------------------------------------------------------
 /**
@@ -287,10 +258,6 @@ function AppInner(): ReactElement {
   // so panes opened before the user visits Settings → Terminal use the
   // persisted values rather than hardcoded defaults.
   const { data: terminalSettingsData } = useTerminalSettings();
-  // Read the persisted screenshot hotkey; fall back to the default constant
-  // while the query is still loading or if the setting has never been saved.
-  const screenshotHotkey =
-    terminalSettingsData?.screenshot_hotkey ?? SCREENSHOT_HOTKEY_DEFAULT;
   useEffect(() => {
     if (terminalSettingsData) {
       document.dispatchEvent(
@@ -365,68 +332,6 @@ function AppInner(): ReactElement {
 
   const closePalette = useCallback(() => setPaletteOpen(false), []);
 
-  // ---------------------------------------------------------------------------
-  // Global screenshot-ring hotkey
-  //
-  // The hotkey accelerator comes from the sidecar setting "screenshot.hotkey"
-  // (default: SCREENSHOT_HOTKEY_DEFAULT = "Ctrl+Shift+2").  The effect
-  // re-runs whenever screenshotHotkey changes — i.e. after the user saves a
-  // new binding in Settings > Terminal > Screenshot.
-  //
-  // Registration lives in the main window because global shortcuts must be
-  // registered while the app is running; the ring window is too short-lived.
-  // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    let registered = false;
-    let registeredHotkey = "";
-
-    void isShortcutRegistered(screenshotHotkey)
-      .then((alreadyRegistered) => {
-        // Guard against StrictMode/HMR double-registration.
-        if (alreadyRegistered) {
-          registered = true;
-          registeredHotkey = screenshotHotkey;
-          return;
-        }
-        return registerShortcut(screenshotHotkey, (event) => {
-          if (event.state === "Pressed") {
-            void openScreenshotRing().catch((err) => {
-              console.error("open_screenshot_ring failed:", err);
-            });
-          }
-        }).then(() => {
-          registered = true;
-          registeredHotkey = screenshotHotkey;
-        });
-      })
-      .catch((err) => {
-        // Registration failed — shortcut taken by another app, or the
-        // accelerator string is malformed.  Dispatch a custom DOM event so
-        // the Settings > Terminal > Screenshot card can display the error
-        // inline (settings.tsx listens via a useEffect on "screenshot:hotkey-error").
-        const msg =
-          err instanceof Error
-            ? err.message
-            : "That shortcut is unavailable — it may be in use by another app.";
-        console.warn(
-          `Failed to register screenshot hotkey "${screenshotHotkey}":`,
-          err,
-        );
-        document.dispatchEvent(
-          new CustomEvent("screenshot:hotkey-error", { detail: msg }),
-        );
-      });
-
-    return () => {
-      if (registered && registeredHotkey) {
-        // Targeted unregister — allow-unregister is granted in
-        // capabilities/default.json.  allow-unregister-all is NOT granted.
-        void unregisterShortcut(registeredHotkey).catch(() => undefined);
-      }
-    };
-  }, [screenshotHotkey]);
-
   return (
     <OnboardingGate>
       <Routes>
@@ -498,20 +403,15 @@ function AppInner(): ReactElement {
             bookmark and an older search result still resolve; `:sessionId` has
             to be re-read inside the element to carry it over. */}
         <Route path="/sessions/:sessionId" element={<SessionRedirect />} />
+        {/* #274 — the Knowledge page is gone, but `/api/v1/documents` is not:
+            the bundled Orion org-agent still registers deliverables through it,
+            so `search_service` keeps returning `doc` hits and those route to
+            `/docs?id=`. Nothing can display one any more, so the path lands on
+            the Deck home rather than silently falling through `*`. Re-point it
+            the day a document viewer comes back. */}
+        <Route path="/docs" element={<Navigate to="/" replace />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/team/:name" element={<AgentDetailPage />} />
-        <Route path="/docs" element={<DocsPage />} />
-        <Route path="/editor" element={<MarkdownEditorPage />} />
-        <Route path="/marketplace" element={<MarketplacePage />} />
-        <Route
-          path="/parallel"
-          element={
-            <FeatureRoute navSlug="parallel">
-              <ParallelRunsPage />
-            </FeatureRoute>
-          }
-        />
-        <Route path="/mcp" element={<McpServersPage />} />
         <Route
           path="/schedules"
           element={
@@ -521,15 +421,6 @@ function AppInner(): ReactElement {
           }
         />
         <Route
-          path="/preview"
-          element={
-            <FeatureRoute navSlug="preview">
-              <PreviewPage />
-            </FeatureRoute>
-          }
-        />
-        <Route path="/library" element={<LibraryPage />} />
-        <Route
           path="/budgets"
           element={
             <FeatureRoute navSlug="budgets">
@@ -538,36 +429,10 @@ function AppInner(): ReactElement {
           }
         />
         <Route
-          path="/feed"
-          element={
-            <FeatureRoute navSlug="feed">
-              <FeedPage />
-            </FeatureRoute>
-          }
-        />
-        <Route path="/plugins" element={<PluginsPage />} />
-        <Route path="/integrations" element={<IntegrationsPage />} />
-        <Route
           path="/hooks"
           element={
             <FeatureRoute navSlug="hooks">
               <HooksPage />
-            </FeatureRoute>
-          }
-        />
-        <Route
-          path="/latency"
-          element={
-            <FeatureRoute navSlug="latency">
-              <LatencyPage />
-            </FeatureRoute>
-          }
-        />
-        <Route
-          path="/sync"
-          element={
-            <FeatureRoute navSlug="sync">
-              <SyncPage />
             </FeatureRoute>
           }
         />
@@ -588,7 +453,6 @@ export function App(): ReactElement {
   // app shell (sidebar, topbar, MemoryRouter routes) and mount the
   // terminals-only root directly.
   const isTerminalsWindow = isTerminalsWindowHash();
-  const isScreenshotRingWindow = isScreenshotRingWindowHash();
 
   if (isTerminalsWindow) {
     return (
@@ -600,11 +464,6 @@ export function App(): ReactElement {
         <TerminalWindowRoot />
       </QueryClientProvider>
     );
-  }
-
-  if (isScreenshotRingWindow) {
-    // Ring overlay (ring → drag thumbnail) — minimal frameless popup.
-    return <ScreenshotRingPage />;
   }
 
   return (

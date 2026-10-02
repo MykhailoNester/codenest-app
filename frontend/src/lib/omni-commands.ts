@@ -42,8 +42,8 @@ export const OMNI_COMMAND_LIMIT = 10;
 // Registry order is load-bearing (see plan D5a): actions first, then
 // nav-derived, then extras. The three actions are the only commands not
 // already one sidebar click away, and the bare-`/` window is only
-// `OMNI_COMMAND_LIMIT` rows — if nav-derived entries led, the 19-entry nav
-// block would fill the whole window and the two named actions ("new task",
+// `OMNI_COMMAND_LIMIT` rows — if nav-derived entries led, the nav block would
+// fill the whole window and the two named actions ("new task",
 // "launch project") would only be reachable by already knowing to type them,
 // which is exactly the discoverability failure this ticket removes.
 const ACTIONS: readonly OmniCommand[] = [
@@ -117,24 +117,6 @@ const EXTRAS: readonly OmniCommand[] = [
     target: { kind: "navigate", path: "/terminal?view=runs" },
   },
   {
-    id: "extra:/editor",
-    title: "Markdown Editor",
-    hint: "/editor",
-    icon: "docs",
-    keywords: ["editor", "markdown", "docs"],
-    navSlug: null,
-    target: { kind: "navigate", path: "/editor" },
-  },
-  {
-    id: "extra:/parallel",
-    title: "Parallel Runs",
-    hint: "/parallel",
-    icon: "parallel",
-    keywords: ["parallel", "runs"],
-    navSlug: "parallel",
-    target: { kind: "navigate", path: "/parallel" },
-  },
-  {
     id: "extra:/settings/workspace",
     title: "Workspace Settings",
     hint: "/settings/workspace",
@@ -170,7 +152,7 @@ export function featureForNavSlug(navSlug: string): string | null {
  * Gating uses `enabledFeatures[feature] === false` — the exact predicate
  * `FeatureRoute` uses — so an unknown feature key keeps a command visible,
  * and a disabled feature can never produce a command that would bounce off
- * `FeatureRoute` to `/command`.
+ * `FeatureRoute` to the Deck home.
  */
 export function buildCommandRows(
   query: string,
