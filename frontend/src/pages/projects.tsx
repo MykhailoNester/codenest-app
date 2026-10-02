@@ -19,7 +19,7 @@ import {
 } from "../lib/api";
 import { isHiddenCatchAllProject } from "../lib/project-display";
 import { DeckShell } from "../components/deck/deck-shell";
-import { DeckGrid, DeckHead, DeckLine } from "../components/deck/deck-grid";
+import { DeckGrid, DeckGroup, DeckHead, DeckLine } from "../components/deck/deck-grid";
 import { DeckMenu } from "../components/deck/deck-menu";
 import { ProjectContextPanel } from "../components/projects/project-context-panel";
 
@@ -546,233 +546,125 @@ export function ProjectsPage(): ReactElement {
         )}
 
         {showForm && (
-          <div
-            className="d3-card"
-            style={{ padding: "16px 20px", marginBottom: 16 }}
-          >
-            <span
-              className="d3-h"
-              style={{ display: "block", marginBottom: 12 }}
-            >
-              New Project
-            </span>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 10,
-                marginBottom: 10,
-              }}
-            >
-              <div>
-                <label
-                  style={{
-                    fontSize: 11,
-                    color: "var(--fg-3)",
-                    display: "block",
-                    marginBottom: 4,
-                  }}
-                >
-                  Name *
-                </label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Project name"
-                  style={{
-                    width: "100%",
-                    padding: "6px 10px",
-                    background: "var(--bg-3)",
-                    border: "1px solid var(--line-2)",
-                    color: "var(--fg-0)",
-                    borderRadius: 6,
-                    fontSize: 13,
-                    boxSizing: "border-box",
-                  }}
-                />
+          <DeckGroup label="new project">
+            <div className="dk-form">
+              <div className="dk-form__grid">
+                <div className="dk-form__row">
+                  <label className="dk-label" htmlFor="np-name">
+                    name *
+                  </label>
+                  <input
+                    id="np-name"
+                    className="dk-ctl"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="Project name"
+                  />
+                </div>
+                <div className="dk-form__row">
+                  <label className="dk-label" htmlFor="np-status">
+                    status
+                  </label>
+                  <select
+                    id="np-status"
+                    className="dk-ctl"
+                    value={form.status}
+                    onChange={(e) =>
+                      setForm({ ...form, status: e.target.value })
+                    }
+                  >
+                    <option value="active">Active</option>
+                    <option value="archived">Archived</option>
+                    <option value="planned">Planned</option>
+                  </select>
+                </div>
+                <div className="dk-form__row full">
+                  <label className="dk-label" htmlFor="np-desc">
+                    description
+                  </label>
+                  <textarea
+                    id="np-desc"
+                    className="dk-ctl"
+                    value={form.description}
+                    onChange={(e) =>
+                      setForm({ ...form, description: e.target.value })
+                    }
+                    placeholder="What does this project do?"
+                    rows={2}
+                  />
+                </div>
+                <div className="dk-form__row">
+                  <label className="dk-label" htmlFor="np-stack">
+                    tech stack
+                  </label>
+                  <input
+                    id="np-stack"
+                    className="dk-ctl"
+                    value={form.tech_stack}
+                    onChange={(e) =>
+                      setForm({ ...form, tech_stack: e.target.value })
+                    }
+                    placeholder="e.g. Python, FastAPI"
+                  />
+                </div>
+                <div className="dk-form__row">
+                  <label className="dk-label" htmlFor="np-path">
+                    path
+                  </label>
+                  <input
+                    id="np-path"
+                    className="dk-ctl"
+                    value={form.path}
+                    onChange={(e) => setForm({ ...form, path: e.target.value })}
+                    placeholder="/path/to/your/project"
+                  />
+                </div>
+                {showProfileSelector && (
+                  <div className="dk-form__row full">
+                    <label className="dk-label" htmlFor="np-profile">
+                      profile group
+                    </label>
+                    <select
+                      id="np-profile"
+                      className="dk-ctl"
+                      value={form.profile_id ?? ""}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          profile_id: e.target.value
+                            ? Number(e.target.value)
+                            : null,
+                        })
+                      }
+                    >
+                      <option value="">Default</option>
+                      {profiles.map((pr: ProfileOut) => (
+                        <option key={pr.id} value={pr.id}>
+                          {pr.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
-              <div>
-                <label
-                  style={{
-                    fontSize: 11,
-                    color: "var(--fg-3)",
-                    display: "block",
-                    marginBottom: 4,
-                  }}
+              <div className="dk-actions">
+                <button
+                  className="dk-btn pri"
+                  type="button"
+                  onClick={() => void handleCreate()}
                 >
-                  Status
-                </label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm({ ...form, status: e.target.value })}
-                  style={{
-                    width: "100%",
-                    padding: "6px 10px",
-                    background: "var(--bg-3)",
-                    border: "1px solid var(--line-2)",
-                    color: "var(--fg-0)",
-                    borderRadius: 6,
-                    fontSize: 13,
-                  }}
+                  Create Project
+                </button>
+                <button
+                  className="dk-btn"
+                  type="button"
+                  onClick={() => setShowForm(false)}
                 >
-                  <option value="active">Active</option>
-                  <option value="archived">Archived</option>
-                  <option value="planned">Planned</option>
-                </select>
-              </div>
-            </div>
-            <div style={{ marginBottom: 10 }}>
-              <label
-                style={{
-                  fontSize: 11,
-                  color: "var(--fg-3)",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Description
-              </label>
-              <textarea
-                value={form.description}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-                placeholder="What does this project do?"
-                rows={2}
-                style={{
-                  width: "100%",
-                  padding: "6px 10px",
-                  background: "var(--bg-3)",
-                  border: "1px solid var(--line-2)",
-                  color: "var(--fg-0)",
-                  borderRadius: 6,
-                  fontSize: 13,
-                  resize: "vertical",
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 10,
-                marginBottom: 12,
-              }}
-            >
-              <div>
-                <label
-                  style={{
-                    fontSize: 11,
-                    color: "var(--fg-3)",
-                    display: "block",
-                    marginBottom: 4,
-                  }}
-                >
-                  Tech Stack
-                </label>
-                <input
-                  value={form.tech_stack}
-                  onChange={(e) =>
-                    setForm({ ...form, tech_stack: e.target.value })
-                  }
-                  placeholder="e.g. Python, FastAPI"
-                  style={{
-                    width: "100%",
-                    padding: "6px 10px",
-                    background: "var(--bg-3)",
-                    border: "1px solid var(--line-2)",
-                    color: "var(--fg-0)",
-                    borderRadius: 6,
-                    fontSize: 13,
-                    boxSizing: "border-box",
-                  }}
-                />
-              </div>
-              <div>
-                <label
-                  style={{
-                    fontSize: 11,
-                    color: "var(--fg-3)",
-                    display: "block",
-                    marginBottom: 4,
-                  }}
-                >
-                  Path
-                </label>
-                <input
-                  value={form.path}
-                  onChange={(e) => setForm({ ...form, path: e.target.value })}
-                  placeholder="e.g. /Users/me/Work/myproject"
-                  style={{
-                    width: "100%",
-                    padding: "6px 10px",
-                    background: "var(--bg-3)",
-                    border: "1px solid var(--line-2)",
-                    color: "var(--fg-0)",
-                    borderRadius: 6,
-                    fontSize: 13,
-                    boxSizing: "border-box",
-                  }}
-                />
+                  Cancel
+                </button>
               </div>
             </div>
-            {showProfileSelector && (
-              <div style={{ marginBottom: 12 }}>
-                <label
-                  style={{
-                    fontSize: 11,
-                    color: "var(--fg-3)",
-                    display: "block",
-                    marginBottom: 4,
-                  }}
-                >
-                  Profile group
-                </label>
-                <select
-                  value={form.profile_id ?? ""}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      profile_id: e.target.value ? Number(e.target.value) : null,
-                    })
-                  }
-                  style={{
-                    width: "100%",
-                    padding: "6px 10px",
-                    background: "var(--bg-3)",
-                    border: "1px solid var(--line-2)",
-                    color: "var(--fg-0)",
-                    borderRadius: 6,
-                    fontSize: 13,
-                  }}
-                >
-                  <option value="">Default</option>
-                  {profiles.map((pr: ProfileOut) => (
-                    <option key={pr.id} value={pr.id}>
-                      {pr.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                className="dk-btn pri"
-                type="button"
-                onClick={() => void handleCreate()}
-              >
-                Create Project
-              </button>
-              <button
-                className="dk-btn"
-                type="button"
-                onClick={() => setShowForm(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          </DeckGroup>
         )}
 
         {visibleProjects.length === 0 ? (

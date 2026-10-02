@@ -10,7 +10,7 @@
  *   <LaunchFromSourceButton kind="inbox" id={item.id} label="Launch agent" />
  */
 
-import { useState, type ReactElement } from "react";
+import { useState, type ReactElement, type CSSProperties } from "react";
 import { useLaunchSeed } from "../../lib/launch-seed";
 import { LaunchComposerDialog } from "./launch-composer-dialog";
 import { Icon } from "../icon";
@@ -59,13 +59,16 @@ export function LaunchFromSourceButton({
     setOpen(true);
   }
 
-  const className = [
-    "d3-btn",
-    variant === "primary" ? "d3-btn--primary" : "d3-btn--ghost",
-    tone === "run" && !isError ? "d3-btn--run" : "",
-  ]
+  const className = ["dk-btn", variant === "primary" ? "pri" : "bare"]
     .filter(Boolean)
     .join(" ");
+
+  // Deck has `.dk-btn.danger` for the error tone but no `ok` sibling, so the
+  // "run" tone is a local override rather than a class. Reported as a gap.
+  const toneStyle: CSSProperties =
+    tone === "run" && !isError
+      ? { color: "var(--ok)", borderColor: "var(--ok)" }
+      : {};
 
   return (
     <>
@@ -82,6 +85,7 @@ export function LaunchFromSourceButton({
           alignItems: "center",
           gap: label ? 5 : 0,
           ...(iconOnly ? { padding: "5px 7px" } : {}),
+          ...toneStyle,
           ...(isError
             ? { borderColor: "var(--err)", color: "var(--err)" }
             : {}),
@@ -113,7 +117,10 @@ export function LaunchFromSourceButton({
   );
 }
 
-// Minimal inline spinner — uses the d3-spinner CSS class from d3-creative.css.
+// Deck states a condition as a character rather than a shape — the error
+// branch beside this one already renders `!`. `~` is Deck's running glyph, so
+// loading reads in the same vocabulary. That was the last consumer of
+// `d3-creative.css`'s keyframes, and the stylesheet is gone with it.
 function Spinner(): ReactElement {
-  return <span aria-hidden="true" className="d3-spinner" />;
+  return <span aria-hidden="true">~</span>;
 }

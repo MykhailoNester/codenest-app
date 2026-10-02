@@ -328,14 +328,14 @@ export function ComposerModal({
           <span className="tb-modal__kbd">⌘↩ to create</span>
           <button
             type="button"
-            className="d3-btn d3-btn--ghost"
+            className="dk-btn bare"
             onClick={onClose}
           >
             Cancel
           </button>
           <button
             type="button"
-            className="d3-btn d3-btn--primary"
+            className="dk-btn pri"
             disabled={!canSubmit}
             onClick={() => void handleCreate()}
           >
