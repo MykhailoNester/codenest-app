@@ -9,20 +9,21 @@ import {
   runSummary,
   summariseRuns,
 } from "../../lib/task-runs";
-import { initialsOf } from "./avatar";
+import { DeckGrid, DeckGroup, DeckHead, DeckLine } from "../deck/deck-grid";
 
 /**
- * The `.td-runs` card in the document column: every ``agent_runs`` row this
- * task's launches produced, newest-first (the page's query already orders
- * it; this component never re-sorts).
+ * Every ``agent_runs`` row this task's launches produced, as Deck lines,
+ * newest-first (the page's query already orders it; this component never
+ * re-sorts).
  *
  * Identity is the PROVIDER, never a team member: `agent_runs` carries
  * `provider_id`/`profile`, not a member id, so `runIdentity` renders
- * `provider_display_name ?? provider_name ?? "Unknown agent"` with the
- * provider's own colour, and the identity element carries
- * `RUN_IDENTITY_TITLE` so the missing per-run attribution is visible in the
- * UI rather than papered over with the task's assignee or the `profile`
- * config-home string (neither is an identity).
+ * `provider_display_name ?? provider_name ?? "Unknown agent"` and the
+ * identity cell carries `RUN_IDENTITY_TITLE`, so the missing per-run
+ * attribution is visible in the UI rather than papered over with the task's
+ * assignee or the `profile` config-home string (neither is an identity).
+ * #298 dropped the coloured avatar with it — Deck carries state in column
+ * one and identity as text, and a provider's hex had no other job here.
  *
  * Duration is `ended_at - started_at`, computed once from the stored
  * stamps (`task-runs.formatRunDuration`) — a run still in flight renders the
@@ -34,11 +35,9 @@ import { initialsOf } from "./avatar";
  * Replay reuses `components/command-center/replay-panel.tsx` (mounted by
  * the page's `<TaskRunReplay>`, not this component) — no second replay
  * implementation.
- *
- * Prop-only, like `activity-card.tsx`: the page owns the query and passes
- * plain props, which keeps this component testable without a
- * `QueryClientProvider`.
  */
+const COLS = "14px minmax(0, 1fr) 150px 72px 72px";
+
 export interface RunsCardProps {
   runs: AgentRun[];
   isLoading: boolean;
@@ -49,8 +48,11 @@ export interface RunsCardProps {
   onReplay: (sessionId: string) => void;
 }
 
-const AVATAR_PX = 20;
-const AVATAR_FONT_PX = 9;
+/** `agent_runs.status` is exactly running|ended — there is no failure flag to
+ *  read, so a finished run is `done` and nothing here is ever `fail`. */
+function runState(run: AgentRun): "run" | "done" {
+  return run.status === "running" ? "run" : "done";
+}
 
 export function RunsCard({
   runs,
@@ -62,94 +64,90 @@ export function RunsCard({
 }: RunsCardProps): ReactElement {
   const { sessions, costUsd, calls } = summariseRuns(runs);
 
-  return (
-    <div className="td-card">
-      <div className="td-card__head">
-        <h2 className="td-h">
-          Agent runs <span className="td-count">{runs.length}</span>
-        </h2>
-        {!isLoading && !isError && runs.length > 0 ? (
-          <span className="td-dim td-sm">
-            {sessions} session{sessions === 1 ? "" : "s"}
-            {costUsd != null ? (
-              <>
-                {" · "}
-                <span title={RUN_COST_TITLE}>{formatUSD(costUsd)}</span>
-              </>
-            ) : null}
-            {calls != null ? ` · ${calls} call${calls === 1 ? "" : "s"}` : null}
-          </span>
+  const note =
+    !isLoading && !isError && runs.length > 0 ? (
+      <>
+        {sessions} session{sessions === 1 ? "" : "s"}
+        {costUsd != null ? (
+          <>
+            {" · "}
+            <span title={RUN_COST_TITLE}>{formatUSD(costUsd)}</span>
+          </>
         ) : null}
-      </div>
+        {calls != null ? ` · ${calls} call${calls === 1 ? "" : "s"}` : null}
+      </>
+    ) : undefined;
 
+  return (
+    <DeckGroup label="agent runs" count={runs.length} note={note}>
       {isLoading ? (
-        <span className="td-dim td-sm">Loading runs…</span>
+        <div className="dk-note">Loading runs…</div>
       ) : isError ? (
-        <>
-          <span className="td-dim td-sm">Could not load agent runs.</span>
-          <button type="button" className="d3-btn d3-btn--ghost" onClick={onRetry}>
+        <div className="dk-note">
+          Could not load agent runs.{" "}
+          <button type="button" className="dk-btn bare" onClick={onRetry}>
             Retry
           </button>
-        </>
+        </div>
       ) : runs.length === 0 ? (
-        <span className="td-dim td-sm">No agent has run on this task yet.</span>
+        <div className="dk-note">No agent has run on this task yet.</div>
       ) : (
-        <div className="td-runs">
+        <DeckGrid cols={COLS} label="Agent runs">
+          <DeckHead cells={["agent", "when", "r cost", "r "]} />
           {runs.map((run) => {
             const identity = runIdentity(run);
             const summary = runSummary(run);
-            const hasProvider =
-              run.provider_name != null || run.provider_display_name != null;
             const sessionId = run.session_id;
             return (
-              <div className="td-run" key={String(run.id)}>
-                {hasProvider ? (
-                  <span
-                    className="td-av"
-                    style={{
-                      width: AVATAR_PX,
-                      height: AVATAR_PX,
-                      fontSize: AVATAR_FONT_PX,
-                      background: run.provider_color ?? "var(--fg-4)",
-                    }}
-                  >
-                    {initialsOf(identity)}
-                  </span>
-                ) : (
-                  <span
-                    className="td-av td-av--none"
-                    style={{ width: AVATAR_PX, height: AVATAR_PX }}
-                  />
-                )}
-                <div className="td-run__body">
-                  <div className="td-run__top">
-                    <b title={RUN_IDENTITY_TITLE}>{identity}</b>
-                    {summary ? <span>{summary}</span> : null}
-                  </div>
-                  <div className="td-run__meta">
-                    {runMetaSegments(run).join(" · ")}
-                  </div>
-                </div>
-                {run.session_cost_usd != null ? (
-                  <span className="td-run__cost" title={RUN_COST_TITLE}>
-                    {formatUSD(run.session_cost_usd)}
-                  </span>
-                ) : null}
-                {sessionId ? (
-                  <button
-                    type="button"
-                    className="td-ghost"
-                    aria-pressed={activeSessionId === sessionId}
-                    onClick={() => onReplay(sessionId)}
-                  >
-                    Replay
-                  </button>
-                ) : null}
-              </div>
+              <DeckLine
+                key={String(run.id)}
+                state={runState(run)}
+                cells={[
+                  {
+                    v: (
+                      <>
+                        <b title={RUN_IDENTITY_TITLE}>{identity}</b>
+                        {summary ? <span className="dim"> {summary}</span> : null}
+                      </>
+                    ),
+                    cls: "sub",
+                    title: summary ? `${identity} — ${summary}` : identity,
+                  },
+                  { v: runMetaSegments(run).join(" · "), cls: "dk-meta" },
+                  {
+                    v:
+                      run.session_cost_usd != null ? (
+                        <span className="cost" title={RUN_COST_TITLE}>
+                          {formatUSD(run.session_cost_usd)}
+                        </span>
+                      ) : null,
+                    cls: "r",
+                  },
+                  {
+                    v: sessionId ? (
+                      <span className="acts">
+                        <button
+                          type="button"
+                          className="dk-btn bare"
+                          aria-pressed={activeSessionId === sessionId}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onReplay(sessionId);
+                          }}
+                        >
+                          replay
+                        </button>
+                      </span>
+                    ) : null,
+                    cls: "r",
+                  },
+                ]}
+                onOpen={sessionId ? () => onReplay(sessionId) : undefined}
+              />
             );
           })}
-        </div>
+        </DeckGrid>
       )}
-    </div>
+    </DeckGroup>
   );
 }

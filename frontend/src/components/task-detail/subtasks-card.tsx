@@ -1,18 +1,23 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import type { Subtask } from "../../lib/api";
+import { DeckGrid, DeckGroup, DeckLine } from "../deck/deck-grid";
 
 /**
- * The `.td-subs` checklist card in the document column.
+ * The subtask checklist, as Deck lines: state glyph, checkbox, title, delete.
+ * The count rides the group heading and the progress bar is a `.dk-meter` in
+ * its actions slot.
  *
  * Prop-only, like `runs-card.tsx`: the page owns the query and the writes.
  * The one piece of state kept here is the optimistic overlay — a map of
  * subtask id to the checked value a flight is trying to store. A row renders
  * that value while the write is in flight, and the entry is dropped once
  * `onToggle` settles either way, so a success reveals the refetched row and a
- * failure reverts the checkbox visibly. Count chip and progress bar are both
- * computed from the SAME overlaid list the rows render, so they can never
- * disagree with what is on screen.
+ * failure reverts the checkbox visibly. Count and meter are both computed
+ * from the SAME overlaid list the rows render, so they can never disagree
+ * with what is on screen.
  */
+const COLS = "14px 18px minmax(0, 1fr) auto";
+
 export interface SubtasksCardProps {
   subtasks: Subtask[];
   isLoading: boolean;
@@ -80,19 +85,13 @@ export function SubtasksCard({
   }
 
   return (
-    <div className="td-card">
-      <div className="td-card__head">
-        <h2 className="td-h">
-          Subtasks
-          {rows.length > 0 ? (
-            <span className="td-count">
-              {doneCount}/{rows.length}
-            </span>
-          ) : null}
-        </h2>
-        {rows.length > 0 ? (
-          <div
-            className="td-prog"
+    <DeckGroup
+      label="subtasks"
+      count={rows.length > 0 ? `${doneCount}/${rows.length}` : undefined}
+      actions={
+        rows.length > 0 ? (
+          <span
+            className="dk-meter"
             role="progressbar"
             aria-label="Subtasks complete"
             aria-valuemin={0}
@@ -100,92 +99,120 @@ export function SubtasksCard({
             aria-valuenow={doneCount}
           >
             <i style={{ width: `${percent}%` }} />
-          </div>
-        ) : null}
-      </div>
-
+          </span>
+        ) : undefined
+      }
+    >
       {isLoading ? (
-        <span className="td-dim td-sm">Loading subtasks…</span>
+        <div className="dk-note">Loading subtasks…</div>
       ) : isError ? (
-        <>
-          <span className="td-dim td-sm">Could not load subtasks.</span>
-          <button
-            type="button"
-            className="d3-btn d3-btn--ghost"
-            onClick={onRetry}
-          >
+        <div className="dk-note">
+          Could not load subtasks.{" "}
+          <button type="button" className="dk-btn bare" onClick={onRetry}>
             Retry
           </button>
-        </>
+        </div>
       ) : (
         <>
           {rows.length === 0 ? (
-            <span className="td-dim td-sm">No subtasks yet.</span>
+            <div className="dk-note">No subtasks yet.</div>
           ) : (
-            <ul className="td-subs">
+            <DeckGrid cols={COLS} label="Subtasks">
               {rows.map((row) => (
-                <li key={row.id} className={row.done ? "is-done" : undefined}>
-                  <input
-                    type="checkbox"
-                    className="td-check"
-                    checked={row.done}
-                    aria-label={row.title}
-                    onChange={() => void handleToggle(row.id, !row.done)}
-                  />
-                  {renamingId === row.id ? (
-                    <input
-                      className="td-sub__edit"
-                      autoFocus
-                      value={renameDraft}
-                      aria-label={`Rename ${row.title}`}
-                      onChange={(e) => setRenameDraft(e.target.value)}
-                      onBlur={() => commitRename(row)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          commitRename(row);
-                        } else if (e.key === "Escape") {
-                          e.stopPropagation();
-                          setRenamingId(null);
+                <DeckLine
+                  key={row.id}
+                  state={row.done ? "done" : "todo"}
+                  done={row.done}
+                  cells={[
+                    {
+                      v: (
+                        <input
+                          type="checkbox"
+                          checked={row.done}
+                          aria-label={row.title}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => void handleToggle(row.id, !row.done)}
+                        />
+                      ),
+                    },
+                    {
+                      v:
+                        renamingId === row.id ? (
+                          <input
+                            className="dk-ctl"
+                            autoFocus
+                            value={renameDraft}
+                            aria-label={`Rename ${row.title}`}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            onBlur={() => commitRename(row)}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                commitRename(row);
+                              } else if (e.key === "Escape") {
+                                setRenamingId(null);
+                              }
+                            }}
+                          />
+                        ) : (
+                          row.title
+                        ),
+                      cls: "sub",
+                      title: row.title,
+                    },
+                    {
+                      v: (
+                        <span className="acts">
+                          <button
+                            type="button"
+                            className="dk-btn bare icon"
+                            aria-label={`Delete ${row.title}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(row.id);
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ),
+                      cls: "r",
+                    },
+                  ]}
+                  onOpen={
+                    renamingId === row.id
+                      ? undefined
+                      : () => {
+                          setRenameDraft(row.title);
+                          setRenamingId(row.id);
                         }
-                      }}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      className="td-sub__title"
-                      onClick={() => {
-                        setRenameDraft(row.title);
-                        setRenamingId(row.id);
-                      }}
-                    >
-                      {row.title}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="td-ghost"
-                    aria-label={`Delete ${row.title}`}
-                    onClick={() => onDelete(row.id)}
-                  >
-                    ✕
-                  </button>
-                </li>
+                  }
+                />
               ))}
-            </ul>
+            </DeckGrid>
           )}
 
-          <form className="td-addsub" onSubmit={handleAdd}>
-            <span aria-hidden="true">+</span>
-            <input
-              value={draft}
-              placeholder="Add a subtask…"
-              aria-label="Add a subtask"
-              onChange={(e) => setDraft(e.target.value)}
-            />
+          <form
+            className="dk-actions"
+            style={{ display: "flex", padding: "var(--u2) var(--u3) 0" }}
+            onSubmit={handleAdd}
+          >
+            <span className="dk-field" style={{ flex: "1 1 auto" }}>
+              <input
+                value={draft}
+                placeholder="add a subtask…"
+                aria-label="Add a subtask"
+                onChange={(e) => setDraft(e.target.value)}
+              />
+            </span>
+            <button type="submit" className="dk-btn" disabled={draft.trim() === ""}>
+              add
+            </button>
           </form>
         </>
       )}
-    </div>
+    </DeckGroup>
   );
 }

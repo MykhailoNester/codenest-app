@@ -8,11 +8,12 @@ import {
 import type { TaskComment } from "../../lib/api";
 import { AgentMarkdown } from "../terminal/agent-markdown";
 import { formatActivityStamp } from "../../lib/task-activity";
-import { hashHue, initialsOf } from "./avatar";
+import { DeckGrid, DeckLine } from "../deck/deck-grid";
 
 /**
- * The Comments panel of the `.td-tabs` card: composer first, thread
- * oldest-first beneath it.
+ * The Comments panel of the tab strip: composer first, thread oldest-first
+ * beneath it on `.dk-list.prose` — the one list Deck lets wrap, which is what
+ * a markdown body needs.
  *
  * Prop-only, like `subtasks-card.tsx` — the page owns the query and the
  * writes. `onPost` and `onSaveEdit` must reject when the write fails: the
@@ -20,9 +21,11 @@ import { hashHue, initialsOf } from "./avatar";
  * failed post's text on screen instead of losing it.
  *
  * Attribution is read off the stored `author_kind`, never guessed from the
- * name: an agent gets its own avatar shape and a visible "Agent" chip, and a
- * comment with no author renders as the operator rather than a made-up member.
+ * name: an agent carries a visible "agent" tag, and a comment with no author
+ * renders as the operator rather than a made-up member.
  */
+const COLS = "14px minmax(0, 1fr) 96px";
+
 export interface CommentsCardProps {
   comments: TaskComment[];
   isLoading: boolean;
@@ -99,156 +102,140 @@ export function CommentsCard({
 
   return (
     <>
-      <form className="td-comment" onSubmit={(e) => void handlePost(e)}>
-        <span
-          className="td-av"
-          aria-hidden="true"
-          style={{
-            width: 26,
-            height: 26,
-            fontSize: 10.5,
-            background: hashHue(OPERATOR_LABEL),
-            color: "var(--bg-0)",
-          }}
-        >
-          {initialsOf(OPERATOR_LABEL)}
-        </span>
-        <div className="td-comment__body">
-          <textarea
-            ref={composerRef}
-            className="td-desc__ta td-comment__ta"
-            rows={2}
-            value={draft}
-            placeholder="Leave a note for yourself or an agent…"
-            aria-label="Write a comment"
-            onChange={(e) => setDraft(e.target.value)}
-          />
-          <div className="td-comment__acts">
-            <button
-              type="submit"
-              className="d3-btn d3-btn--primary"
-              disabled={draft.trim() === "" || posting}
-            >
-              Comment
-            </button>
-          </div>
+      <form
+        className="dk-form"
+        style={{ padding: "var(--u3)", gap: "var(--u2)" }}
+        onSubmit={(e) => void handlePost(e)}
+      >
+        <textarea
+          ref={composerRef}
+          className="dk-ta"
+          rows={2}
+          value={draft}
+          placeholder="Leave a note for yourself or an agent…"
+          aria-label="Write a comment"
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <div className="dk-actions end">
+          <button
+            type="submit"
+            className="dk-btn"
+            disabled={draft.trim() === "" || posting}
+          >
+            comment
+          </button>
         </div>
       </form>
 
       {isLoading ? (
-        <span className="td-dim td-sm">Loading comments…</span>
+        <div className="dk-note">Loading comments…</div>
       ) : isError ? (
-        <>
-          <span className="td-dim td-sm">Could not load comments.</span>
-          <button
-            type="button"
-            className="d3-btn d3-btn--ghost"
-            onClick={onRetry}
-          >
+        <div className="dk-note">
+          Could not load comments.{" "}
+          <button type="button" className="dk-btn bare" onClick={onRetry}>
             Retry
           </button>
-        </>
+        </div>
       ) : comments.length === 0 ? (
-        <span className="td-dim td-sm">No comments yet.</span>
+        <div className="dk-note">No comments yet.</div>
       ) : (
-        <ul className="td-thread">
+        <DeckGrid cols={COLS} className="prose" label="Comments">
           {comments.map((comment) => {
             const label = authorLabel(comment);
             const isAgent = comment.author_kind === "agent";
+            const editing = editingId === comment.id;
             return (
-              <li key={comment.id} className="td-comment">
-                <span
-                  className={`td-av${isAgent ? " td-av--agent" : ""}`}
-                  aria-hidden="true"
-                  style={{
-                    width: 26,
-                    height: 26,
-                    fontSize: 10.5,
-                    background: hashHue(label),
-                    color: "var(--bg-0)",
-                  }}
-                >
-                  {initialsOf(label)}
-                </span>
-                <div className="td-comment__body">
-                  <div className="td-comment__who">
-                    <b>{label}</b>
-                    {isAgent ? <span className="td-kind">Agent</span> : null}
-                    <time
-                      className="td-comment__when"
-                      dateTime={`${comment.created_at}Z`}
-                      title={comment.created_at}
-                    >
-                      {formatActivityStamp(comment.created_at)}
-                    </time>
-                    {comment.updated_at !== comment.created_at ? (
-                      <span className="td-comment__when">edited</span>
-                    ) : null}
-                  </div>
-
-                  {editingId === comment.id ? (
-                    <>
-                      <textarea
-                        className="td-desc__ta td-comment__ta"
-                        rows={2}
-                        autoFocus
-                        value={editDraft}
-                        aria-label={`Edit comment by ${label}`}
-                        onChange={(e) => {
-                          setEditDraft(e.target.value);
-                          autoGrow(e.target);
-                        }}
-                      />
-                      <div className="td-comment__acts">
-                        <button
-                          type="button"
-                          className="d3-btn d3-btn--primary"
-                          disabled={editDraft.trim() === ""}
-                          onClick={() => void commitEdit(comment)}
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          className="d3-btn d3-btn--ghost"
-                          onClick={() => setEditingId(null)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="td-para">
-                        <AgentMarkdown text={comment.body} />
-                      </div>
-                      <div className="td-comment__acts">
-                        <button
-                          type="button"
-                          className="td-ghost"
-                          onClick={() => {
-                            setEditDraft(comment.body);
-                            setEditingId(comment.id);
-                          }}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="td-ghost"
-                          aria-label={`Delete comment by ${label}`}
-                          onClick={() => onDelete(comment.id)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </li>
+              <DeckLine
+                key={comment.id}
+                state={isAgent ? "run" : "idle"}
+                cells={[
+                  {
+                    v: (
+                      <>
+                        <div className="dk-actions">
+                          <b className="sub">{label}</b>
+                          {isAgent ? <span className="dk-tag">agent</span> : null}
+                          {comment.updated_at !== comment.created_at ? (
+                            <span className="dim">edited</span>
+                          ) : null}
+                        </div>
+                        {editing ? (
+                          <>
+                            <textarea
+                              className="dk-ta"
+                              rows={2}
+                              autoFocus
+                              value={editDraft}
+                              aria-label={`Edit comment by ${label}`}
+                              onChange={(e) => {
+                                setEditDraft(e.target.value);
+                                autoGrow(e.target);
+                              }}
+                            />
+                            <div className="dk-actions">
+                              <button
+                                type="button"
+                                className="dk-btn"
+                                disabled={editDraft.trim() === ""}
+                                onClick={() => void commitEdit(comment)}
+                              >
+                                save
+                              </button>
+                              <button
+                                type="button"
+                                className="dk-btn bare"
+                                onClick={() => setEditingId(null)}
+                              >
+                                cancel
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="dk-prose">
+                              <AgentMarkdown text={comment.body} />
+                            </div>
+                            <div className="dk-actions">
+                              <button
+                                type="button"
+                                className="dk-btn bare"
+                                onClick={() => {
+                                  setEditDraft(comment.body);
+                                  setEditingId(comment.id);
+                                }}
+                              >
+                                edit
+                              </button>
+                              <button
+                                type="button"
+                                className="dk-btn bare danger"
+                                aria-label={`Delete comment by ${label}`}
+                                onClick={() => onDelete(comment.id)}
+                              >
+                                delete
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    ),
+                  },
+                  {
+                    v: (
+                      <time
+                        dateTime={`${comment.created_at}Z`}
+                        title={comment.created_at}
+                      >
+                        {formatActivityStamp(comment.created_at)}
+                      </time>
+                    ),
+                    cls: "r dim",
+                  },
+                ]}
+              />
             );
           })}
-        </ul>
+        </DeckGrid>
       )}
     </>
   );

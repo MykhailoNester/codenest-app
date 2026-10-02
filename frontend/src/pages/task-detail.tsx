@@ -1,16 +1,17 @@
 /**
  * Task detail — a read-first document, not a row editor.
  *
- * A sticky `.td-bar` action row sits above a two-column `.td-grid`: a
- * document column (inline-editable title, read-first Description card with
- * an Edit toggle) and a 300px properties sidebar (`PropertiesCard` +
- * Blockers + Timestamps + Delete). Status / priority / effort / assignee /
- * project / labels write the moment a popover item is chosen — there is no
- * "Save Changes" button for those fields, matching the Work Board
+ * A `.dk-bar` action row sits above a two-column `.dk-detail`: a document
+ * column (`.dk-detail__doc` — inline-editable title, read-first description
+ * group with an edit toggle) and a 300px properties sidebar
+ * (`PropertiesCard` + blockers + timestamps). Status / priority / effort /
+ * assignee / project / labels write the moment a select changes — there is
+ * no "Save Changes" button for those fields, matching the Work Board
  * (`pages/tasks.tsx`). Title commits on Enter or blur; description commits
- * on an explicit Save. The `.td-saved` indicator is never optimistic: it
- * appears only after the write **and** its `["task", id]` refetch have both
- * settled (`runWrite` below), and never after a failed write.
+ * on an explicit save. The "saved" indicator in the shell's action slot is
+ * never optimistic: it appears only after the write **and** its
+ * `["task", id]` refetch have both settled (`runWrite` below), and never
+ * after a failed write.
  *
  * Four deliberate divergences from the design mockup, all forced by schema
  * the sidecar does not have (never "fix" these without a migration):
@@ -73,17 +74,16 @@ import {
 import { relativeTime } from "../lib/format-helpers";
 import { DeckShell } from "../components/deck/deck-shell";
 import { DeckMenu } from "../components/deck/deck-menu";
+import { DeckGrid, DeckGroup, DeckLine } from "../components/deck/deck-grid";
 import { taskState } from "../components/deck/deck-cols";
 import { LaunchFromSourceButton } from "../components/launch/launch-from-source-button";
 import { AgentMarkdown } from "../components/terminal/agent-markdown";
 import { ActivityCard } from "../components/task-detail/activity-card";
-import { hashHue, initialsOf } from "../components/task-detail/avatar";
 import { PropertiesCard } from "../components/task-detail/properties-card";
 import { TaskRunReplay } from "../components/task-detail/run-replay";
 import { RunsCard } from "../components/task-detail/runs-card";
 import { SubtasksCard } from "../components/task-detail/subtasks-card";
 import { CommentsCard } from "../components/task-detail/comments-card";
-import { TdPopover } from "../components/task-detail/td-popover";
 
 // Module-level sentinels so a not-yet-resolved query never hands a fresh
 // array/object reference into a memo dependency (`tasks.tsx`'s NO_* idiom).
@@ -98,8 +98,7 @@ const NO_RUNS: AgentRun[] = [];
 const NO_SUBTASKS: Subtask[] = [];
 const NO_COMMENTS: TaskComment[] = [];
 
-const AVATAR_PX = 20;
-const AVATAR_FONT_PX = 9;
+const BLOCKER_COLS = "14px minmax(0, 1fr) 90px auto";
 
 type SavePhase = "idle" | "saving" | "saved";
 const SAVED_INDICATOR_MS = 2_500;
@@ -448,9 +447,7 @@ export function TaskDetailPage(): ReactElement {
     }
   }
 
-  // ── Add-blocker popover ─────────────────────────────────────────────────
-  const [blockerPopoverOpen, setBlockerPopoverOpen] = useState(false);
-
+  // ── Add-blocker candidates ──────────────────────────────────────────────
   // `useTasks()` with no filters/sort defaults to `t.created_at DESC`
   // (`task_service.get_all_tasks`) — already newest-first, so no client
   // re-sort is needed.
@@ -491,28 +488,26 @@ export function TaskDetailPage(): ReactElement {
     const notFound = !task || error?.status === 404;
     return (
       <DeckShell title={`#${taskId}`} crumb="loading">
-          <div style={{ padding: "24px 28px" }}>
-            {notFound ? (
-              <>
-                <p className="td-dim">Task #{taskId} no longer exists.</p>
-                <Link className="td-back" to="/tasks">
-                  ← Work Board
-                </Link>
-              </>
-            ) : (
-              <>
-                <p className="td-dim">
-                  {error?.message ?? "Failed to load task."}
-                </p>
-                <button
-                  type="button"
-                  className="d3-btn d3-btn--ghost"
-                  onClick={() => void refetch()}
-                >
-                  Retry
-                </button>
-              </>
-            )}
+        <div className="dk-note">
+          {notFound ? (
+            <>
+              <p>Task #{taskId} no longer exists.</p>
+              <Link className="dk-btn bare" to="/tasks">
+                ← work board
+              </Link>
+            </>
+          ) : (
+            <>
+              <p>{error?.message ?? "Failed to load task."}</p>
+              <button
+                type="button"
+                className="dk-btn"
+                onClick={() => void refetch()}
+              >
+                retry
+              </button>
+            </>
+          )}
         </div>
       </DeckShell>
     );
@@ -563,118 +558,98 @@ export function TaskDetailPage(): ReactElement {
 
         <div className="dk-detail">
           <div className="dk-detail__doc">
-            {editingTitle ? (
-              <textarea
-                ref={titleRef}
-                className="td-title td-title--edit"
-                autoFocus
-                value={titleDraft}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onKeyDown={handleTitleKeyDown}
-                onBlur={commitTitle}
-              />
-            ) : (
-              <h1
-                className="td-title"
-                role="button"
-                tabIndex={0}
-                onClick={startEditTitle}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    startEditTitle();
-                  }
-                }}
-              >
-                {task.title}
-              </h1>
-            )}
-
-            <div className="td-quickmeta">
-              {task.assignee_name ? (
-                <span
-                  className="td-av"
-                  style={{
-                    width: AVATAR_PX,
-                    height: AVATAR_PX,
-                    fontSize: AVATAR_FONT_PX,
-                    background: hashHue(task.assignee_name),
+            {/* `.dk-title` is Deck's record header: a mono h1 over a hairline.
+                The editor replaces the h1 in place and keeps the imperative
+                autosize, so the row grows with the text instead of jumping to
+                `textarea.dk-ctl`'s 92px floor. */}
+            <div className="dk-title">
+              {editingTitle ? (
+                <textarea
+                  ref={titleRef}
+                  className="dk-ctl dk-title__edit"
+                  style={{ minHeight: 0, resize: "none", flex: "1 1 auto" }}
+                  autoFocus
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onKeyDown={handleTitleKeyDown}
+                  onBlur={commitTitle}
+                />
+              ) : (
+                <h1
+                  role="button"
+                  tabIndex={0}
+                  onClick={startEditTitle}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      startEditTitle();
+                    }
                   }}
                 >
-                  {initialsOf(task.assignee_name)}
-                </span>
-              ) : (
-                <span
-                  className="td-av td-av--none"
-                  style={{ width: AVATAR_PX, height: AVATAR_PX }}
-                />
+                  {task.title}
+                </h1>
               )}
-              <b>{task.assignee_name ?? "Unassigned"}</b>
-              {assigneeMember ? (
-                <span className="td-dim td-sm">{assigneeMember.role}</span>
-              ) : null}
-              <span className="td-dot-sep" />
-              <span>{task.project_name ?? "—"}</span>
-              <span className="td-dot-sep" />
-              <span>Updated {relativeTime(withZ(task.updated_at))}</span>
             </div>
 
-            <div className="td-card">
-              <div className="td-card__head">
-                <h2 className="td-h">Description</h2>
-                {!editingDesc ? (
+            <div className="dim" style={{ padding: "0 var(--u3) var(--u6)" }}>
+              {task.assignee_name ?? "unassigned"}
+              {assigneeMember ? ` (${assigneeMember.role})` : ""}
+              {" · "}
+              {task.project_name ?? "—"}
+              {" · updated "}
+              {relativeTime(withZ(task.updated_at))}
+            </div>
+
+            <DeckGroup
+              label="description"
+              actions={
+                !editingDesc ? (
                   <button
                     type="button"
-                    className="td-ghost"
+                    className="dk-btn bare"
                     onClick={startEditDesc}
                   >
-                    Edit
+                    edit
                   </button>
-                ) : null}
-              </div>
+                ) : undefined
+              }
+            >
               {editingDesc ? (
-                <>
+                <div
+                  className="dk-form"
+                  style={{ padding: "0 var(--u3)", gap: "var(--u2)" }}
+                >
                   <textarea
-                    className="td-desc__ta"
+                    className="dk-ta"
                     autoFocus
                     rows={6}
                     value={descDraft}
                     onChange={(e) => setDescDraft(e.target.value)}
                     onKeyDown={handleDescKeyDown}
                   />
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      marginTop: 8,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="d3-btn d3-btn--primary"
-                      onClick={commitDesc}
-                    >
-                      Save
+                  <div className="dk-actions">
+                    <button type="button" className="dk-btn" onClick={commitDesc}>
+                      save
                     </button>
                     <button
                       type="button"
-                      className="td-ghost"
+                      className="dk-btn bare"
                       onClick={() => setEditingDesc(false)}
                     >
-                      Cancel
+                      cancel
                     </button>
                   </div>
-                </>
+                </div>
               ) : (
-                <div className="td-body">
+                <div className="dk-prose" style={{ padding: "0 var(--u3)" }}>
                   {task.description ? (
                     <AgentMarkdown text={task.description} />
                   ) : (
-                    <span className="td-dim td-sm">No description yet.</span>
+                    <span className="dim">No description yet.</span>
                   )}
                 </div>
               )}
-            </div>
+            </DeckGroup>
 
             <SubtasksCard
               subtasks={subtasks}
@@ -738,123 +713,112 @@ export function TaskDetailPage(): ReactElement {
               onToggleLabel={handleToggleLabel}
             />
 
-            <div className="td-card">
-              <div className="td-card__head">
-                <h2 className="td-h td-h--side">
-                  Blockers <span className="td-count">{blockers.length}</span>
-                </h2>
-                <TdPopover
-                  label="Add blocker"
-                  open={blockerPopoverOpen}
-                  onOpenChange={setBlockerPopoverOpen}
-                  renderTrigger={({ ref, open, onClick }) => (
-                    <button
-                      ref={ref}
-                      type="button"
-                      className="td-ghost"
-                      aria-haspopup="listbox"
-                      aria-expanded={open}
-                      onClick={onClick}
-                    >
-                      + Add
-                    </button>
-                  )}
+            <DeckGroup
+              label="blockers"
+              count={blockers.length}
+              actions={
+                <select
+                  className="dk-rowsel"
+                  aria-label="Add blocker"
+                  value=""
+                  disabled={blockerCandidates.length === 0}
+                  onChange={(e) => {
+                    const id = Number(e.target.value);
+                    if (id) handleAddBlocker(id);
+                  }}
                 >
-                  {({ close }) => (
-                    <>
-                      <div className="td-pop__h">Add blocker</div>
-                      {blockerCandidates.length === 0 ? (
-                        <button type="button" className="td-pop__i" disabled>
-                          No other tasks to add
-                        </button>
-                      ) : (
-                        blockerCandidates.map((t) => (
-                          <button
-                            key={t.id}
-                            type="button"
-                            role="option"
-                            aria-selected={false}
-                            className="td-pop__i"
-                            onClick={() => {
-                              handleAddBlocker(t.id);
-                              close();
-                            }}
-                          >
-                            #{t.id} {t.title}
-                          </button>
-                        ))
-                      )}
-                    </>
-                  )}
-                </TdPopover>
-              </div>
+                  <option value="">
+                    {blockerCandidates.length === 0
+                      ? "no other tasks"
+                      : "+ blocker"}
+                  </option>
+                  {blockerCandidates.map((t) => (
+                    <option key={t.id} value={String(t.id)}>
+                      #{t.id} {t.title}
+                    </option>
+                  ))}
+                </select>
+              }
+            >
               {blockers.length === 0 ? (
-                <div className="td-noblock">✓ Not blocked</div>
+                <div className="dk-note">Not blocked.</div>
               ) : (
-                <div className="td-blockers">
+                <DeckGrid cols={BLOCKER_COLS} label="Blockers">
                   {blockers.map((b) => {
                     const blockingStatus = statusVocab.find(
                       (e) => e.slug === b.blocking_status,
                     );
+                    const label =
+                      blockingStatus?.label ?? b.blocking_status;
                     return (
-                      <div key={b.id} className="td-blocker">
-                        <button
-                          type="button"
-                          className="td-blocker__link"
-                          onClick={() =>
-                            void navigate(`/tasks/${b.blocking_task_id}`)
-                          }
-                        >
-                          #{b.blocking_task_id} — {b.blocking_title}
-                        </button>
-                        <span
-                          className="td-label"
-                          style={{
-                            color: blockingStatus?.color ?? "var(--fg-4)",
-                          }}
-                        >
-                          {blockingStatus?.label ?? b.blocking_status}
-                        </span>
-                        <button
-                          type="button"
-                          className="td-ghost"
-                          style={{ color: "var(--err)" }}
-                          onClick={() => handleRemoveBlocker(b.id)}
-                        >
-                          Remove
-                        </button>
-                      </div>
+                      <DeckLine
+                        key={b.id}
+                        state={taskState(b.blocking_status)}
+                        cells={[
+                          {
+                            v: `#${b.blocking_task_id} — ${b.blocking_title}`,
+                            cls: "sub",
+                          },
+                          {
+                            v: (
+                              <span
+                                className="dk-tag"
+                                data-s={taskState(b.blocking_status)}
+                              >
+                                {label.toLowerCase()}
+                              </span>
+                            ),
+                          },
+                          {
+                            v: (
+                              <span className="acts">
+                                <button
+                                  type="button"
+                                  className="dk-btn bare"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemoveBlocker(b.id);
+                                  }}
+                                >
+                                  remove
+                                </button>
+                              </span>
+                            ),
+                            cls: "r",
+                          },
+                        ]}
+                        onOpen={() =>
+                          void navigate(`/tasks/${b.blocking_task_id}`)
+                        }
+                      />
                     );
                   })}
-                </div>
+                </DeckGrid>
               )}
-            </div>
+            </DeckGroup>
 
-            <div className="td-card">
-              <h2 className="td-h td-h--side">Timestamps</h2>
-              <div className="td-times">
-                <div>
-                  <span>Created</span>
-                  <b title={task.created_at}>
-                    {relativeTime(withZ(task.created_at))}
-                  </b>
-                </div>
-                <div>
-                  <span>Started</span>
-                  <b>{task.started_date ?? "—"}</b>
-                </div>
-                <div>
-                  <span>Completed</span>
-                  <b>{task.completed_date ?? "—"}</b>
-                </div>
-                <div>
-                  <span>Updated</span>
-                  <b title={task.updated_at}>
-                    {relativeTime(withZ(task.updated_at))}
-                  </b>
-                </div>
+            <DeckGroup label="timestamps">
+              <div className="dk-kv">
+                <span>created</span>
+                <span title={task.created_at}>
+                  {relativeTime(withZ(task.created_at))}
+                </span>
               </div>
-            </div>
+              <div className="dk-kv">
+                <span>started</span>
+                <span>{task.started_date ?? "—"}</span>
+              </div>
+              <div className="dk-kv">
+                <span>completed</span>
+                <span>{task.completed_date ?? "—"}</span>
+              </div>
+              <div className="dk-kv">
+                <span>updated</span>
+                <span title={task.updated_at}>
+                  {relativeTime(withZ(task.updated_at))}
+                </span>
+              </div>
+            </DeckGroup>
           </div>
         </div>
       </>

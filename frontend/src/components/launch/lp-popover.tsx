@@ -27,14 +27,15 @@ import { createPortal } from "react-dom";
  * scroll close because a fixed panel goes stale under scroll, an estimated
  * height rather than a measured one — measuring needs a layout effect +
  * `setState`, deliberately avoided) and
- * `components/task-detail/td-popover.tsx` (anchor + wrapper held in **state**,
- * fed by ref callbacks and read during render — never a ref dereferenced at
- * render time, the `react-hooks/refs` requirement — the render-prop
+ * the task detail's own popover (anchor + wrapper held in **state**, fed by
+ * ref callbacks and read during render — never a ref dereferenced at render
+ * time, the `react-hooks/refs` requirement — the render-prop
  * `children({close})` API, the `is-up`/`is-right` flip computation's
  * `rect ? … : false` guard, outside-mousedown close, and arrow-key roving
- * focus). The two-element outside-click check (wrapper *and* menu) is the one
- * thing `td-popover.tsx` does not need and this does: its menu is in-flow
- * inside the wrapper, this one is portalled, so it is not a descendant of it.
+ * focus). That one was deleted in #298, when the task detail moved to Deck
+ * and its property pickers became native selects; the two-element
+ * outside-click check (wrapper *and* menu) was always this file's own, since
+ * its menu is portalled rather than in-flow inside the wrapper.
  *
  * The design's `.lp-pop__menu.is-up`/`.is-right` rules are inert under
  * `position: fixed` with inline offsets (`bottom: calc(100% + 5px)` would
@@ -151,8 +152,7 @@ export function LpPopover({
   }
 
   // A render that happens before the ref callback has run must not call
-  // `getBoundingClientRect()` on null — the `rect ? … : false` shape from
-  // `td-popover.tsx:111-113`.
+  // `getBoundingClientRect()` on null — hence the `rect ? … : false` shape.
   const rect = anchorEl?.getBoundingClientRect();
   const estH = estimatedMenuHeight();
   const up = rect

@@ -310,14 +310,14 @@ describe("TaskDetailPage", () => {
     const { container } = renderPage();
     fireEvent.click(screen.getByText("Original title"));
     const textarea = container.querySelector(
-      ".td-title--edit",
+      ".dk-title__edit",
     ) as HTMLTextAreaElement;
     expect(textarea).not.toBeNull();
     fireEvent.change(textarea, { target: { value: "New title" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(mockUpdateTask).toHaveBeenCalledTimes(1);
     expect(mockUpdateTask).toHaveBeenCalledWith(1, { title: "New title" });
-    expect(container.querySelector(".td-title--edit")).toBeNull();
+    expect(container.querySelector(".dk-title__edit")).toBeNull();
   });
 
   it("blur commits the inline title edit", () => {
@@ -325,7 +325,7 @@ describe("TaskDetailPage", () => {
     const { container } = renderPage();
     fireEvent.click(screen.getByText("Original title"));
     const textarea = container.querySelector(
-      ".td-title--edit",
+      ".dk-title__edit",
     ) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "Blurred title" } });
     fireEvent.blur(textarea);
@@ -337,7 +337,7 @@ describe("TaskDetailPage", () => {
     const { container } = renderPage();
     fireEvent.click(screen.getByText("Original title"));
     const textarea = container.querySelector(
-      ".td-title--edit",
+      ".dk-title__edit",
     ) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "Changed" } });
     fireEvent.keyDown(textarea, { key: "Escape" });
@@ -350,7 +350,7 @@ describe("TaskDetailPage", () => {
     const { container } = renderPage();
     fireEvent.click(screen.getByText("Original title"));
     const textarea = container.querySelector(
-      ".td-title--edit",
+      ".dk-title__edit",
     ) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "   " } });
     fireEvent.keyDown(textarea, { key: "Enter" });
@@ -360,8 +360,9 @@ describe("TaskDetailPage", () => {
   it("choosing a status writes through the status endpoint", () => {
     setupMocks();
     renderPage();
-    fireEvent.click(screen.getByLabelText("Status: To do"));
-    fireEvent.click(screen.getByRole("option", { name: "In progress" }));
+    const select = screen.getByLabelText("Status") as HTMLSelectElement;
+    expect(select.value).toBe("todo");
+    fireEvent.change(select, { target: { value: "in-progress" } });
     expect(mockChangeTaskStatus).toHaveBeenCalledWith(1, "in-progress");
     expect(mockUpdateTask).not.toHaveBeenCalled();
   });
@@ -369,17 +370,16 @@ describe("TaskDetailPage", () => {
   it("choosing an effort never sends a value the CHECK rejects", () => {
     setupMocks();
     renderPage();
-    const openEffort = () =>
-      fireEvent.click(screen.getByLabelText("Effort: —"));
+    const select = screen.getByLabelText("Effort") as HTMLSelectElement;
 
-    openEffort();
-    fireEvent.click(screen.getByRole("option", { name: /None/ }));
-    openEffort();
-    fireEvent.click(screen.getByRole("option", { name: /Small/ }));
-    openEffort();
-    fireEvent.click(screen.getByRole("option", { name: /Medium/ }));
-    openEffort();
-    fireEvent.click(screen.getByRole("option", { name: /Large/ }));
+    // Every option the control offers, in turn — the point of the test is
+    // that the set is closed, so it drives the real option list rather than
+    // a list repeated here.
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(["", "small", "medium", "large"]);
+    for (const value of values) {
+      fireEvent.change(select, { target: { value } });
+    }
 
     expect(mockUpdateTask.mock.calls.map((c) => c[1])).toEqual([
       { effort: null },
@@ -389,13 +389,15 @@ describe("TaskDetailPage", () => {
     ]);
   });
 
-  it("adding a label calls the label endpoint and keeps the menu open", () => {
+  it("adding a label calls the label endpoint and the control stays usable", () => {
     setupMocks();
     renderPage();
-    fireEvent.click(screen.getByLabelText("Add label"));
-    fireEvent.click(screen.getByRole("option", { name: "Bug" }));
+    const select = screen.getByLabelText("Add label") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "7" } });
     expect(mockAddTaskLabel).toHaveBeenCalledWith(1, 7);
-    // Multi-select: the item is still there, the popover did not close.
+    // Multi-valued: the control resets to its placeholder and the next label
+    // can be added without reopening anything.
+    expect(select.value).toBe("");
     expect(screen.queryByRole("option", { name: "Bug" })).not.toBeNull();
   });
 
@@ -414,8 +416,8 @@ describe("TaskDetailPage", () => {
       }),
     });
     renderPage();
-    fireEvent.click(screen.getByLabelText("Add label"));
-    fireEvent.click(screen.getByRole("option", { name: "Bug" }));
+    // An assigned label is a chip, and the chip is its own remove control.
+    fireEvent.click(screen.getByLabelText("Remove label Bug"));
     expect(mockRemoveTaskLabel).toHaveBeenCalledWith(1, 7);
   });
 
@@ -433,15 +435,14 @@ describe("TaskDetailPage", () => {
 
     fireEvent.click(screen.getByText("Original title"));
     const textarea = container.querySelector(
-      ".td-title--edit",
+      ".dk-title__edit",
     ) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "New title" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    // "Saving…" (`.td-saved.td-dim`) is expected while the write is
-    // in-flight; "✓ Saved" (`.td-saved` without `.td-dim`) is the assertion
-    // that must wait for the write AND its refetch to settle.
-    expect(screen.queryByText("✓ Saved")).toBeNull();
+    // "saving…" is expected while the write is in-flight; "✓ saved" is the
+    // assertion that must wait for the write AND its refetch to settle.
+    expect(screen.queryByText(/✓ saved/i)).toBeNull();
 
     resolveUpdate?.();
     await waitFor(() => screen.getByText(/✓ saved/i));
@@ -454,13 +455,13 @@ describe("TaskDetailPage", () => {
 
     fireEvent.click(screen.getByText("Original title"));
     const textarea = container.querySelector(
-      ".td-title--edit",
+      ".dk-title__edit",
     ) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "New title" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     await waitFor(() => expect(mockToastError).toHaveBeenCalled());
-    expect(container.querySelector(".td-saved")).toBeNull();
+    expect(screen.queryByText(/✓ saved/i)).toBeNull();
   });
 
   it("blockers still add and remove", () => {
@@ -483,37 +484,57 @@ describe("TaskDetailPage", () => {
     });
     renderPage();
 
-    fireEvent.click(screen.getByText("+ Add"));
-    fireEvent.click(screen.getByRole("option", { name: "#2 Other task" }));
+    const add = screen.getByLabelText("Add blocker") as HTMLSelectElement;
+    expect(screen.getByRole("option", { name: "#2 Other task" })).not.toBeNull();
+    fireEvent.change(add, { target: { value: "2" } });
     expect(mockAddTaskBlocker).toHaveBeenCalledWith(1, 2);
 
-    fireEvent.click(screen.getByText("Remove"));
+    fireEvent.click(screen.getByText(/^remove$/i));
     expect(mockRemoveTaskBlocker).toHaveBeenCalledWith(1, 10);
   });
 
-  it("an unassigned task renders the dashed avatar", () => {
+  // #298 dropped the avatar with the rest of the card chrome; "no assignee"
+  // now has to read as text in both places it appears.
+  it("an unassigned task says so in the quickmeta and in the picker", () => {
     setupMocks();
-    const { container } = renderPage();
-    expect(container.querySelectorAll(".td-av--none").length).toBeGreaterThan(
-      0,
-    );
-    expect(screen.getAllByText("Unassigned").length).toBeGreaterThan(0);
+    renderPage();
+    const select = screen.getByLabelText("Assignee") as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect(screen.getAllByText(/unassigned/i).length).toBeGreaterThan(1);
   });
 
   it("a task with no effort and no labels renders those rows empty", () => {
     setupMocks();
-    const { container } = renderPage();
-    screen.getByLabelText("Effort: —");
-    const labelsRow = container.querySelector(".td-labels");
+    renderPage();
+    expect((screen.getByLabelText("Effort") as HTMLSelectElement).value).toBe(
+      "",
+    );
+    const add = screen.getByLabelText("Add label");
+    const labelsRow = add.closest(".dk-kv");
     expect(labelsRow).not.toBeNull();
-    expect(labelsRow?.querySelectorAll(".td-label").length).toBe(0);
-    expect(labelsRow?.querySelector(".td-label--add")).not.toBeNull();
+    expect(labelsRow?.querySelectorAll(".dk-tag").length).toBe(0);
   });
 
-  it("no select survives on the page", () => {
+  // #298 reversed this: the old design banned every <select> in favour of
+  // custom popovers. Deck has no popover primitive, so the six property
+  // pickers are native selects — the same control the Work board's line
+  // carries. The contract this now pins is that each field has exactly one,
+  // accessibly named.
+  it("every property picker is a native, named select", () => {
     setupMocks();
     const { container } = renderPage();
-    expect(container.querySelector("select")).toBeNull();
+    expect(container.querySelectorAll("select").length).toBe(7);
+    for (const name of [
+      "Status",
+      "Priority",
+      "Assignee",
+      "Effort",
+      "Project",
+      "Add label",
+      "Add blocker",
+    ]) {
+      expect(screen.getByLabelText(name).tagName).toBe("SELECT");
+    }
   });
 
   it("a 404 renders the not-found state", () => {
@@ -594,9 +615,9 @@ describe("TaskDetailPage", () => {
     const { container } = renderPage();
     const doc = container.querySelector(".dk-detail__doc");
     expect(doc).not.toBeNull();
-    const feed = doc?.querySelector(".td-feed");
+    const feed = doc?.querySelector(".dk-list");
     expect(feed).not.toBeNull();
-    expect(feed?.querySelectorAll("li").length).toBe(2);
+    expect(feed?.querySelectorAll(".dk-line").length).toBe(2);
   });
 
   it("the runs card is mounted in the document column", () => {
@@ -666,9 +687,9 @@ describe("TaskDetailPage", () => {
     const { container } = renderPage();
     const doc = container.querySelector(".dk-detail__doc");
     expect(doc).not.toBeNull();
-    const runsList = doc?.querySelector(".td-runs");
+    const runsList = doc?.querySelector('[aria-label="Agent runs"]');
     expect(runsList).not.toBeNull();
-    expect(runsList?.querySelectorAll(".td-run").length).toBe(2);
+    expect(runsList?.querySelectorAll(".dk-line").length).toBe(2);
   });
 
   it("Replay mounts the existing replay panel", () => {
@@ -736,7 +757,7 @@ describe("TaskDetailPage", () => {
     const { container } = renderPage();
     expect(container.querySelector(".d3-replay")).toBeNull();
 
-    fireEvent.click(screen.getByText("Replay"));
+    fireEvent.click(screen.getByText(/^replay$/i));
     const doc = container.querySelector(".dk-detail__doc");
     expect(doc?.querySelector(".d3-replay")).not.toBeNull();
   });

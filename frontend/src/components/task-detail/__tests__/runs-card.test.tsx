@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("RunsCard", () => {
-  it("renders one .td-run per run, newest-first order preserved", () => {
+  it("renders one line per run, newest-first order preserved", () => {
     // The component never re-sorts — it renders exactly the order it is
     // handed, so "newest first" is the caller's (the page's query) job.
     // Distinct `prompt_preview` values, not the formatted timestamp (which
@@ -62,7 +62,7 @@ describe("RunsCard", () => {
         onReplay={vi.fn()}
       />,
     );
-    const rows = container.querySelectorAll(".td-run");
+    const rows = container.querySelectorAll(".dk-line");
     expect(rows.length).toBe(3);
     expect(rows[0]?.textContent).toContain("third-newest");
     expect(rows[1]?.textContent).toContain("second");
@@ -85,7 +85,7 @@ describe("RunsCard", () => {
         onReplay={vi.fn()}
       />,
     );
-    const aggregate = container.querySelector(".td-card__head .td-dim");
+    const aggregate = container.querySelector(".dk-group__h .note");
     expect(aggregate?.textContent).toBe("3 sessions · $0.30 · 3 calls");
   });
 
@@ -101,7 +101,7 @@ describe("RunsCard", () => {
       />,
     );
     screen.getByText("No agent has run on this task yet.");
-    expect(container.querySelector(".td-runs")).toBeNull();
+    expect(container.querySelector(".dk-list")).toBeNull();
   });
 
   it("loading and error states", () => {
@@ -144,7 +144,7 @@ describe("RunsCard", () => {
         onReplay={vi.fn()}
       />,
     );
-    const meta = container.querySelector(".td-run__meta");
+    const meta = container.querySelector(".dk-meta");
     expect(meta?.textContent).toMatch(/running/);
     expect(meta?.textContent).not.toMatch(/\d+m|\d+s/);
   });
@@ -170,11 +170,20 @@ describe("RunsCard", () => {
     expect(screen.queryByText("work")).toBeNull();
   });
 
-  it("a run with no provider row renders the dashed avatar with no initials", () => {
-    const { container } = render(
+  // #298 dropped the coloured provider avatar with the rest of the card
+  // chrome, so the "no provider" case is pinned on the thing that always
+  // carried the contract: the identity text must say it is unknown rather
+  // than borrow the profile, the project or the assignee.
+  it("a run with no provider row never invents an identity", () => {
+    render(
       <RunsCard
         runs={[
-          run({ provider_name: null, provider_display_name: null }),
+          run({
+            provider_name: null,
+            provider_display_name: null,
+            profile: "work",
+            project_name: "Alpha",
+          }),
         ]}
         isLoading={false}
         isError={false}
@@ -183,9 +192,8 @@ describe("RunsCard", () => {
         onReplay={vi.fn()}
       />,
     );
-    const dashed = container.querySelector(".td-av--none");
-    expect(dashed).not.toBeNull();
-    expect(dashed?.textContent).toBe("");
+    screen.getByText("Unknown agent");
+    expect(screen.queryByText("work")).toBeNull();
   });
 
   it("a run with no session_id offers no Replay", () => {
@@ -199,7 +207,7 @@ describe("RunsCard", () => {
         onReplay={vi.fn()}
       />,
     );
-    expect(screen.queryByText("Replay")).toBeNull();
+    expect(screen.queryByText(/^replay$/i)).toBeNull();
   });
 
   it("clicking Replay calls onReplay with the session id", () => {
@@ -214,7 +222,7 @@ describe("RunsCard", () => {
         onReplay={onReplay}
       />,
     );
-    fireEvent.click(screen.getByText("Replay"));
+    fireEvent.click(screen.getByText(/^replay$/i));
     expect(onReplay).toHaveBeenCalledWith("sess-42");
   });
 
@@ -229,7 +237,7 @@ describe("RunsCard", () => {
         onReplay={vi.fn()}
       />,
     );
-    expect(screen.getByText("Replay").getAttribute("aria-pressed")).toBe(
+    expect(screen.getByText(/^replay$/i).getAttribute("aria-pressed")).toBe(
       "true",
     );
   });
@@ -245,7 +253,7 @@ describe("RunsCard", () => {
         onReplay={vi.fn()}
       />,
     );
-    expect(withoutCost.querySelector(".td-run__cost")).toBeNull();
+    expect(withoutCost.querySelector(".cost")).toBeNull();
     cleanup();
 
     const { container: withZeroCost } = render(
@@ -258,7 +266,7 @@ describe("RunsCard", () => {
         onReplay={vi.fn()}
       />,
     );
-    expect(withZeroCost.querySelector(".td-run__cost")?.textContent).toBe(
+    expect(withZeroCost.querySelector(".cost")?.textContent).toBe(
       "$0.00",
     );
   });
