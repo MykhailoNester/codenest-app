@@ -419,3 +419,199 @@ describe("OmniBar Escape is two-stage", () => {
     expect(input.value).toBe("");
   });
 });
+
+// ─── #283: the Deck conversion ──────────────────────────────────────────────
+//
+// The stylesheet that carried `.suggestionActive`, `.rowMeta`'s per-type
+// colour and the five `.kind*` colours is gone. Selection, the panel's own
+// keyboard model and the `@library:` error path had no test, which left the
+// restyle with nothing holding it to the behaviour it replaced.
+
+describe("OmniBar keyboard selection", () => {
+  function openWithResults(): HTMLInputElement {
+    useSearchMock.mockReturnValue({
+      data: {
+        results: [
+          { type: "task", id: 1, title: "First", snippet: "", score: 3 },
+          { type: "task", id: 2, title: "Second", snippet: "", score: 2 },
+          { type: "task", id: 3, title: "Third", snippet: "", score: 1 },
+        ],
+        query: "thing",
+        total: 3,
+      },
+      isFetching: false,
+      isError: false,
+    });
+    vi.useFakeTimers();
+    renderBar();
+    const input = screen.getByPlaceholderText(PLACEHOLDER) as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "thing" } });
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    return input;
+  }
+
+  function selectedLabel(): string {
+    return document.querySelector('[aria-selected="true"]')?.textContent ?? "";
+  }
+
+  it("marks exactly one row selected, and the field points at it", () => {
+    const input = openWithResults();
+    // `.dk-line.on` is the paint; `aria-selected` plus `aria-activedescendant`
+    // is the part a screen reader and this test can both read.
+    expect(document.querySelectorAll('[aria-selected="true"]')).toHaveLength(1);
+    expect(selectedLabel()).toContain("First");
+    expect(input.getAttribute("aria-activedescendant")).toBe("omni-row-0");
+  });
+
+  it("moves with the arrows and stops at both ends — it does not wrap", () => {
+    const input = openWithResults();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(selectedLabel()).toContain("Second");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(selectedLabel()).toContain("Third");
+
+    // At the last row ArrowDown holds, rather than returning to the first.
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(selectedLabel()).toContain("Third");
+    expect(input.getAttribute("aria-activedescendant")).toBe("omni-row-2");
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(selectedLabel()).toContain("Second");
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(selectedLabel()).toContain("First");
+
+    // …and at the first row ArrowUp holds, rather than jumping to the last.
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(selectedLabel()).toContain("First");
+    expect(input.getAttribute("aria-activedescendant")).toBe("omni-row-0");
+  });
+
+  it("Enter opens whichever row the arrows left selected", () => {
+    const input = openWithResults();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(locationText()).toBe("/tasks/3");
+  });
+
+  it("hovering a row selects it, so the mouse and the arrows agree", () => {
+    openWithResults();
+    fireEvent.mouseEnter(screen.getByText("Second").closest('[role="option"]')!);
+    expect(selectedLabel()).toContain("Second");
+  });
+});
+
+describe("OmniBar rows are Deck lines", () => {
+  it("every row carries the inert glyph, and the selected one carries `.on`", () => {
+    useSearchMock.mockReturnValue({
+      data: {
+        results: [
+          { type: "task", id: 1, title: "First", snippet: "", score: 2 },
+          { type: "doc", id: 2, title: "Second", snippet: "", score: 1 },
+        ],
+        query: "thing",
+        total: 2,
+      },
+      isFetching: false,
+      isError: false,
+    });
+    vi.useFakeTimers();
+    const { container } = renderBar();
+    const input = screen.getByPlaceholderText(PLACEHOLDER);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "thing" } });
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+
+    const options = Array.from(container.querySelectorAll('[role="option"]'));
+    expect(options).toHaveLength(2);
+    for (const o of options) {
+      expect(o.classList.contains("dk-line")).toBe(true);
+      // A suggestion is not running, failing or waiting on anybody. Any other
+      // state here would be this list inventing a second vocabulary for the
+      // glyph column the rest of the app shares.
+      expect(o.querySelector(".dk-s")?.getAttribute("data-s")).toBe("idle");
+    }
+    expect(options[0]?.classList.contains("on")).toBe(true);
+    expect(options[1]?.classList.contains("on")).toBe(false);
+  });
+
+  it("names a snippet row in words, since its meta is a slug", () => {
+    useLibraryItemsMock.mockReturnValue({ data: { items: [libraryItem()] } });
+    renderBar();
+    const input = screen.getByPlaceholderText(PLACEHOLDER);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "@dep" } });
+
+    const row = screen.getByText("Dependency Scan").closest('[role="option"]')!;
+    // The per-type icon is gone. A project or member row already says what it
+    // is in its meta; this is the row that did not.
+    expect(row.querySelector(".dk-tag")?.textContent).toBe("snippet");
+  });
+
+  it("says which grammar is active, as a word", () => {
+    renderBar();
+    const input = screen.getByPlaceholderText(PLACEHOLDER);
+    fireEvent.change(input, { target: { value: "/sched" } });
+    expect(screen.getByText("slash cmd")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "@ali" } });
+    expect(screen.getByText("reference")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "" } });
+    expect(screen.getByText("palette")).toBeTruthy();
+  });
+});
+
+describe("OmniBar `@library:` rejects a bad slug out loud", () => {
+  it("an empty slug toasts rather than failing silently", () => {
+    renderBar();
+    const input = screen.getByPlaceholderText(PLACEHOLDER);
+    fireEvent.focus(input);
+
+    // `@library:` with nothing after it builds no `library-ref` row, so Enter
+    // falls past the panel to the validation branch.
+    fireEvent.change(input, { target: { value: "@library:" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(toastErrorMock).toHaveBeenCalledWith("Empty @library:<slug>");
+    expect(fetchLibraryItemBySlugMock).not.toHaveBeenCalled();
+  });
+
+  it("an invalid slug toasts once the panel is out of the way", () => {
+    renderBar();
+    const input = screen.getByPlaceholderText(PLACEHOLDER);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "@library:!bad" } });
+
+    // With the panel open, Enter activates the "fetch by slug" row — the
+    // panel's selection always wins over the bar's own Enter handling. The
+    // validation branch is the one behind it, so the panel is dismissed first
+    // (the two-stage Escape, which keeps the text).
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid @library:"),
+    );
+    expect(fetchLibraryItemBySlugMock).not.toHaveBeenCalled();
+  });
+
+  it("a slug with no item behind it says so", async () => {
+    fetchLibraryItemBySlugMock.mockResolvedValue(null);
+    renderBar();
+    const input = screen.getByPlaceholderText(PLACEHOLDER);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "@library:ghost" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        "No library item @library:ghost",
+      ),
+    );
+  });
+});

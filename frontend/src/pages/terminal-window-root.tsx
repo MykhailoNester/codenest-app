@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type ReactElement,
+  type CSSProperties,
 } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -19,8 +20,61 @@ import { recordAgentExitedAndWait } from "../lib/agent-run-telemetry";
 import { useAgentSessionStore } from "../stores/agent-session-store";
 import * as pendingLaunchStore from "../stores/pending-launch-store";
 import type { PaneLaunchSpec } from "../lib/launch";
-import styles from "./terminal-window-root.module.css";
 import { listen } from "@tauri-apps/api/event";
+
+/**
+ * The popout window's own root (#283).
+ *
+ * Deck has no full-window surface — `.dk-app` is the main shell's two-column
+ * grid, and this window has neither rail nor status line. So the three shapes
+ * below are local constants, the call `components/notification-bell.tsx` makes
+ * for `POPOVER_STYLE` and `components/startup-splash.tsx` for its own root.
+ *
+ * The ground is `--bg-1` rather than `.deck`'s `--bg`: a detached terminal
+ * window is the rail's ground, not the page's, which is what the old
+ * stylesheet also said.
+ */
+const WINDOW_STYLE: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  width: "100vw",
+  height: "100vh",
+  background: "var(--bg-1)",
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden",
+};
+
+/**
+ * `.dk-sess` / `.dk-sess__main` — whichever root `TerminalsLayout` returns —
+ * already carry `flex: 1 1 auto; min-height: 0`, so the old `.body > *` rule
+ * that forced it is not carried over: it was restating what Deck already says.
+ */
+const BODY_STYLE: CSSProperties = {
+  flex: "1 1 auto",
+  minHeight: 0,
+  position: "relative",
+  display: "flex",
+};
+
+/**
+ * The sidecar-down strip. Deck has no alert banner: `.dk-bar` is a detail
+ * page's toolbar (it carries a bottom margin and side padding meant for a
+ * `.dk-page`), and `.dk-note` is quiet prose. This is the missing primitive,
+ * declared locally and drawn from the error tokens rather than the raw
+ * `rgba(220, 38, 38, …)` literals the stylesheet hardcoded.
+ */
+const BANNER_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--u2)",
+  flex: "none",
+  padding: "var(--u2) var(--u3)",
+  background: "var(--err-bg)",
+  color: "var(--err)",
+  borderBottom: "1px solid var(--err)",
+  fontSize: "var(--fs-s)",
+};
 
 /**
  * Apply a launch spec to this window's terminal store — the popout's half
@@ -254,16 +308,19 @@ export function TerminalWindowRoot(): ReactElement {
     // `deck` is what scopes the design system, and the popout is not wrapped
     // in `DeckShell` — it has no rail and no status line. Carrying the class
     // here is what gives the same layout its Deck tokens in both windows.
-    <div className={`deck ${styles.root}`}>
+    <div className="deck" style={WINDOW_STYLE}>
       {sidecarDown && (
-        <div className={styles.banner} role="alert">
-          <span className={styles.bannerDot} aria-hidden="true" />
+        <div style={BANNER_STYLE} role="alert">
+          {/* Was a bare red dot with no text alternative. Deck's `fail` glyph
+              (`×`) is the same signal as a character, so it survives in a log
+              and with colour switched off, and it carries its own word. */}
+          <span className="dk-s" data-s="fail" role="img" aria-label="failed" />
           <span>
             Backend unavailable — active terminal sessions remain functional.
           </span>
         </div>
       )}
-      <div className={styles.body}>
+      <div style={BODY_STYLE}>
         {/* The palette is mounted here rather than inside `TerminalsLayout` so
             that component stays renderable without a `QueryClientProvider`
             (the palette needs one; three test files render the layout bare).

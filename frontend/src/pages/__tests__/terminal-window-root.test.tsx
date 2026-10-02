@@ -46,13 +46,22 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async () => () => undefined),
 }));
 
+// `useEvent` is captured rather than stubbed away, so a test can fire the
+// sidecar events the crash banner listens on.
+const { eventHandlers } = vi.hoisted(() => ({
+  eventHandlers: new Map<string, (payload: unknown) => void>(),
+}));
+
 vi.mock("../../lib/ipc", () => ({
-  useEvent: (): void => undefined,
+  useEvent: (name: string, handler: (payload: unknown) => void): void => {
+    eventHandlers.set(name, handler);
+  },
   closeTerminal: vi.fn(async () => undefined),
   agentStop: vi.fn(async () => undefined),
 }));
 
 beforeEach(() => {
+  eventHandlers.clear();
   layoutProps.length = 0;
   destroyMock.mockReset().mockResolvedValue(undefined);
   onCloseRequestedMock.mockReset().mockResolvedValue(() => undefined);
@@ -69,6 +78,37 @@ describe("TerminalWindowRoot", () => {
     });
 
     expect(layoutProps[0]?.showNavigator).toBe(true);
+  });
+
+  it("roots the window in `.deck` so the design system's tokens resolve", async () => {
+    // This window is not wrapped in `DeckShell` — it has no rail and no status
+    // line — so it opts in itself. Without the class every `var(--…)` in the
+    // tree below resolves to nothing and the window renders unstyled. #283
+    // moved this root's box from a CSS module to inline constants, which made
+    // the class the only thing still scoping the design system here.
+    const { container } = await act(async () => render(<TerminalWindowRoot />));
+    expect(container.firstElementChild?.classList.contains("deck")).toBe(true);
+  });
+
+  it("states the sidecar crash with a glyph and a word, not a bare red dot", async () => {
+    await act(async () => {
+      render(<TerminalWindowRoot />);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(async () => {
+      eventHandlers.get("sidecar_crashed")?.(null);
+    });
+
+    const banner = screen.getByRole("alert");
+    expect(banner.textContent).toContain("Backend unavailable");
+    // The dot it replaced was decoration with no text alternative.
+    expect(banner.querySelector('[aria-label="failed"]')).toBeTruthy();
+
+    await act(async () => {
+      eventHandlers.get("sidecar_ready")?.(null);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("keeps the ⌘P palette alongside it", async () => {

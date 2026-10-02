@@ -14,7 +14,14 @@
  * Escape to this component instead of also restoring a maximized pane.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactElement,
+} from "react";
 import { useProjects } from "../../lib/api";
 import {
   fsBuildFileIndex,
@@ -27,7 +34,35 @@ import { useFindActions } from "../../hooks/use-find-actions";
 import { resolveRoots } from "../../lib/explorer/roots";
 import { formatCount } from "../../lib/format-helpers";
 import { ExplorerFind } from "./explorer-find";
-import overlayStyles from "./find-palette-overlay.module.css";
+
+/**
+ * The ⌘P card's two shapes (#283).
+ *
+ * `.dk-scrim` centres its child in the viewport; a find palette belongs near
+ * the top, where the eye already is and where the result list grows downward
+ * instead of pushing the field about as it fills. That is the one thing
+ * overridden here — the dim and the inset stay Deck's.
+ *
+ * The z-index is the popout's own stacking order rather than the main
+ * window's: this card has to sit over a maximized terminal pane, which
+ * `.dk-scrim`'s 60 is under. It was 8000 before and stays 8000.
+ */
+const SCRIM_STYLE: CSSProperties = {
+  placeItems: "start center",
+  paddingTop: "12vh",
+  zIndex: 8000,
+};
+
+/**
+ * `.dk-modal` is 680px and caps at 85vh. A file palette is a narrow column of
+ * paths and wants neither — the same inline-override move
+ * `components/notification-bell.tsx` makes for its own popover.
+ */
+const CARD_STYLE: CSSProperties = {
+  width: "520px",
+  maxWidth: "92vw",
+  maxHeight: "70vh",
+};
 
 export function FindPaletteOverlay(): ReactElement | null {
   const [open, setOpen] = useState(false);
@@ -103,9 +138,10 @@ export function FindPaletteOverlay(): ReactElement | null {
   const indexedRoots = Object.keys(indexByRootId).length;
 
   return (
-    <div className={overlayStyles.scrim} role="presentation">
+    <div className="dk-scrim" style={SCRIM_STYLE} role="presentation">
       <div
-        className={overlayStyles.card}
+        className="dk-modal"
+        style={CARD_STYLE}
         data-modal
         role="dialog"
         aria-label="Find file"
@@ -139,9 +175,12 @@ export function FindPaletteOverlay(): ReactElement | null {
           </div>
         </div>
         <ExplorerFind roots={roots} />
-        <div className={overlayStyles.foot}>
-          {formatCount(totalFiles)} files indexed across {indexedRoots}{" "}
-          roots
+        {/* `.dk-side__f`, not `.dk-modal__f`: the latter is a button tray and
+            flushes its contents right, while this is a status line that reads
+            from the left. `.dk-side__f` is the rule-above-it footer the
+            navigator uses for exactly this — a count at the footnote tier. */}
+        <div className="dk-side__f">
+          {formatCount(totalFiles)} files indexed across {indexedRoots} roots
           {watchBackend ? ` · watcher: ${watchBackend}` : ""}
         </div>
       </div>
