@@ -20,9 +20,13 @@ export function projectContextRoute(projectId: number | string): string {
   return `/projects/${projectId}/context`;
 }
 
-/** `/sessions/:sessionId` — the #180 Session Inspector. */
+/**
+ * The #180 Session Inspector, which #271 folded onto the Sessions surface as
+ * the session detail's `inspect` tab. `/sessions/:sessionId` still redirects
+ * here, but a hit should land in one navigation, not two.
+ */
 export function sessionRoute(sessionId: string): string {
-  return `/sessions/${encodeURIComponent(sessionId)}`;
+  return `/terminal?view=runs&session=${encodeURIComponent(sessionId)}&tab=inspect`;
 }
 
 /**
@@ -43,7 +47,9 @@ export function routeForResult(result: SearchResult): string {
     case "inbox":
       return `/inbox?id=${result.id}`;
     case "event":
-      return result.session_id ? sessionRoute(result.session_id) : "/command";
+      return result.session_id
+        ? sessionRoute(result.session_id)
+        : "/terminal?view=runs";
     case "session":
       return sessionRoute(String(result.id));
     case "attention":

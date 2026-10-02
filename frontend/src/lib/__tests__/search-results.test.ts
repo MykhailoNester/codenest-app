@@ -34,19 +34,23 @@ describe("routeForResult", () => {
     expect(routeForResult(result("inbox", 9))).toBe("/inbox?id=9");
   });
 
+  // #271 moved the Session Inspector onto the Sessions surface as the session
+  // detail's `inspect` tab, so these land there in one navigation rather than
+  // through the `/sessions/:sessionId` redirect. The encoding assertion is the
+  // same one, on the same id.
   it("event with session_id -> the #180 Session Inspector", () => {
     expect(routeForResult(result("event", 1, { session_id: "abc123" }))).toBe(
-      "/sessions/abc123",
+      "/terminal?view=runs&session=abc123&tab=inspect",
     );
   });
 
-  it("event without session_id -> /command", () => {
-    expect(routeForResult(result("event", 1))).toBe("/command");
+  it("event without session_id -> the runs list", () => {
+    expect(routeForResult(result("event", 1))).toBe("/terminal?view=runs");
   });
 
   it("session -> the Inspector, its text id encoded", () => {
     expect(routeForResult(result("session", "abc 123&x=1"))).toBe(
-      "/sessions/abc%20123%26x%3D1",
+      "/terminal?view=runs&session=abc%20123%26x%3D1&tab=inspect",
     );
   });
 
@@ -63,9 +67,8 @@ describe("routeForResult", () => {
       /^\/projects\/\d+\/context$/,
       /^\/docs\?id=\d+$/,
       /^\/inbox\?id=\d+$/,
-      /^\/sessions\/.+$/,
+      /^\/terminal\?view=runs(&session=.+&tab=inspect)?$/,
       /^\/attention$/,
-      /^\/command$/,
     ];
     const results: SearchResult[] = [
       result("task", 1),

@@ -13,6 +13,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useParams,
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
@@ -53,7 +54,6 @@ import { InProgressPage } from "./pages/in-progress";
 // TODO: remove InboxPage and its import once workflow_items is merged into tasks.
 import { TeamPage } from "./pages/team";
 import { AgentDetailPage } from "./pages/agent-detail";
-import { SessionInspectorPage } from "./pages/session-inspector";
 import { DocsPage } from "./pages/docs";
 import { TerminalPage } from "./pages/terminal";
 import { TerminalWindowRoot } from "./pages/terminal-window-root";
@@ -99,6 +99,21 @@ function deckInitialEntry(): string {
   const p = window.location.pathname;
   if (p.length <= 1 || p.startsWith("/index")) return "/";
   return p + window.location.search;
+}
+
+/**
+ * `/sessions/:sessionId` → the session's `inspect` tab on the Sessions surface
+ * (#271). A plain `<Navigate>` cannot do this: the target needs the path param,
+ * which only resolves inside the route's element.
+ */
+function SessionRedirect(): ReactElement {
+  const { sessionId = "" } = useParams<{ sessionId: string }>();
+  return (
+    <Navigate
+      to={`/terminal?view=runs&session=${encodeURIComponent(sessionId)}&tab=inspect`}
+      replace
+    />
+  );
 }
 
 // FeatureRoute — hard-gate guard (Phase 1)
@@ -466,10 +481,11 @@ function AppInner(): ReactElement {
             </FeatureRoute>
           }
         />
-        <Route
-          path="/sessions/:sessionId"
-          element={<SessionInspectorPage />}
-        />
+        {/* #271 — the Session Inspector is the `inspect` tab on the Sessions
+            surface's session detail. The old path stays as a redirect so a
+            bookmark and an older search result still resolve; `:sessionId` has
+            to be re-read inside the element to carry it over. */}
+        <Route path="/sessions/:sessionId" element={<SessionRedirect />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/team/:name" element={<AgentDetailPage />} />
         <Route path="/docs" element={<DocsPage />} />

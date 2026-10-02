@@ -182,7 +182,11 @@ function ReplayPanelInner({
           <button
             className="d3-btn d3-btn--ghost"
             type="button"
-            onClick={() => navigate(`/sessions/${session.session_id}`)}
+            onClick={() =>
+              navigate(
+                `/terminal?view=runs&session=${encodeURIComponent(session.session_id)}&tab=inspect`,
+              )
+            }
           >
             Inspect lanes
           </button>
