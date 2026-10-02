@@ -278,7 +278,7 @@ function ContextPicker({
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Dismiss on a click anywhere else — the same `mousedown` + Escape pairing the
-  // app's other popovers use (`notification-bell.tsx:65-81`). The trigger button
+  // app's other popovers use (`notification-bell.tsx`). The trigger button
   // stops its own `mousedown` from reaching this listener, so clicking it while
   // open closes it once via its toggle instead of closing here and immediately
   // reopening.
