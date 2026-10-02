@@ -486,6 +486,13 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .dk-modal__h { display: flex; align-items: center; gap: var(--u2); flex: none;
   height: 34px; padding: 0 var(--u3); border-bottom: 1px solid var(--line);
   font-size: var(--fs-s); letter-spacing: 1.1px; text-transform: uppercase; color: var(--fg-2); }
+/* A heading inside the bar inherits it, exactly as `.dk-title h1` and
+   `.dk-side__h h3` already do. Without this a bare `<h2>` lands at the UA's
+   18px bold with ~15px margins and bursts the 34px bar — which is what the
+   event-detail modal was doing. Covers h2 and h3 so the next dialog that
+   reaches for a heading cannot reintroduce it. */
+.dk-modal__h h2, .dk-modal__h h3 { margin: 0; font: inherit;
+  letter-spacing: inherit; text-transform: inherit; }
 .dk-modal__h .sp { margin-left: auto; }
 .dk-modal__b { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--u4); }
 .dk-modal__f { display: flex; align-items: center; gap: var(--u2); justify-content: flex-end;
