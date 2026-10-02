@@ -1,13 +1,35 @@
+/**
+ * Agent detail — `/team/:name`, reached from Agents (#345).
+ *
+ * Converted off the old `Shell` as the last page on it. Nothing the page did
+ * was dropped: the range toggle, the three stats, the invocations table, the
+ * "try all time" empty state and the pager are all here, drawn with Deck's
+ * primitives instead of inline styles. Two deliberate differences:
+ *
+ *   - Back is a `Link` to `/team`, not `DetailHeader`'s `navigate(-1)` with a
+ *     fallback. `/team` is this page's only parent, and a plain link is the
+ *     idiom every converted detail page uses (`task-detail.tsx`).
+ *   - The range toggle sits in the shell's `actions` slot as a `.dk-seg`, the
+ *     way Needs You carries its state tabs — "where an action goes" puts a
+ *     filter in the title bar, not above the content.
+ */
 import { useState, type ReactElement } from "react";
-import { useParams } from "react-router-dom";
-import {
-  useAgentInvocations,
-  type AgentInvocationRow,
-} from "../lib/api";
-import { Shell } from "../components/layout/shell";
-import { DetailHeader } from "../components/layout/detail-header";
+import { Link, useParams } from "react-router-dom";
+import { useAgentInvocations, type AgentInvocationRow } from "../lib/api";
+import { DeckShell } from "../components/deck/deck-shell";
+import { DeckGrid, DeckGroup, DeckHead, DeckLine } from "../components/deck/deck-grid";
 
 type Range = "7d" | "30d" | "all";
+
+const RANGES: readonly Range[] = ["7d", "30d", "all"];
+
+/** Rows per page — the limit `useAgentInvocations` defaults to. */
+const PAGE_SIZE = 50;
+
+/** The em dash every unmeasured figure renders. Never a zero. */
+const DASH = "—";
+
+const INVOCATION_COLS = "14px 150px minmax(0, 1fr) 80px 180px";
 
 function fmtDuration(s: number): string {
   if (s < 60) return `${s}s`;
@@ -28,64 +50,21 @@ function fmtRelativeDate(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-function InvocationRow({
-  inv,
-}: {
-  inv: AgentInvocationRow;
-}): ReactElement {
-  const durationDisplay =
-    inv.duration_seconds !== null
-      ? fmtDuration(inv.duration_seconds)
-      : "—";
-
-  const profileDisplay = inv.project_name
+function invocationCells(inv: AgentInvocationRow) {
+  const when = new Date(inv.created_at).toLocaleString();
+  const what = inv.description ?? inv.label ?? DASH;
+  const profile = inv.project_name
     ? `${inv.profile} · ${inv.project_name}`
     : inv.profile;
-
-  return (
-    <tr style={{ borderBottom: "1px solid var(--line-1)" }}>
-      <td
-        style={{
-          padding: "9px 10px",
-          fontSize: 12,
-          color: "var(--fg-3)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {new Date(inv.created_at).toLocaleString()}
-      </td>
-      <td
-        style={{
-          padding: "9px 10px",
-          fontSize: 12,
-          color: "var(--fg-2)",
-          maxWidth: 320,
-        }}
-      >
-        {inv.description ?? inv.label ?? "—"}
-      </td>
-      <td
-        style={{
-          padding: "9px 10px",
-          fontSize: 12,
-          color: "var(--fg-3)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {durationDisplay}
-      </td>
-      <td
-        style={{
-          padding: "9px 10px",
-          fontSize: 12,
-          color: "var(--fg-4)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {profileDisplay}
-      </td>
-    </tr>
-  );
+  return [
+    when,
+    { v: what, cls: "sub", title: what },
+    {
+      v: inv.duration_seconds !== null ? fmtDuration(inv.duration_seconds) : DASH,
+      cls: "r",
+    },
+    { v: profile, cls: "r" },
+  ];
 }
 
 export function AgentDetailPage(): ReactElement {
@@ -98,236 +77,135 @@ export function AgentDetailPage(): ReactElement {
   const stats = data?.stats;
   const invocations = data?.invocations ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.ceil(total / 50);
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
-  const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+  const ranges = (
+    <div className="dk-seg" role="tablist" aria-label="Range">
+      {RANGES.map((r) => (
+        <button
+          key={r}
+          type="button"
+          role="tab"
+          aria-selected={range === r}
+          className={range === r ? "on" : undefined}
+          onClick={() => {
+            setRange(r);
+            setPage(0);
+          }}
+        >
+          {r}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
-    <Shell>
-      <div style={{ padding: "0 24px 24px" }}>
-        <DetailHeader
-          crumbs={`Team · ${name}`}
-          title={displayName}
-          fallbackRoute="/team"
-          actions={
-            <>
-              {(["7d", "30d", "all"] as Range[]).map((r) => (
+    <DeckShell title={name.toLowerCase()} crumb="agent" actions={ranges}>
+      <Link className="dk-btn bare" to="/team" style={{ marginBottom: "var(--u3)" }}>
+        ← agents
+      </Link>
+
+      {isError && (
+        <div className="dk-note" style={{ color: "var(--err)" }}>
+          Failed to load invocation data for &ldquo;{name}&rdquo;.
+        </div>
+      )}
+
+      {isLoading && <div className="dk-note">Loading&hellip;</div>}
+
+      {stats !== undefined && (
+        <div className="dk-bigs">
+          <div className="dk-big">
+            <div className="v">{stats.total_invocations}</div>
+            <div className="l">
+              invocations
+              {stats.total_invocations > 0 ? ` · ${stats.completed} completed` : ""}
+            </div>
+          </div>
+          <div className="dk-big">
+            <div className={stats.last_invoked_at === null ? "v na" : "v"}>
+              {stats.last_invoked_at !== null
+                ? fmtRelativeDate(stats.last_invoked_at)
+                : DASH}
+            </div>
+            <div className="l">
+              last invoked
+              {stats.last_invoked_at !== null
+                ? ` · ${new Date(stats.last_invoked_at).toLocaleDateString()}`
+                : ""}
+            </div>
+          </div>
+          <div className="dk-big">
+            <div className={stats.avg_duration_seconds === null ? "v na" : "v"}>
+              {stats.avg_duration_seconds !== null
+                ? fmtDuration(stats.avg_duration_seconds)
+                : DASH}
+            </div>
+            <div className="l">avg duration</div>
+          </div>
+        </div>
+      )}
+
+      <DeckGroup label="invocations" count={stats ? stats.total_invocations : DASH}>
+        {!isLoading && stats !== undefined && stats.total_invocations === 0 && (
+          <div className="dk-note sans">
+            <div style={{ color: "var(--fg-2)" }}>
+              {name} has not been invoked in this period.
+            </div>
+            {range !== "all" && (
+              <div>
+                Try switching to{" "}
                 <button
-                  key={r}
-                  className={`d3-btn ${range === r ? "d3-btn--primary" : "d3-btn--ghost"}`}
                   type="button"
+                  className="dk-btn bare"
                   onClick={() => {
-                    setRange(r);
+                    setRange("all");
                     setPage(0);
                   }}
                 >
-                  {r}
+                  all time
                 </button>
+                .
+              </div>
+            )}
+          </div>
+        )}
+
+        {invocations.length > 0 && (
+          <>
+            <DeckGrid cols={INVOCATION_COLS} label="Invocations">
+              <DeckHead cells={["when", "task", "r duration", "r profile"]} />
+              {invocations.map((inv) => (
+                <DeckLine key={inv.id} cells={invocationCells(inv)} />
               ))}
-            </>
-          }
-        />
+            </DeckGrid>
 
-        {isError && (
-          <div
-            style={{ color: "var(--fg-3)", fontSize: 13, padding: "16px 0" }}
-          >
-            Failed to load invocation data for &ldquo;{name}&rdquo;.
-          </div>
-        )}
-
-        {isLoading && (
-          <div
-            style={{ color: "var(--fg-3)", fontSize: 13, padding: "16px 0" }}
-          >
-            Loading&hellip;
-          </div>
-        )}
-
-        {/* Stat tiles */}
-        {stats !== undefined && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 12,
-              marginBottom: 20,
-            }}
-          >
-            <div className="d3-card" style={{ padding: "14px 16px" }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--fg-4)",
-                  marginBottom: 4,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                Invocations
-              </div>
-              <div
-                style={{ fontSize: 22, fontWeight: 700, color: "var(--fg-0)" }}
-              >
-                {stats.total_invocations}
-              </div>
-              {stats.total_invocations > 0 && (
-                <div style={{ fontSize: 11, color: "var(--fg-4)", marginTop: 2 }}>
-                  {stats.completed} completed
-                </div>
-              )}
-            </div>
-
-            <div className="d3-card" style={{ padding: "14px 16px" }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--fg-4)",
-                  marginBottom: 4,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                Last Invoked
-              </div>
-              <div
-                style={{ fontSize: 22, fontWeight: 700, color: "var(--fg-0)" }}
-              >
-                {stats.last_invoked_at !== null
-                  ? fmtRelativeDate(stats.last_invoked_at)
-                  : "—"}
-              </div>
-              {stats.last_invoked_at !== null && (
-                <div style={{ fontSize: 11, color: "var(--fg-4)", marginTop: 2 }}>
-                  {new Date(stats.last_invoked_at).toLocaleDateString()}
-                </div>
-              )}
-            </div>
-
-            <div className="d3-card" style={{ padding: "14px 16px" }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--fg-4)",
-                  marginBottom: 4,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                Avg Duration
-              </div>
-              <div
-                style={{ fontSize: 22, fontWeight: 700, color: "var(--fg-0)" }}
-              >
-                {stats.avg_duration_seconds !== null
-                  ? fmtDuration(stats.avg_duration_seconds)
-                  : "—"}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Invocations table */}
-        <div
-          className="d3-card"
-          style={{ padding: "16px", overflow: "hidden" }}
-        >
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--fg-1)",
-              marginBottom: 12,
-            }}
-          >
-            Invocations
-          </div>
-
-          {!isLoading && stats !== undefined && stats.total_invocations === 0 && (
-            <div style={{ fontSize: 12, color: "var(--fg-4)", padding: "8px 0" }}>
-              {displayName} hasn&apos;t been invoked in this period.
-              {range !== "all" && (
-                <> Try switching to{" "}
-                  <button
-                    type="button"
-                    className="d3-btn d3-btn--ghost"
-                    style={{ fontSize: 11 }}
-                    onClick={() => setRange("all")}
-                  >
-                    all time
-                  </button>.
-                </>
-              )}
-            </div>
-          )}
-
-          {invocations.length > 0 && (
-            <>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid var(--line-2)" }}>
-                    {["When", "Task", "Duration", "Profile"].map((h) => (
-                      <th
-                        key={h}
-                        style={{
-                          padding: "6px 10px",
-                          fontSize: 11,
-                          color: "var(--fg-3)",
-                          textAlign: "left",
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {invocations.map((inv) => (
-                    <InvocationRow key={inv.id} inv={inv} />
-                  ))}
-                </tbody>
-              </table>
-
-              {totalPages > 1 && (
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    marginTop: 12,
-                    fontSize: 12,
-                    color: "var(--fg-3)",
-                  }}
+            {totalPages > 1 && (
+              <div className="dk-actions" style={{ marginTop: "var(--u3)" }}>
+                <button
+                  type="button"
+                  className="dk-btn bare"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => p - 1)}
                 >
-                  <button
-                    className="d3-btn d3-btn--ghost"
-                    type="button"
-                    disabled={page === 0}
-                    onClick={() => setPage((p) => p - 1)}
-                    style={{ fontSize: 12 }}
-                  >
-                    &larr; Prev
-                  </button>
-                  <span>
-                    Page {page + 1} of {totalPages}
-                  </span>
-                  <button
-                    className="d3-btn d3-btn--ghost"
-                    type="button"
-                    disabled={page >= totalPages - 1}
-                    onClick={() => setPage((p) => p + 1)}
-                    style={{ fontSize: 12 }}
-                  >
-                    Next &rarr;
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </Shell>
+                  ← prev
+                </button>
+                <span className="dim">
+                  page {page + 1} of {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className="dk-btn bare"
+                  disabled={page >= totalPages - 1}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  next →
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </DeckGroup>
+    </DeckShell>
   );
 }
