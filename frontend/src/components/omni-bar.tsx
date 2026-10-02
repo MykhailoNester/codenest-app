@@ -1,7 +1,47 @@
+/**
+ * OmniBar — the search-and-command field in the top chrome, on Deck (#283).
+ *
+ * Mount status, because it changes what a reviewer can check: nothing renders
+ * this component today. It was a child of `.d3-omni-row` in `shell.tsx`, and
+ * that shell is gone; every surviving mention of `OmniBar` outside this file
+ * and its test is a comment. The conversion is done on its merits — the
+ * component is whole and tested — but it cannot be clicked until something
+ * mounts it again.
+ *
+ * What the stylesheet was carrying, and where it went
+ * ---------------------------------------------------
+ * `.input` becomes `.dk-field`, which is the same 24px bordered row with the
+ * leading glyph and the focus border Deck already draws. `.suggestion` becomes
+ * `.dk-line`, so a result row is the same primitive as a task row, and
+ * `.suggestionActive` becomes `.on`, Deck's selected row.
+ *
+ * Two colour vocabularies are deliberately not carried over:
+ *
+ *   * **The five kind colours** (`.kindSlash` amber, `.kindReference` purple,
+ *     `.kindSearch` sky, `.kindPrompt` green). Deck has four semantics and
+ *     they mean broken / wants-you / finished / live — a grammar is none of
+ *     those, and two of the five had no Deck colour at all. The badge already
+ *     carries the grammar as a word, which is the trade
+ *     `components/notification-bell.tsx` made for its per-type icon chip, so
+ *     the word does the work and `.dk-tag` draws it plain. `data-s="run"` is
+ *     the one state left, and it marks dictation actually listening.
+ *   * **`typeColor` on a row's meta.** Seven hex literals, one per result
+ *     type, on text that sits under a group header already naming that type.
+ *
+ * The per-row type icon goes the same way as the bell's: out, in favour of the
+ * word. The group header names the type in search mode and `omni-mentions.ts`
+ * puts it in `meta` for projects and members; a snippet row is the one case
+ * that had only an icon, so it gets a `.dk-tag` saying so.
+ *
+ * This component does **not** portal — `.suggestions` was absolutely
+ * positioned inside the bar — so there is no `display: contents` wrapper to
+ * add. It does need a `.deck` ancestor from whatever remounts it.
+ */
 import {
   useEffect,
   useMemo,
   useState,
+  type CSSProperties,
   type ChangeEvent,
   type DragEvent,
   type KeyboardEvent,
@@ -41,13 +81,84 @@ import {
   projectRoute,
   resultMeta,
   routeForResult,
-  typeColor,
-  typeIcon,
 } from "../lib/search-results";
 import { useDebounce } from "../hooks/use-debounce";
 import { useVoiceDictation } from "../lib/use-voice-dictation";
 import { Icon } from "./icon";
-import styles from "./omni-bar.module.css";
+
+/**
+ * The bar's own box. Deck has no "item in the chrome row" primitive — the
+ * real shell's chrome is `.dk-status`, a fixed-height strip, not a growing
+ * flex child — so this is a local constant, the call
+ * `components/notification-bell.tsx` makes for `POPOVER_STYLE`.
+ *
+ * `position: relative` is load-bearing: it is what the suggestions panel's
+ * `top: 100%` is measured from. `z-index` lifts the bar and its absolute
+ * child over page content that makes its own stacking context.
+ */
+const BAR_STYLE: CSSProperties = {
+  position: "relative",
+  zIndex: 20,
+  flex: "1 1 auto",
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--u2)",
+  minWidth: 0,
+};
+
+/**
+ * Files are over the bar and will be captured if dropped. `--mark` is Deck's
+ * one "this wants your attention" colour and is not in the severity ramp,
+ * which is right: a pending drop is not a state of anything.
+ */
+const BAR_DROP_STYLE: CSSProperties = {
+  ...BAR_STYLE,
+  outline: "2px dashed var(--mark)",
+  outlineOffset: -2,
+  background: "var(--sel)",
+};
+
+/**
+ * The results panel.
+ *
+ * `.dk-modal` rather than `.dk-menu`: a menu is `min-width: 190px` and sits at
+ * a corner, while this is a full-width sheet under the field. `.dk-modal` is
+ * the panel box — ground, border, radius — and, decisively, it is the one
+ * surface the narrow-viewport rule exempts. Under 1100px Deck gives every
+ * `.dk-head`/`.dk-line` a 900px floor so a wide table scrolls sideways rather
+ * than crushing, and `.dk-modal .dk-line { min-width: 0 }` is the opt-out. A
+ * 520px dropdown of 900px rows is exactly the bug that rule would cause, and
+ * `components/notification-bell.tsx` takes `.dk-modal` for its popover for the
+ * same reason.
+ *
+ * `width: auto` undoes `.dk-modal`'s own 680px, since `left`/`right` set the
+ * width here, and `overflowY` moves the scroll onto the panel because the
+ * rows are its direct children rather than living in a `.dk-modal__b`.
+ */
+const PANEL_STYLE: CSSProperties = {
+  position: "absolute",
+  top: "100%",
+  left: 0,
+  right: 0,
+  width: "auto",
+  marginTop: 4,
+  maxHeight: "min(320px, 50vh)",
+  overflowY: "auto",
+  zIndex: 100,
+};
+
+/**
+ * Three columns: the state glyph Deck puts on every row, the label, and the
+ * meta. Not in `DECK_COLS` — that module is a deck primitive and out of scope
+ * — so it lives with its one list, as `BELL_COLS` does.
+ */
+const OMNI_COLS = "14px minmax(0, 1fr) 132px";
+
+/** Pinned under the rows, as it was: a rule and one line of footnote. */
+const PANEL_FOOT_STYLE: CSSProperties = {
+  padding: "var(--u) var(--u3)",
+  borderTop: "1px solid var(--line)",
+};
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -84,13 +195,6 @@ const KIND_LABEL: Record<IntentResult["kind"], string> = {
   prompt: "prompt",
 };
 
-const KIND_CLASS: Record<IntentResult["kind"], string> = {
-  "command-palette": styles.kindEmpty ?? "",
-  slash: styles.kindSlash ?? "",
-  reference: styles.kindReference ?? "",
-  search: styles.kindSearch ?? "",
-  prompt: styles.kindPrompt ?? "",
-};
 
 /**
  * What the dropdown is showing right now. `"search"` covers both the
@@ -130,17 +234,18 @@ function rowKey(row: OmniRow, idx: number): string {
   }
 }
 
-function rowIconName(row: OmniRow): string {
-  switch (row.kind) {
-    case "command":
-      return row.command.icon;
-    case "mention":
-      if (row.row.kind === "project") return "projects";
-      if (row.row.kind === "member") return "team";
-      return "library";
-    case "result":
-      return typeIcon(row.result.type);
-  }
+/**
+ * The word a row needs when nothing else on it names its kind.
+ *
+ * `omni-mentions.ts` already puts "project", "agent" or "human" in `meta`, and
+ * in search mode the group header above the row names the type, so those rows
+ * need nothing. A library row's `meta` is the slug, which leaves it as the one
+ * row whose kind was carried by its icon alone — so it gets the word.
+ */
+function rowTag(row: OmniRow): string | null {
+  if (row.kind !== "mention") return null;
+  const k = row.row.kind;
+  return k === "library" || k === "library-ref" ? "snippet" : null;
 }
 
 function rowLabel(row: OmniRow): string {
@@ -453,28 +558,40 @@ export function OmniBar(): ReactElement {
 
   function renderRow(row: OmniRow, idx: number): ReactElement {
     const selected = idx === clampedIdx;
-    const metaStyle =
-      row.kind === "result" ? { color: typeColor(row.result.type) } : undefined;
+    const tag = rowTag(row);
     return (
+      // A `.dk-line` but not a `DeckLine`: this list is a combobox popup, so
+      // the rows have to stay `role="option"` under `role="listbox"` with the
+      // input keeping focus and `aria-activedescendant` pointing at the
+      // selection. `DeckLine` is a `role="row"` driven by a roving tabindex,
+      // which would move focus off the field and break typing. The class is
+      // the part worth sharing; the keyboard model is not.
       <div
         key={rowKey(row, idx)}
         id={`omni-row-${idx}`}
         role="option"
         aria-selected={selected}
-        className={`${styles.suggestion ?? ""} ${selected ? (styles.suggestionActive ?? "") : ""}`}
+        className={`dk-line${selected ? " on" : ""}`}
         onMouseDown={(e) => {
           e.preventDefault();
           activate(row);
         }}
         onMouseEnter={() => setActiveIdx(idx)}
       >
-        <span className={styles.rowIcon ?? ""}>
-          <Icon name={rowIconName(row)} size={12} />
+        {/* Deck puts a state in column one of every row. A suggestion is not
+            running, failing or waiting on anybody — `idle` ("inert") is the
+            honest reading, and claiming anything else would give this list a
+            second vocabulary for the glyph the rest of the app shares. */}
+        <span className="dk-s" data-s="idle" role="img" aria-label="inert" />
+        {/* `.dk-actions` is the gapped cluster — without it a label and a tag
+            butt together and read as one word. Same title-plus-tag shape the
+            bell uses. The label keeps its own element so it stays the row's
+            accessible name rather than "Dependency Scan snippet". */}
+        <span className="dk-actions">
+          <span className="trunc">{rowLabel(row)}</span>
+          {tag !== null && <span className="dk-tag">{tag}</span>}
         </span>
-        <span>{rowLabel(row)}</span>
-        <span className={styles.rowMeta ?? ""} style={metaStyle}>
-          {rowMetaText(row)}
-        </span>
+        <span className="r dim">{rowMetaText(row)}</span>
       </div>
     );
   }
@@ -494,7 +611,11 @@ export function OmniBar(): ReactElement {
             });
             return (
               <div key={type}>
-                <div role="presentation" className={styles.groupHeader ?? ""}>
+                {/* `.dk-grp__h` is Deck's section label — uppercase, tracked
+                    out, on the faint tier. It is named for the rail's groups
+                    but it is a plain class and this is the same thing: a word
+                    over a list. */}
+                <div role="presentation" className="dk-grp__h">
                   {GROUP_LABELS[type]}
                 </div>
                 {groupRows}
@@ -509,47 +630,60 @@ export function OmniBar(): ReactElement {
 
   return (
     <div
-      className={`${styles.bar ?? ""} ${dragOver ? (styles.barDrag ?? "") : ""}`}
+      style={dragOver ? BAR_DROP_STYLE : BAR_STYLE}
       role="search"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <span className={styles.leadIcon ?? ""}>
-        <Icon name="search" size={13} />
+      {/* `.dk-field` is Deck's bordered input row, and it already draws the
+          leading glyph slot and the focus border `.input:focus` hand-rolled.
+          `components/explorer/find-palette-overlay.tsx` sets the precedent. */}
+      <span className="dk-field" style={{ flex: "1 1 auto", minWidth: 0 }}>
+        <span className="dim" style={{ display: "flex", flex: "none" }}>
+          <Icon name="search" size={13} />
+        </span>
+        <input
+          type="text"
+          value={query}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder="Search, or type / for commands, @ to reference…"
+          aria-label="Search and commands"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls="omni-listbox"
+          aria-activedescendant={
+            open && rows.length ? `omni-row-${clampedIdx}` : undefined
+          }
+          // The first character selects the grammar in classifyIntent
+          // (lib/prompt-intent.ts), and `@library:<slug>` is rejected by a
+          // lowercase-only regex, so an OS rewrite can change which branch
+          // runs or turn a valid slug into an error toast.
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          autoComplete="off"
+        />
       </span>
-      <input
-        type="text"
-        className={styles.input}
-        value={query}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        placeholder="Search, or type / for commands, @ to reference…"
-        aria-label="Search and commands"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls="omni-listbox"
-        aria-activedescendant={
-          open && rows.length ? `omni-row-${clampedIdx}` : undefined
-        }
-        // The first character selects the grammar in classifyIntent
-        // (lib/prompt-intent.ts), and `@library:<slug>` is rejected by a
-        // lowercase-only regex, so an OS rewrite can change which branch
-        // runs or turn a valid slug into an error toast.
-        spellCheck={false}
-        autoCorrect="off"
-        autoCapitalize="off"
-        autoComplete="off"
-      />
-      <span className={`${styles.kind ?? ""} ${KIND_CLASS[intent.kind] ?? ""}`}>
+      {/* The grammar, as a word. `run` while dictating is the one state the
+          badge still carries — see the file header on the five kind colours. */}
+      <span
+        className="dk-tag"
+        style={{ flex: "none" }}
+        data-s={voice.listening ? "run" : undefined}
+      >
         {voice.listening ? "listening…" : KIND_LABEL[intent.kind]}
       </span>
       {captureEligible ? (
+        // A named secondary action, so `.dk-btn` — the pill it replaces was a
+        // third button shape with no rule behind it, which is the thing
+        // design/deck/README.md's "Where an action goes" exists to stop.
         <button
           type="button"
-          className={styles.captureChip ?? ""}
+          className="dk-btn"
           onMouseDown={(e) => {
             e.preventDefault();
             capture();
@@ -559,7 +693,7 @@ export function OmniBar(): ReactElement {
           Save as inbox item ⌘↵
         </button>
       ) : null}
-      <span className={styles.hint}>
+      <span className="dk-meta">
         {voice.supported
           ? "Cmd+Shift+Space dictate (audio leaves device) · "
           : ""}
@@ -567,21 +701,30 @@ export function OmniBar(): ReactElement {
           modeHint
         ) : (
           <>
-            <kbd className={styles.kbdHint}>⌘K</kbd> palette · drop files
+            {/* Deck has no key-cap primitive; `.dk-tag` is the chip it would
+                be, and the element stays a real `<kbd>`. */}
+            <kbd className="dk-tag">⌘K</kbd> palette · drop files
           </>
         )}
       </span>
       {open ? (
-        <div id="omni-listbox" role="listbox" className={styles.suggestions ?? ""}>
+        <div
+          id="omni-listbox"
+          role="listbox"
+          className="dk-modal"
+          style={{ ...PANEL_STYLE, ["--cols" as string]: OMNI_COLS }}
+        >
           {panelMessage !== null ? (
-            <div className={styles.emptyState ?? ""}>{panelMessage}</div>
+            <div className="dk-note">{panelMessage}</div>
           ) : (
             renderPanelRows()
           )}
           {/* Complements the always-visible `.hint` strip above (which
               already states the mode-specific navigate/act hint) rather
               than repeating it. */}
-          <div className={styles.panelFooter ?? ""}>esc close</div>
+          <div className="dk-meta trunc" style={PANEL_FOOT_STYLE}>
+            esc close
+          </div>
         </div>
       ) : null}
     </div>
