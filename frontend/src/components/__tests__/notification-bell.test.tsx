@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NotificationBell } from "../notification-bell";
 import { notifRoute } from "../../lib/notification-route";
+import * as api from "../../lib/api";
 import type { Notification } from "../../lib/api";
 
 const mockUseNotifications = vi.fn();
@@ -29,6 +30,13 @@ function wrapper({ children }: { children: React.ReactNode }) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockUseNotifications.mockReturnValue({ data: [] });
+});
+
+// `afterEach(cleanup)` is mandatory: `frontend/vite.config.ts` does not set
+// `globals: true`, so Testing Library's auto-cleanup never registers and two
+// bells from two tests end up in the same document.
+afterEach(() => {
+  cleanup();
 });
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -211,7 +219,9 @@ describe("NotificationBell", () => {
       data: [makeNotif(1, true)],
     });
     render(<NotificationBell />, { wrapper });
-    const badge = document.querySelector("[class*='badge']");
+    // Was `[class*='badge']`, the CSS-module class. #283 replaced the blue
+    // rounded pill with Deck's `.dk-tag`; the assertion is the same one.
+    const badge = document.querySelector(".dk-tag");
     expect(badge).toBeNull();
   });
 
@@ -251,5 +261,121 @@ describe("NotificationBell", () => {
     // Close
     fireEvent.click(bell);
     expect(document.querySelector("[role='dialog']")).toBeNull();
+  });
+
+  // ─── #283: the Deck conversion ────────────────────────────────────────────
+
+  function openBell(data: Notification[]): void {
+    mockUseNotifications.mockReturnValue({ data });
+    render(<NotificationBell />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: /^Notifications/ }));
+  }
+
+  it("portals the popover inside a `.deck` scope so the tokens resolve", () => {
+    openBell([makeNotif(1, false)]);
+    const dialog = document.querySelector("[role='dialog']");
+    expect(dialog).toBeTruthy();
+    expect(dialog!.closest(".deck")).toBeTruthy();
+  });
+
+  it("draws the popover on Deck, not on a CSS module", () => {
+    openBell([makeNotif(1, false)]);
+    const dialog = document.querySelector("[role='dialog']")!;
+    expect(dialog.className).toContain("dk-modal");
+    expect(document.querySelector("[role='grid']")).toBeTruthy();
+    // The old module hashed every class as `notification-bell_<name>__<hash>`.
+    expect(document.querySelector("[class*='notification-bell']")).toBeNull();
+  });
+
+  it("gives an unread row the same `?` glyph Needs You gives it, and a read row `·`", () => {
+    openBell([makeNotif(1, false), makeNotif(2, true)]);
+    const glyphs = Array.from(
+      document.querySelectorAll("[role='row'] .dk-s"),
+    ).map((g) => g.getAttribute("data-s"));
+    expect(glyphs).toEqual(["wait", "idle"]);
+  });
+
+  it("marks an unread title bold on `.sub` and leaves a read one plain", () => {
+    openBell([makeNotif(1, false), makeNotif(2, true)]);
+    expect(screen.getByText("Item 1").tagName).toBe("B");
+    expect(screen.getByText("Item 1").className).toBe("sub");
+    expect(screen.getByText("Item 2").tagName).toBe("SPAN");
+  });
+
+  it("names the notification type as a word instead of a per-type icon chip", () => {
+    openBell([makeNotif(1, false, { type: "session_failed" })]);
+    expect(screen.getByText("session failed")).toBeTruthy();
+  });
+
+  it("falls back to the raw type, de-underscored, for a type it does not know", () => {
+    openBell([makeNotif(1, false, { type: "some_future_type" })]);
+    expect(screen.getByText("some future type")).toBeTruthy();
+  });
+
+  it("marks one row read from its own button", () => {
+    openBell([makeNotif(7, false)]);
+    fireEvent.click(screen.getByRole("button", { name: "mark read" }));
+    expect(api.markNotificationRead).toHaveBeenCalledWith(7);
+    expect(api.markAllNotificationsRead).not.toHaveBeenCalled();
+  });
+
+  it("marks one row read when the row itself is activated", () => {
+    openBell([makeNotif(9, false)]);
+    fireEvent.click(document.querySelector("[role='row'].dk-line")!);
+    expect(api.markNotificationRead).toHaveBeenCalledWith(9);
+  });
+
+  it("offers neither mark-read affordance on a row that is already read", () => {
+    openBell([makeNotif(3, true)]);
+    expect(screen.queryByRole("button", { name: "mark read" })).toBeNull();
+    fireEvent.click(document.querySelector("[role='row'].dk-line")!);
+    expect(api.markNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it("shows `mark all read` only while something is unread", () => {
+    openBell([makeNotif(1, false)]);
+    const markAll = screen.getByRole("button", { name: "mark all read" });
+    fireEvent.click(markAll);
+    expect(api.markAllNotificationsRead).toHaveBeenCalled();
+  });
+
+  it("hides `mark all read` when everything is read", () => {
+    openBell([makeNotif(1, true)]);
+    expect(screen.queryByRole("button", { name: "mark all read" })).toBeNull();
+  });
+
+  it("keeps the relative timestamp on every row", () => {
+    openBell([makeNotif(1, false)]);
+    // Three gridcells: the state glyph, the subject, the timestamp.
+    const cells = document.querySelectorAll("[role='row'].dk-line [role='gridcell']");
+    expect(cells.length).toBe(3);
+    expect(cells[2]!.className).toBe("r");
+    expect(cells[2]!.textContent).toBeTruthy();
+  });
+
+  it("expands a body on click and collapses it again, without marking it read", () => {
+    openBell([makeNotif(1, false, { body: "the long story" })]);
+    const body = screen.getByText("the long story");
+    expect(body.getAttribute("style")).toContain("line-clamp");
+    fireEvent.click(body);
+    expect(screen.getByText("the long story").getAttribute("style")).toContain(
+      "pre-wrap",
+    );
+    expect(api.markNotificationRead).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("the long story"));
+    expect(screen.getByText("the long story").getAttribute("style")).toContain(
+      "line-clamp",
+    );
+  });
+
+  it("renders the empty state when there is nothing at all", () => {
+    openBell([]);
+    expect(screen.getByText("No notifications")).toBeTruthy();
+    expect(document.querySelector("[role='grid']")).toBeNull();
+  });
+
+  it("caps the list at 50 rows", () => {
+    openBell(Array.from({ length: 60 }, (_, i) => makeNotif(i + 1, false)));
+    expect(document.querySelectorAll("[role='row'].dk-line").length).toBe(50);
   });
 });
