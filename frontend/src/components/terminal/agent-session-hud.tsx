@@ -8,7 +8,7 @@
  * instead of shoving it around (#38; the dock's module doc has the full why).
  *
  * Deliberately a sibling of `<SessionHud/>` rather than a reuse of it, sharing
- * only `session-hud.module.css` so the two strips are visually identical. They
+ * only `session-hud-chrome.tsx` so the two strips are visually identical. They
  * read different sources, and that is the whole point:
  *
  * * `<SessionHud/>` (shell panes) reports what the *sidecar* knows, assembled
@@ -53,7 +53,22 @@ import {
   formatElapsed,
   formatTokens,
 } from "./session-hud-format";
-import styles from "./session-hud.module.css";
+import {
+  CELL_STYLE,
+  hudCells,
+  type HudCell,
+  KEY_STYLE,
+  STRIP_DOCKED_DIMMED_STYLE,
+  STRIP_DOCKED_STYLE,
+  THINK_STYLE,
+  VALUE_ACC_STYLE,
+  VALUE_INFO_STYLE,
+  VALUE_NUM_STYLE,
+  VALUE_OK_STYLE,
+  VALUE_STYLE,
+  VALUE_WARN_STYLE,
+} from "./session-hud-chrome";
+import { ThinkingDot } from "./session-hud-motion";
 
 interface AgentSessionHudProps {
   state: ConversationState;
@@ -76,7 +91,7 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
     return () => clearInterval(id);
   }, [ticking]);
 
-  const cells: ReactElement[] = [];
+  const cells: HudCell[] = [];
 
   // Status. The one cell that always renders once a session exists at all: it
   // is what the strip is *for*, and every value it can take is a fact the
@@ -88,15 +103,15 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
         : "running"
       : state.status;
   cells.push(
-    <div key="status" className={styles.cell} data-cell="status">
+    <div key="status" style={CELL_STYLE} data-cell="status">
       <span
-        className={`${styles.value} ${
+        style={
           state.status === "running"
-            ? styles.acc
+            ? VALUE_ACC_STYLE
             : state.status === "exited"
-              ? styles.warn
-              : styles.ok
-        }`}
+              ? VALUE_WARN_STYLE
+              : VALUE_OK_STYLE
+        }
       >
         {statusLabel}
       </span>
@@ -109,19 +124,19 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
     if (contextWindow !== null) {
       const pct = Math.min(100, Math.round((contextTokens / contextWindow) * 100));
       cells.push(
-        <div key="ctx" className={styles.cell} data-cell="ctx">
-          <span className={styles.key}>ctx</span>
+        <div key="ctx" style={CELL_STYLE} data-cell="ctx">
+          <span style={KEY_STYLE}>ctx</span>
           <span className="dk-meter">
             <i style={{ width: `${pct}%` }} />
           </span>
-          <span className={`${styles.value} ${styles.ok}`}>
+          <span style={VALUE_OK_STYLE}>
             {formatContextPercent(contextTokens, contextWindow)}
           </span>
         </div>,
       );
       cells.push(
-        <div key="tokens" className={styles.cell} data-cell="tokens">
-          <span className={`${styles.value} ${styles.num}`}>
+        <div key="tokens" style={CELL_STYLE} data-cell="tokens">
+          <span style={VALUE_NUM_STYLE}>
             {formatTokens(contextTokens)}/{formatTokens(contextWindow)}
           </span>
         </div>,
@@ -129,9 +144,9 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
     } else {
       // Usage without a window: tokens are still a fact, the percentage is not.
       cells.push(
-        <div key="tokens" className={styles.cell} data-cell="tokens">
-          <span className={styles.key}>ctx</span>
-          <span className={`${styles.value} ${styles.num}`}>
+        <div key="tokens" style={CELL_STYLE} data-cell="tokens">
+          <span style={KEY_STYLE}>ctx</span>
+          <span style={VALUE_NUM_STYLE}>
             {formatTokens(contextTokens)}
           </span>
         </div>,
@@ -141,9 +156,9 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
 
   if (state.lastResult?.costUsd != null) {
     cells.push(
-      <div key="cost" className={styles.cell} data-cell="cost">
+      <div key="cost" style={CELL_STYLE} data-cell="cost">
         <span
-          className={`${styles.value} ${styles.warn}`}
+          style={VALUE_WARN_STYLE}
           title="The CLI's own total_cost_usd for this session. On a subscription this is notional pricing, not billing."
         >
           {formatUSD(state.lastResult.costUsd)}
@@ -163,21 +178,21 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
         : null;
   if (turnSeconds !== null) {
     cells.push(
-      <div key="elapsed" className={styles.cell} data-cell="elapsed">
-        <span className={styles.value}>{formatElapsed(turnSeconds)}</span>
+      <div key="elapsed" style={CELL_STYLE} data-cell="elapsed">
+        <span style={VALUE_STYLE}>{formatElapsed(turnSeconds)}</span>
       </div>,
     );
   }
 
   if (git !== null) {
     cells.push(
-      <div key="git" className={styles.cell} data-cell="git">
-        <span className={`${styles.value} ${styles.ok}`}>{git.branch}</span>
+      <div key="git" style={CELL_STYLE} data-cell="git">
+        <span style={VALUE_OK_STYLE}>{git.branch}</span>
         {git.dirty ? (
-          <span className={`${styles.value} ${styles.warn}`}>*</span>
+          <span style={VALUE_WARN_STYLE}>*</span>
         ) : null}
         {git.ahead != null && git.ahead > 0 ? (
-          <span className={`${styles.value} ${styles.info}`}>+{git.ahead}</span>
+          <span style={VALUE_INFO_STYLE}>+{git.ahead}</span>
         ) : null}
       </div>,
     );
@@ -185,9 +200,9 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
 
   if (state.thinking && !exited) {
     cells.push(
-      <div key="thinking" className={styles.cell} data-cell="thinking">
-        <span className={styles.think}>
-          <span className={styles.thinkDot} />
+      <div key="thinking" style={CELL_STYLE} data-cell="thinking">
+        <span style={THINK_STYLE}>
+          <ThinkingDot />
           Thinking
           {state.thinkingTokens > 0 ? ` ${formatTokens(state.thinkingTokens)}` : ""}
         </span>
@@ -197,8 +212,8 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
 
   if (state.permissions.length > 0) {
     cells.push(
-      <div key="perm" className={styles.cell} data-cell="perm">
-        <span className={`${styles.value} ${styles.warn}`}>
+      <div key="perm" style={CELL_STYLE} data-cell="perm">
+        <span style={VALUE_WARN_STYLE}>
           {state.permissions.length} awaiting approval
         </span>
       </div>,
@@ -207,15 +222,11 @@ export function AgentSessionHud({ state, cwd }: AgentSessionHudProps): ReactElem
 
   return (
     <div
-      className={
-        dimmed
-          ? `${styles.strip} ${styles.stripDocked} ${styles.dimmed}`
-          : `${styles.strip} ${styles.stripDocked}`
-      }
+      style={dimmed ? STRIP_DOCKED_DIMMED_STYLE : STRIP_DOCKED_STYLE}
       data-testid="agent-session-hud"
       data-dimmed={dimmed ? "true" : "false"}
     >
-      {cells}
+      {hudCells(cells)}
     </div>
   );
 }
