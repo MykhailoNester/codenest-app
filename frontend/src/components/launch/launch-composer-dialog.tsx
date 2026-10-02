@@ -14,8 +14,9 @@
  * test suite can keep rendering it bare, with no router and no terminal
  * store (`components/launch/__tests__/launch-composer.test.tsx`).
  *
- * Every entry point in the app mounts this wrapper: `layout/shell.tsx` (the
- * top bar and the OmniBar's `OMNI_EVENT_OPEN_LAUNCH`) with no source, and
+ * Every entry point in the app mounts this wrapper: `deck/deck-shell.tsx` (the
+ * status row's launch button and the palette's `OMNI_EVENT_OPEN_LAUNCH`) with
+ * no source, and
  * `launch-from-source-button.tsx` (five of the six task/inbox entry points)
  * with a seeded one.
  */

@@ -28,7 +28,7 @@
  */
 
 // `node:fs` resolves at runtime (vitest runs on node) but not at type level —
-// see `mission-control.test.tsx`, which names the same gap for the same reason.
+// see `deck-home.test.tsx`, which names the same gap for the same reason.
 // prettier-ignore
 // @ts-expect-error -- node builtins are outside this project's type roots
 import { readFileSync } from "node:fs";

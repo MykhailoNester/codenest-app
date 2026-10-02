@@ -1,27 +1,38 @@
 /**
- * shell.test.tsx
+ * DeckShell — the Launch entry points, re-homed from the deleted
+ * `components/layout/__tests__/shell.test.tsx` (#345).
  *
- * The top-bar and OmniBar Launch entry points (task #35): both must reach
- * `LaunchComposerDialog` with no source. The heavy chrome siblings
- * (`Sidebar`, `Topbar`, `OmniBar`, `NotificationBell`)
- * are stubbed — this file's job is the Launch button and the
- * `OMNI_EVENT_OPEN_LAUNCH` listener, not the rest of the shell's chrome
- * (which has no test of its own today and is out of scope here).
+ * The old `Shell` is gone, but the contract these two tests pinned is DeckShell's
+ * too and is the reason it is worth pinning: the status row's `launch` button
+ * and the palette's `OMNI_EVENT_OPEN_LAUNCH` event must both reach
+ * `LaunchComposerDialog` with no source ref. The event exists precisely so the
+ * palette does not have to thread a callback through every page, which means
+ * nothing else would notice if the listener stopped being registered.
+ *
+ * The heavy chrome siblings are stubbed — this file is about the two entry
+ * points, not the rail or the status line.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { Shell } from "../shell";
+import { DeckShell } from "../deck-shell";
 import { useAgentCatalogStore } from "../../../stores/agent-catalog-store";
 import { OMNI_EVENT_OPEN_LAUNCH } from "../../../lib/omni-commands";
 
-const { mockUseActiveSessionCounts, mockUseProjects, mockUseLookups } =
-  vi.hoisted(() => ({
-    mockUseActiveSessionCounts: vi.fn(),
-    mockUseProjects: vi.fn(),
-    mockUseLookups: vi.fn(),
-  }));
+const {
+  mockUseActiveSessionCounts,
+  mockUseProjects,
+  mockUseLookups,
+  mockUseAttention,
+  mockUseDailySpend,
+} = vi.hoisted(() => ({
+  mockUseActiveSessionCounts: vi.fn(),
+  mockUseProjects: vi.fn(),
+  mockUseLookups: vi.fn(),
+  mockUseAttention: vi.fn(),
+  mockUseDailySpend: vi.fn(),
+}));
 
 vi.mock("../../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../lib/api")>();
@@ -30,6 +41,8 @@ vi.mock("../../../lib/api", async (importOriginal) => {
     useActiveSessionCounts: () => mockUseActiveSessionCounts(),
     useProjects: () => mockUseProjects(),
     useLookups: () => mockUseLookups(),
+    useAttention: () => mockUseAttention(),
+    useDailySpend: () => mockUseDailySpend(),
     useLaunchPresets: () => ({ data: [] }),
     useCreateLaunchPreset: () => ({ mutateAsync: vi.fn(), isPending: false }),
     useDeleteLaunchPreset: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -37,10 +50,17 @@ vi.mock("../../../lib/api", async (importOriginal) => {
   };
 });
 
-vi.mock("../sidebar", () => ({ Sidebar: () => null }));
-vi.mock("../topbar", () => ({ Topbar: () => null }));
-vi.mock("../../omni-bar", () => ({ OmniBar: () => null }));
 vi.mock("../../notification-bell", () => ({ NotificationBell: () => null }));
+
+function renderShell(): void {
+  render(
+    <MemoryRouter>
+      <DeckShell title="deck">
+        <div>page content</div>
+      </DeckShell>
+    </MemoryRouter>,
+  );
+}
 
 beforeEach(() => {
   mockUseActiveSessionCounts.mockReturnValue({ activeCount: 0 });
@@ -48,6 +68,8 @@ beforeEach(() => {
     data: [{ id: 1, name: "codenest", path: "/repo/codenest" }],
   });
   mockUseLookups.mockReturnValue({ data: { profiles: [] } });
+  mockUseAttention.mockReturnValue({ data: undefined });
+  mockUseDailySpend.mockReturnValue({ data: undefined });
   useAgentCatalogStore.setState({
     providers: [
       {
@@ -72,22 +94,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Shell — Launch entry points", () => {
-  it("the top-bar Launch button opens the composer with no source ref", () => {
-    render(
-      <MemoryRouter>
-        <Shell>
-          <div>page content</div>
-        </Shell>
-      </MemoryRouter>,
-    );
+describe("DeckShell — Launch entry points", () => {
+  it("the status row's launch button opens the composer with no source ref", () => {
+    renderShell();
 
     expect(document.querySelector('[aria-label="Launch session"]')).toBeNull();
 
-    const launchButton = Array.from(
-      document.querySelectorAll("button"),
-    ).find((b) => b.textContent?.includes("Launch"));
-    if (!launchButton) throw new Error("expected the top-bar Launch button");
+    const launchButton = Array.from(document.querySelectorAll("button")).find(
+      // Case-insensitive because Deck lowercases every control label; the old
+      // Shell's button read "Launch". The rule is which button, not its case.
+      (b) => b.textContent?.toLowerCase().includes("launch"),
+    );
+    if (!launchButton) throw new Error("expected the status row's launch button");
     fireEvent.click(launchButton);
 
     expect(
@@ -96,14 +114,8 @@ describe("Shell — Launch entry points", () => {
     expect(document.querySelector(".lp-head__ref")).toBeNull();
   });
 
-  it("the OmniBar's open-launch event opens the same dialog", async () => {
-    render(
-      <MemoryRouter>
-        <Shell>
-          <div>page content</div>
-        </Shell>
-      </MemoryRouter>,
-    );
+  it("the palette's open-launch event opens the same dialog", async () => {
+    renderShell();
 
     expect(document.querySelector('[aria-label="Launch session"]')).toBeNull();
 

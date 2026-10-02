@@ -40,6 +40,25 @@
  * The mark is read **once, on mount**. A stamp that moved while you were
  * reading would erase the divider under your eyes, which is the one thing it
  * exists not to do.
+ *
+ * ## What #345 carried over when Mission Control was deleted
+ *
+ * Mission Control held three things no other surface did, so retiring it would
+ * have deleted them rather than re-drawn them:
+ *
+ * - **The source chip and the compaction marker**, off `ActiveSessions`. Both
+ *   are P1 rows in the design's data table, nothing else in the app renders
+ *   either, and the compaction marker is the element the design singled out as
+ *   the one worth arguing for. They are a `source` column on the running list.
+ * - **The board counts** (todo + backlog), off the "Your board" tile.
+ * - **`resolved_today`**, which the old Needs You panel printed beside the
+ *   mean. It is in the mean-resolution tile's label.
+ *
+ * Deliberately not carried: the "Vendor cost" (P3) and "Agent todo lists" (P2)
+ * tiles. Both can only ever render a dash, and the two lanes behind them are
+ * already named on this page — the OTLP receiver by the tool-failures tile, the
+ * hook lane by the needs-you empty copy. A dash that names a lane twice is not
+ * a second measurement.
  */
 
 import {
@@ -65,6 +84,7 @@ import {
   sessionIdFromDelta,
 } from "../lib/sse-session-envelope";
 import {
+  formatCount,
   formatDuration,
   formatUSD,
   parseUtcMs,
@@ -250,6 +270,61 @@ function sessionLabel(s: AgentSession): string {
   return prompt || s.profile;
 }
 
+/**
+ * The two P1 session rows carried off Mission Control's `ActiveSessions` when
+ * that panel was retired (#345). Nothing else in the app renders either, so
+ * dropping them with the panel would have deleted a capability rather than a
+ * rendering of one.
+ *
+ * The source chip renders `entrypoint` verbatim: three values exist on this
+ * machine (claude-desktop, cli, sdk-cli) and the set is open, so a fixed
+ * per-client presentation would mis-render the first value nobody has seen.
+ * `null` (the scanner has not reached this session) and absent (a sidecar
+ * predating migration 009) are the same claim — we do not know — and both say
+ * "unknown".
+ *
+ * The compaction marker is the element the design called the one worth arguing
+ * for: context exhaustion is the commonest silent failure in a long session and
+ * no client shows it as history. `> 0` rather than `!= null`, so a scanned
+ * session that was never compacted stays quiet instead of wearing a zero badge.
+ */
+function sessionProvenance(s: AgentSession): ReactNode {
+  return (
+    <>
+      <span
+        className={s.source_app ? undefined : "dim"}
+        title={
+          s.source_app
+            ? `Started by ${s.source_app}${s.cli_version ? ` · CLI ${s.cli_version}` : ""}`
+            : "No transcript has been read for this session yet"
+        }
+      >
+        {s.source_app ?? "unknown"}
+      </span>
+      {(s.compaction_count ?? 0) > 0 && (
+        <>
+          {" "}
+          <span
+            className="dk-tag"
+            data-s="wait"
+            title={
+              s.context_peak_tokens
+                ? `Peak context ${formatCount(s.context_peak_tokens)} tokens before compaction`
+                : "This session was compacted"
+            }
+          >
+            compacted ×{s.compaction_count}
+          </span>
+        </>
+      )}
+    </>
+  );
+}
+
+const SESSION_COLS = "14px minmax(0, 1fr) 110px 130px 150px 62px 96px";
+
+const SESSION_HEAD = ["session", "model", "where", "source", "r elapsed", "r cost"];
+
 function sessionCells(s: AgentSession) {
   const elapsed = Math.floor((Date.now() - parseUtcMs(s.started_at)) / 1000);
   const label = sessionLabel(s);
@@ -257,6 +332,7 @@ function sessionCells(s: AgentSession) {
     { v: label, cls: "sub", title: label },
     s.model ?? DASH,
     s.project_name ?? DASH,
+    { v: sessionProvenance(s) },
     { v: elapsed >= 0 ? formatDuration(elapsed) : DASH, cls: "r" },
     { v: formatUSD(s.cost_usd), cls: "r" },
   ];
@@ -357,6 +433,7 @@ export function DeckHomePage(): ReactElement {
   const live = sessions.filter((s) => s.status !== "ended");
   const running = live.filter((s) => s.status === "active");
 
+  const board = dash?.task_counts;
   const inProgress = dash?.in_progress_tasks ?? [];
   const activity = (dash?.recent_activity ?? []).slice(0, CHANGED_LIMIT);
   // A first visit has no mark, so nothing is "new" — every row goes below the
@@ -393,9 +470,25 @@ export function DeckHomePage(): ReactElement {
           value={spend === undefined ? DASH : formatUSD(spend.cost_usd)}
           label="spend today · estimated"
         />
+        {/* Carried off Mission Control's "Your board" tile (#345). A dash until
+            the dashboard payload answers: "0 todo · 0 backlog" on first paint,
+            or whenever the sidecar is unreachable, is this page's own honesty
+            rule broken on the page that states it. */}
+        <Big
+          value={board === undefined ? DASH : board.todo + board.backlog}
+          label={
+            board === undefined
+              ? "your board · waiting for the sidecar"
+              : `your board · ${board.todo} todo · ${board.backlog} backlog`
+          }
+        />
         <Big
           value={formatAverage(counts?.resolved_today_avg_seconds)}
-          label="mean resolution · resolved today"
+          label={
+            counts
+              ? `mean resolution · ${counts.resolved_today} resolved today`
+              : "mean resolution · resolved today"
+          }
         />
         {/* Permanently dashed until there is a ceiling to divide by. See the
             module docstring: the prototype's "69% · runs out 16:12" is not a
@@ -454,8 +547,8 @@ export function DeckHomePage(): ReactElement {
         ) : live.length === 0 ? (
           <div className="dk-note sans">No session is running.</div>
         ) : (
-          <DeckGrid cols={DECK_COLS.default} label="Running">
-            <DeckHead cells={["session", "model", "where", "r elapsed", "r cost"]} />
+          <DeckGrid cols={SESSION_COLS} label="Running">
+            <DeckHead cells={SESSION_HEAD} />
             {live.map((s) => (
               <DeckLine
                 key={s.session_id}
