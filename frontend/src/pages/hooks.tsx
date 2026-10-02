@@ -664,18 +664,22 @@ function SourceLegend({
         at all, which is what makes them easy to miss. Each one adds to what the
         others declared.
       </p>
-      <div className="">
+      <div>
+        {/* `.dk-kv` is a two-column grid (96px label, then the value). Passing
+            a third child put the note on an implicit row in the 96px column,
+            where it wrapped one word per line. Path and note share the value
+            cell instead, and the label is a `span` so `.dk-kv > span:first-child`
+            actually styles it. */}
         {report.sources.map((s) => (
-          <div
-            key={s.slug}
-            className="dk-kv"
-          >
-            <div className="sub">
+          <div key={s.slug} className="dk-kv">
+            <span>
               {s.label}
               {s.observable ? "" : " — contribution unknown"}
+            </span>
+            <div>
+              <div className="mono dim">{s.where}</div>
+              <div className="dim">{s.note}</div>
             </div>
-            <div className="mono dim">{s.where}</div>
-            <div className="dim">{s.note}</div>
           </div>
         ))}
       </div>
