@@ -35,6 +35,7 @@
  */
 
 import {
+  Children,
   cloneElement,
   createContext,
   isValidElement,
@@ -167,13 +168,26 @@ const PRE_CODE_STYLE: CSSProperties = {
 
 const BLOCKQUOTE_STYLE: CSSProperties = {
   margin: "0 0 var(--u3)",
-  // No bottom padding: the quote's last paragraph brings its own `--u3`, which
-  // the old `blockquote > :last-child` rule used to strip. Letting that margin
-  // stand and dropping the padding keeps the same inner height.
-  padding: "2px 0 0 var(--u3)",
+  // The quote's own padding is the spacing; its last paragraph's own margin
+  // would double it, which is what `collapseLastMargin` below takes back.
+  padding: "2px 0 2px var(--u3)",
   borderLeft: "2px solid var(--line-2)",
   color: "var(--fg-3)",
 };
+
+/** `blockquote > :last-child { margin-bottom: 0 }`, as data — a structural
+ *  pseudo-class has no inline form. The quote's first child needs no such
+ *  treatment: every block `.dk-prose` styles already has `margin-top: 0`. */
+function collapseLastMargin(children: ReactNode): ReactNode {
+  const items = Children.toArray(children);
+  const last = items.findLast((c) => isValidElement(c));
+  if (last === undefined) return children;
+  return items.map((c) =>
+    c === last && isValidElement<{ style?: CSSProperties }>(c)
+      ? cloneElement(c, { style: { ...c.props.style, marginBottom: 0 } })
+      : c,
+  );
+}
 
 const HR_STYLE: CSSProperties = {
   margin: "var(--u4) 0",
@@ -378,7 +392,7 @@ export function AgentMarkdown({ text }: { text: string }): ReactElement {
             </pre>
           ),
           blockquote: ({ children }) => (
-            <blockquote style={BLOCKQUOTE_STYLE}>{children}</blockquote>
+            <blockquote style={BLOCKQUOTE_STYLE}>{collapseLastMargin(children)}</blockquote>
           ),
           hr: () => <hr style={HR_STYLE} />,
           table: ({ children }) => (
