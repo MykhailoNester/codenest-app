@@ -443,6 +443,98 @@ async def complete_onboarding() -> dict:
     return {"completed": True}
 
 
+# Tables `factory_reset` wipes, ordered to respect FK constraints (children
+# before parents). `workspace_state` is wiped so onboarding_completed clears.
+#
+# Module-level rather than inline so `tests/sidecar/test_factory_reset.py` can
+# import it and check it against the real schema: a name left here for a table
+# that #276 dropped, or a typo, would otherwise only ever surface as a logged
+# warning that nothing reads.
+_WIPE_TABLES: tuple[str, ...] = (
+    # deepest dependents first
+    "session_project_costs",
+    "agent_events",
+    "agent_runs",
+    "agent_sessions",
+    "project_agents",
+    "project_skills",
+    "project_commands",
+    "org_agents",
+    "mcp_server_project_scopes",
+    "mcp_servers",
+    "agent_launch_overrides",
+    "notifications",
+    "schedule_runs",
+    "schedules",
+    "launch_presets",
+    "launch_source_overrides",
+    "provider_models",
+    "providers",
+    "budget_threshold_alerts",
+    "budgets",
+    "activity_log",
+    "task_blockers",
+    "attachments",
+    "insight_runs",
+    "task_label_assignments",
+    "task_comments",
+    "task_subtasks",
+    "tasks",
+    "workflow_items",
+    "documents",
+    "members",
+    "library_items",
+    "workspaces",
+    "taxonomies",
+    "profiles",
+    # project_roots is user-owned state (which directories parent one
+    # project per git repo), so a factory reset must clear it too —
+    # otherwise the cwd resolver keeps auto-creating "discovered"
+    # projects under roots the user believes they wiped.
+    "project_roots",
+    # session_field_provenance has no FK to agent_sessions (a hook must
+    # never be blocked by an FK check), so it cannot be cleared by a
+    # cascade and has to be named here or a reset would leave claim rows
+    # pointing at sessions that no longer exist.
+    "session_field_provenance",
+    # The Lane C transcript scan's two side tables (#163), named here for
+    # the same reason: neither carries an FK to `agent_sessions`
+    # (`transcript_scan_state` deliberately records session ids that have
+    # no session row at all), so neither is reachable by a cascade. Leaving
+    # `transcript_scan_state` behind would be worse than leaving orphan
+    # rows: its byte offsets would tell the next pass every transcript had
+    # already been read, and the wiped database would never refill.
+    "transcript_scan_state",
+    "agent_session_compactions",
+    # Per-repo session spans (#173). Same reason again: no FK to
+    # `agent_sessions`, because they are written from the hook ingest path
+    # and a hook must never be blocked by an FK check. They are derived
+    # from `agent_events`, but not rebuilt automatically, so a reset that
+    # left them would keep showing per-project stretches of sessions that
+    # no longer exist and that nothing would ever recompute away.
+    "session_project_spans",
+    # The attention queue (#162). Derived, and carrying no FK to any of its
+    # subjects, so nothing above cascades into it. It would rebuild itself
+    # on the next refresh anyway — but not before the wiped app showed a
+    # queue of items about sessions and tasks that no longer exist, and any
+    # item whose subject is gone for good would never be re-produced and so
+    # would never be swept either.
+    "attention_items",
+    # Lane B's metric series (#175). No FK to `agent_sessions` either — the
+    # receiver enforces the join itself and refuses any export naming a
+    # session that does not exist, so the constraint would buy nothing on a
+    # path that takes pushed input. Named here because a reset that left
+    # these behind would leave the only durable record of what wiped
+    # sessions cost, attached to session ids nothing can resolve.
+    "otlp_metric_series",
+    # Lane B's span aggregates (#178). Same reasoning as the line above.
+    "otlp_span_stats",
+    "projects",
+    "app_settings",
+    "workspace_state",
+)
+
+
 @router.post("/factory-reset")
 async def factory_reset() -> dict:
     """Wipe all user data and reset onboarding so the next launch starts fresh.
@@ -455,98 +547,7 @@ async def factory_reset() -> dict:
     """
     db = await get_db()
 
-    # Tables to wipe — ordered to respect FK constraints (children before parents).
-    # workspace_state is wiped so onboarding_completed is cleared.
-    tables = [
-        # deepest dependents first
-        "session_project_costs",
-        "agent_events",
-        "agent_runs",
-        "agent_sessions",
-        "project_agents",
-        "project_skills",
-        "project_commands",
-        "org_agents",
-        "mcp_server_project_scopes",
-        "mcp_servers",
-        "agent_launch_overrides",
-        "notifications",
-        "schedule_runs",
-        "schedules",
-        "parallel_run_attempts",
-        "parallel_runs",
-        "marketplace_installs",
-        "launch_presets",
-        "launch_source_overrides",
-        "provider_models",
-        "providers",
-        "budget_threshold_alerts",
-        "budgets",
-        "activity_log",
-        "task_blockers",
-        "attachments",
-        "insight_runs",
-        "task_label_assignments",
-        "task_subtasks",
-        "tasks",
-        "workflow_items",
-        "documents",
-        "members",
-        "preview_visits",
-        "library_items",
-        "sync_snapshots",
-        "sync_targets",
-        "plugins",
-        "workspaces",
-        "taxonomies",
-        "integration_catalog",
-        "profiles",
-        # project_roots is user-owned state (which directories parent one
-        # project per git repo), so a factory reset must clear it too —
-        # otherwise the cwd resolver keeps auto-creating "discovered"
-        # projects under roots the user believes they wiped.
-        "project_roots",
-        # session_field_provenance has no FK to agent_sessions (a hook must
-        # never be blocked by an FK check), so it cannot be cleared by a
-        # cascade and has to be named here or a reset would leave claim rows
-        # pointing at sessions that no longer exist.
-        "session_field_provenance",
-        # The Lane C transcript scan's two side tables (#163), named here for
-        # the same reason: neither carries an FK to `agent_sessions`
-        # (`transcript_scan_state` deliberately records session ids that have
-        # no session row at all), so neither is reachable by a cascade. Leaving
-        # `transcript_scan_state` behind would be worse than leaving orphan
-        # rows: its byte offsets would tell the next pass every transcript had
-        # already been read, and the wiped database would never refill.
-        "transcript_scan_state",
-        "agent_session_compactions",
-        # Per-repo session spans (#173). Same reason again: no FK to
-        # `agent_sessions`, because they are written from the hook ingest path
-        # and a hook must never be blocked by an FK check. They are derived
-        # from `agent_events`, but not rebuilt automatically, so a reset that
-        # left them would keep showing per-project stretches of sessions that
-        # no longer exist and that nothing would ever recompute away.
-        "session_project_spans",
-        # The attention queue (#162). Derived, and carrying no FK to any of its
-        # subjects, so nothing above cascades into it. It would rebuild itself
-        # on the next refresh anyway — but not before the wiped app showed a
-        # queue of items about sessions and tasks that no longer exist, and any
-        # item whose subject is gone for good would never be re-produced and so
-        # would never be swept either.
-        "attention_items",
-        # Lane B's metric series (#175). No FK to `agent_sessions` either — the
-        # receiver enforces the join itself and refuses any export naming a
-        # session that does not exist, so the constraint would buy nothing on a
-        # path that takes pushed input. Named here because a reset that left
-        # these behind would leave the only durable record of what wiped
-        # sessions cost, attached to session ids nothing can resolve.
-        "otlp_metric_series",
-        # Lane B's span aggregates (#178). Same reasoning as the line above.
-        "otlp_span_stats",
-        "projects",
-        "app_settings",
-        "workspace_state",
-    ]
+    tables = _WIPE_TABLES
     for table in tables:
         try:
             await db.execute(f"DELETE FROM {table}")
@@ -557,7 +558,7 @@ async def factory_reset() -> dict:
     await db.commit()
 
     # Restore the seeded reference data (app_settings, taxonomies, workspaces,
-    # integration_catalog, and the Unassigned sentinel project) that the wipe
+    # and the Unassigned sentinel project) that the wipe
     # just deleted.  providers / provider_models
     # / profiles are intentionally NOT reseeded — post-reset those tables must
     # be empty (=0) so onboarding starts completely clean.
