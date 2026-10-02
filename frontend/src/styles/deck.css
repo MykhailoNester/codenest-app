@@ -333,6 +333,13 @@
   .dk-page > * { max-width: none; }
   .dk-list { overflow-x: auto; }
   .dk-head, .dk-line { min-width: 900px; }
+  /* ...but not inside a dialog or popover. Those set their own width and
+     size their columns for it, so the page floor makes their rows overflow
+     the panel they live in — the notification bell is 520px wide and its
+     subject column was being pushed out of sight on any window under
+     1100px. The floor exists for a page grid squeezed by the viewport,
+     which is not a thing that happens to a panel. */
+  .dk-modal .dk-head, .dk-modal .dk-line { min-width: 0; }
 }
 
 .dk-bigs { display: flex; gap: 44px; flex-wrap: wrap; margin-bottom: var(--group-gap); padding: 0 var(--u3) var(--u6); border-bottom: 1px solid var(--line); }
