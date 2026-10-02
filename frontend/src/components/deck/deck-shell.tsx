@@ -67,17 +67,17 @@ function DeckStatus(): ReactElement {
         <span className="dk-s" role="img" aria-label="running" data-s="run" /> <b>{activeCount}</b>{" "}
         running
       </span>
-      <span className="sep">·</span>
+      <span className="sep" aria-hidden="true">·</span>
       <span>
         <span className="dk-s" role="img" aria-label="blocking" data-s="block" />{" "}
         <b>{counts?.blocking ?? 0}</b> blocking
       </span>
-      <span className="sep">·</span>
+      <span className="sep" aria-hidden="true">·</span>
       <span>
         <span className="dk-s" role="img" aria-label="stalled" data-s="stall" />{" "}
         <b>{counts?.stalled ?? 0}</b> stalled
       </span>
-      <span className="sep">·</span>
+      <span className="sep" aria-hidden="true">·</span>
       <span>{spend ? formatUSD(spend.cost_usd) : "—"} today</span>
       <span className="sp" />
       <button
