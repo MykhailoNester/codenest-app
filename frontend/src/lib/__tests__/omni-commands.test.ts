@@ -57,11 +57,12 @@ const EXTRA_PATHS = [
 
 describe("OMNI_COMMANDS shape", () => {
   // 26 → 27 with #162's `attention` slug; 27 → 28 with #171's `hooks` slug;
-  // 28 → 29 with #178's `latency` slug.
+  // 28 → 29 with #178's `latency` slug; 29 → 28 with #270, which removes the
+  // `notifications` nav row (folded into Needs You).
   // The registry derives its nav-entries from NAV_ITEMS, so this number is the
   // guard that a new nav row was a decision rather than an accident.
-  it("has exactly 29 entries", () => {
-    expect(OMNI_COMMANDS.length).toBe(29);
+  it("has exactly 28 entries", () => {
+    expect(OMNI_COMMANDS.length).toBe(28);
   });
 
   it("has unique ids", () => {
@@ -173,7 +174,7 @@ describe("buildCommandRows — gating", () => {
   });
 
   it("an unknown feature map hides nothing", () => {
-    expect(buildCommandRows("", {}, 100).length).toBe(29);
+    expect(buildCommandRows("", {}, 100).length).toBe(28);
   });
 
   // Property pinned: a disabled feature can never yield a command that

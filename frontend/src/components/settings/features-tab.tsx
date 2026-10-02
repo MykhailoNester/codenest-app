@@ -24,15 +24,11 @@ const FEATURE_META: Record<string, { label: string; description: string }> = {
   attention: {
     label: "Needs You",
     description:
-      "The attention queue: stalled sessions, failed scheduled runs, budget thresholds and blocked tasks in one list.",
+      "The attention queue: stalled sessions, failed scheduled runs, budget thresholds, blocked tasks and unread notifications in one list.",
   },
   work: {
     label: "Work (Tasks, Inbox)",
     description: "Task tracking and inbox triage pipeline.",
-  },
-  notifications: {
-    label: "Notifications",
-    description: "Notifications center and activity event feed.",
   },
   schedules: {
     label: "Schedules",

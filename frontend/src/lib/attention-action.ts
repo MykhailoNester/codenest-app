@@ -23,6 +23,7 @@
  */
 
 import type { AttentionItem } from "./api";
+import { notifRoute } from "./notification-route";
 
 /** A task or inbox item a seeded launch can be composed from. */
 export interface AttentionLaunchSource {
@@ -44,6 +45,8 @@ export type AttentionAction =
       source: AttentionLaunchSource | null;
       projectId: number | null;
     }
+  /** Clear the unread-notification backlog this row stands for. */
+  | { kind: "markAllRead"; label: string }
   /** Nothing to open. `waitingOn` names what would have to exist. */
   | { kind: "none"; waitingOn: string };
 
@@ -65,6 +68,109 @@ const KIND_SURFACE: Readonly<Record<string, { path: string; label: string }>> = 
   budget_threshold: { path: "/budgets", label: "open budgets" },
   inbox_backlog: { path: "/tasks", label: "triage inbox" },
 };
+
+/**
+ * What to call a destination `notifRoute` chose.
+ *
+ * The notification routing table predates this page and returns bare paths, so
+ * the button needs a verb from somewhere. Keyed on the first path segment
+ * rather than on the notification type, because the type list is the one that
+ * keeps growing and a type this table has not heard of still lands on a path
+ * it has.
+ */
+function routeLabel(path: string): string {
+  const head = path.split(/[/?]/)[1] ?? "";
+  switch (head) {
+    case "tasks":
+      return "open task";
+    case "inbox":
+      return "triage inbox";
+    case "budgets":
+      return "open budgets";
+    case "command":
+      return "open command";
+    case "sessions":
+      return "open session";
+    case "projects":
+      return "open project";
+    default:
+      return "open";
+  }
+}
+
+/** The `payload_json` an attention item carries. Every field optional — the
+ *  column is producer-specific extras and a reader must survive all of them
+ *  being absent. */
+interface AttentionPayload {
+  notification_id?: unknown;
+  notification_type?: unknown;
+  notification_payload?: unknown;
+}
+
+function payloadOf(item: AttentionItem): AttentionPayload {
+  if (!item.payload_json) return {};
+  try {
+    const parsed: unknown = JSON.parse(item.payload_json);
+    return parsed !== null && typeof parsed === "object"
+      ? (parsed as AttentionPayload)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The `notifications.id` behind a folded notification item, or null.
+ *
+ * This is what "mark read" needs, and it is read from `payload_json` rather
+ * than parsed back out of `dedup_key`: the key is the condition's name and the
+ * service is free to change its spelling, while the payload is the row's own
+ * record of where it came from.
+ */
+/** Whether this row came from the folded `notifications` table (#270). */
+export function isNotificationItem(item: AttentionItem): boolean {
+  return (
+    item.kind === "notification_unread" || item.kind === "notification_backlog"
+  );
+}
+
+export function notificationIdOf(item: AttentionItem): number | null {
+  const id = payloadOf(item).notification_id;
+  return typeof id === "number" ? id : null;
+}
+
+/**
+ * Where a folded notification points, via the routing table that already
+ * existed for it (`notification-route.ts`).
+ *
+ * That module has been computing destinations for nobody since it was written —
+ * neither the bell nor the page it belonged to ever navigated, both saying in
+ * a comment that notifications are "informational only". Folding them into a
+ * queue whose entire job is to take you somewhere is what finally gives it a
+ * caller.
+ *
+ * `"/"` means `notifRoute` recognised nothing, so it is treated as no
+ * destination rather than silently dropping the user on the home screen.
+ */
+function notificationRoute(item: AttentionItem): string | null {
+  const payload = payloadOf(item);
+  const type = payload.notification_type;
+  if (typeof type !== "string") return null;
+  const inner = payload.notification_payload;
+  const path = notifRoute({
+    id: notificationIdOf(item) ?? 0,
+    type,
+    title: item.title,
+    body: item.detail,
+    payload_json:
+      inner !== null && typeof inner === "object" ? JSON.stringify(inner) : null,
+    target: null,
+    priority: "normal",
+    read_at: null,
+    created_at: item.first_seen_at,
+  });
+  return path === "/" ? null : path;
+}
 
 /**
  * The one action an item offers.
@@ -104,7 +210,16 @@ export function primaryAction(item: AttentionItem): AttentionAction {
     return { kind: "route", label: surface.label, path: surface.path };
   }
 
-  // 4. A ticket with no session: the next step is to start one, with the
+  // 4. A folded notification's own destination.
+  const notification = notificationRoute(item);
+  if (notification) {
+    return { kind: "route", label: routeLabel(notification), path: notification };
+  }
+  if (item.kind === "notification_backlog") {
+    return { kind: "markAllRead", label: "mark all read" };
+  }
+
+  // 5. A ticket with no session: the next step is to start one, with the
   //    agent, project and model the launch seed already knows.
   if (item.task_id !== null) {
     return {
@@ -136,6 +251,10 @@ export function primaryAction(item: AttentionItem): AttentionAction {
  * one meaning — when it would duplicate the primary action's destination.
  */
 export function inspectPath(item: AttentionItem): string | null {
+  // A folded notification's second action is "mark read" — the thing that
+  // ends it. Offering a third would break the deck's two-actions-per-row rule
+  // and would put the row's own meaning behind an overflow menu.
+  if (isNotificationItem(item)) return null;
   const primary = primaryAction(item);
   const path =
     item.task_id !== null

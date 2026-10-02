@@ -1,5 +1,6 @@
 /**
- * Needs You — surface S2 of the v2 design (epic #153 / #162).
+ * Needs You — surface S2 of the v2 design (epic #153 / #162), and since #270
+ * the app's only queue.
  *
  * One list, severity-grouped, oldest first, with the action inline. The page's
  * own argument is that if it is empty you close the app, so the empty state is
@@ -36,11 +37,24 @@
  * session seeded from the ticket, open the surface that owns it — or, when the
  * row genuinely points at nothing, an em dash naming what is missing. A dead
  * button is worse than no button, and this page cannot afford either.
+ *
+ * #270 — Notifications folded in
+ * ------------------------------
+ * The Notifications page is gone. Its unread rows are derived into the queue by
+ * `attention_service._produce_notifications` and carry a **mark read** action
+ * here, which is what closes them. The bell in the chrome keeps the full
+ * history, read and unread, on every screen.
  */
 
 import { useCallback, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAttention, type AttentionItem } from "../lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useAttention,
+  markNotificationRead,
+  markAllNotificationsRead,
+  type AttentionItem,
+} from "../lib/api";
 import { TERMINAL_ROUTE } from "../lib/nav-items";
 import { useTerminalStore } from "../stores/terminal-store";
 import { collectLeaves } from "../lib/layout-tree";
@@ -53,6 +67,7 @@ import { relativeTime } from "../lib/format-helpers";
 import {
   primaryAction,
   inspectPath,
+  notificationIdOf,
   type AttentionAction,
 } from "../lib/attention-action";
 import { AttentionLaunchDialog } from "../components/launch/attention-launch-dialog";
@@ -74,7 +89,7 @@ type QueueState = "open" | "resolved" | "muted";
  * this ticket, so the shape lives with the only list that has it rather than
  * being added to a shared file by a page change. The queue needs a wider last
  * column than any named template has — its rows carry up to two buttons whose
- * labels vary ("jump to pane", "start session", "open schedules") — and the
+ * labels vary ("jump to pane", "start session", "mark all read") — and the
  * template it used before, `DECK_COLS.default`, declared six columns for the
  * five cells this list renders, which left the action cell 62px and a 96px
  * column with nothing in it.
@@ -134,6 +149,7 @@ function formatDuration(seconds: number | null): string {
 interface RowHandlers {
   onInspect: (item: AttentionItem) => void;
   onActivate: (item: AttentionItem) => void;
+  onMarkRead: (item: AttentionItem) => void;
 }
 
 function actionCell(
@@ -175,6 +191,18 @@ function actionCell(
           {action.label}
         </button>
       )}
+      {item.kind === "notification_unread" && (
+        <button
+          type="button"
+          className="dk-btn bare"
+          onClick={(e) => {
+            e.stopPropagation();
+            handlers.onMarkRead(item);
+          }}
+        >
+          mark read
+        </button>
+      )}
     </span>
   );
 }
@@ -199,12 +227,18 @@ export function AttentionPage(): ReactElement {
   const [state, setState] = useState<QueueState>("open");
   const { data, isLoading } = useAttention(state);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   /** The item a launch is being composed for, or null. */
   const [launchFor, setLaunchFor] = useState<AttentionItem | null>(null);
 
   const items = data?.items ?? [];
   const counts = data?.counts;
+
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["attention"] });
+    void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+  }, [queryClient]);
 
   const handleInspect = useCallback(
     (item: AttentionItem) => {
@@ -257,6 +291,17 @@ export function AttentionPage(): ReactElement {
     [navigate],
   );
 
+  const handleMarkRead = useCallback(
+    (item: AttentionItem) => {
+      const id = notificationIdOf(item);
+      if (id === null) return;
+      void markNotificationRead(id)
+        .then(refresh)
+        .catch(() => undefined);
+    },
+    [refresh],
+  );
+
   /** The row's one action, run. */
   const handleActivate = useCallback(
     (item: AttentionItem) => {
@@ -271,16 +316,22 @@ export function AttentionPage(): ReactElement {
         case "launch":
           setLaunchFor(item);
           return;
+        case "markAllRead":
+          void markAllNotificationsRead()
+            .then(refresh)
+            .catch(() => undefined);
+          return;
         case "none":
           return;
       }
     },
-    [handleJump, navigate],
+    [handleJump, navigate, refresh],
   );
 
   const handlers: RowHandlers = {
     onInspect: handleInspect,
     onActivate: handleActivate,
+    onMarkRead: handleMarkRead,
   };
 
   const tiles = (
@@ -341,11 +392,12 @@ export function AttentionPage(): ReactElement {
           </div>
           {/* The 30-second re-check is the whole of P1's freshness promise, and
               it is named here because it is the only thing that makes an empty
-              page trustworthy. No tray notification is promised. */}
+              page trustworthy. Nothing is promised about being told any other
+              way: there is no tray and no push behind this queue. */}
           <div>This page re-checks every 30 seconds while it is open.</div>
           <div>
-            Stalled sessions, failed scheduled runs, budget thresholds and blocked tasks appear
-            here on their own.
+            Stalled sessions, failed scheduled runs, budget thresholds, blocked tasks and
+            anything unread in the bell appear here on their own.
           </div>
         </div>
       ) : (
@@ -368,8 +420,9 @@ export function AttentionPage(): ReactElement {
                     state={SEV_STATE[item.severity] ?? "idle"}
                     cells={attentionCells(item, handlers)}
                     // Row activation runs the action only when it *goes*
-                    // somewhere; a row whose action is an em dash is not
-                    // activatable at all.
+                    // somewhere. "mark all read" is a write, and a write that
+                    // fires because Enter was pressed on a focused row is a
+                    // write nobody asked for; it stays on its button.
                     onOpen={
                       ROW_ACTIVATES.has(primaryAction(item).kind)
                         ? () => handleActivate(item)

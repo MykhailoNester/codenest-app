@@ -1,5 +1,5 @@
 /**
- * Needs You (epic #153 / #162, extended by #265).
+ * Needs You (epic #153 / #162, extended by #265 and #270).
  *
  * The page's value is entirely in what it claims, so these pin the claims
  * rather than the layout:
@@ -19,6 +19,8 @@
  *     is each of its three outcomes — the pane is in a tab, the pane is live
  *     elsewhere, the pane is gone — and that the third one falls back to the
  *     session's record instead of raising an empty window.
+ *   * **#270: a folded notification can be cleared from here.** Marking it
+ *     read is what resolves it; the page must call that and nothing else.
  *
  * Which rule produces which action is pinned in
  * `lib/__tests__/attention-action.test.ts` — that is a pure function. This file
@@ -28,6 +30,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AttentionPage } from "../attention";
 import type { AttentionItem, AttentionQueue } from "../../lib/api";
 import type { ReactNode } from "react";
@@ -35,6 +38,8 @@ import type { ReactNode } from "react";
 const {
   mockUseAttention,
   mockNavigate,
+  mockMarkRead,
+  mockMarkAllRead,
   mockListLivePanes,
   mockOpenTerminalsWindow,
   mockEmitFocusPane,
@@ -45,6 +50,8 @@ const {
 } = vi.hoisted(() => ({
   mockUseAttention: vi.fn(),
   mockNavigate: vi.fn(),
+  mockMarkRead: vi.fn((id: number) => Promise.resolve({ id })),
+  mockMarkAllRead: vi.fn(() => Promise.resolve({ updated: 3 })),
   mockListLivePanes: vi.fn(() => Promise.resolve([] as string[])),
   mockOpenTerminalsWindow: vi.fn(() => Promise.resolve()),
   mockEmitFocusPane: vi.fn((paneId: string) => Promise.resolve(paneId)),
@@ -56,6 +63,8 @@ const {
 
 vi.mock("../../lib/api", () => ({
   useAttention: (...args: unknown[]) => mockUseAttention(...args),
+  markNotificationRead: (id: number) => mockMarkRead(id),
+  markAllNotificationsRead: () => mockMarkAllRead(),
 }));
 
 vi.mock("../../lib/ipc", () => ({
@@ -154,10 +163,15 @@ function queue(items: AttentionItem[]): AttentionQueue {
 }
 
 function renderPage(): ReturnType<typeof render> {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <MemoryRouter>
-      <AttentionPage />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <AttentionPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -180,6 +194,13 @@ describe("Needs You — empty state", () => {
     // The S2 mockup's copy says "You'll get a tray notification the moment
     // that changes." P1 builds no tray, so that sentence would be a lie on
     // the one screen that cannot afford one.
+    //
+    // #270 folded the Notifications page into this queue, so the empty state
+    // now has to say that unread announcements land here too. It names **the
+    // bell** — the surface they come from, which is in the chrome on every
+    // screen — rather than the word "notification", which keeps this
+    // assertion exactly as strict as it was written: the page must not use
+    // the vocabulary of being told.
     mockUseAttention.mockReturnValue({ data: queue([]), isLoading: false });
     const { container } = renderPage();
     expect(container.textContent).not.toMatch(/tray/i);
@@ -371,6 +392,93 @@ describe("Needs You — jump to pane", () => {
     );
     expect(mockOpenTerminalsWindow).not.toHaveBeenCalled();
     expect(mockEmitFocusPane).not.toHaveBeenCalled();
+  });
+});
+
+describe("Needs You — folded notifications (#270)", () => {
+  const unread = (payload: Record<string, unknown> = { task_id: 9 }) =>
+    item({
+      id: 11,
+      kind: "notification_unread",
+      severity: "queued",
+      dedup_key: "notification_unread:7",
+      title: "Session ended with errors",
+      session_id: null,
+      project_id: null,
+      payload_json: JSON.stringify({
+        notification_id: 7,
+        notification_type: "task_assigned",
+        notification_payload: payload,
+      }),
+    });
+
+  it("carries the notification's own destination", () => {
+    mockUseAttention.mockReturnValue({
+      data: queue([unread()]),
+      isLoading: false,
+    });
+    renderPage();
+    fireEvent.click(screen.getByText(/^open task$/i));
+    expect(mockNavigate).toHaveBeenCalledWith("/tasks/9");
+  });
+
+  it("clears one by marking it read — never by deleting it", () => {
+    // The page it replaced had a Dismiss that deleted the row. Marking read
+    // takes it off this queue (the producer stops emitting, the sweep
+    // resolves) and leaves the record in the bell.
+    mockUseAttention.mockReturnValue({
+      data: queue([unread()]),
+      isLoading: false,
+    });
+    renderPage();
+    fireEvent.click(screen.getByText(/^mark read$/i));
+    expect(mockMarkRead).toHaveBeenCalledWith(7);
+    expect(mockMarkAllRead).not.toHaveBeenCalled();
+  });
+
+  it("clears the backlog row by marking everything read", () => {
+    mockUseAttention.mockReturnValue({
+      data: queue([
+        item({
+          id: 12,
+          kind: "notification_backlog",
+          severity: "queued",
+          dedup_key: "notification_backlog",
+          title: "14 unread notification(s)",
+          session_id: null,
+          project_id: null,
+        }),
+      ]),
+      isLoading: false,
+    });
+    renderPage();
+    fireEvent.click(screen.getByText(/^mark all read$/i));
+    expect(mockMarkAllRead).toHaveBeenCalled();
+  });
+
+  it("does not run a write when the row itself is activated", () => {
+    // A row's Enter/Space activation runs its jump. "Mark all read" is a
+    // write, and a write nobody pressed a button for is a write nobody asked
+    // for.
+    mockUseAttention.mockReturnValue({
+      data: queue([
+        item({
+          id: 12,
+          kind: "notification_backlog",
+          severity: "queued",
+          dedup_key: "notification_backlog",
+          title: "14 unread notification(s)",
+          session_id: null,
+          project_id: null,
+        }),
+      ]),
+      isLoading: false,
+    });
+    const { container } = renderPage();
+    const row = container.querySelector(".dk-line");
+    expect(row).toBeTruthy();
+    fireEvent.click(row!);
+    expect(mockMarkAllRead).not.toHaveBeenCalled();
   });
 });
 

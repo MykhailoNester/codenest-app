@@ -22,6 +22,8 @@ import {
   primaryAction,
   inspectPath,
   sessionIsLive,
+  notificationIdOf,
+  isNotificationItem,
 } from "../attention-action";
 import type { AttentionItem } from "../api";
 
@@ -50,6 +52,25 @@ function item(overrides: Partial<AttentionItem> = {}): AttentionItem {
     project_name: null,
     ...overrides,
   };
+}
+
+/** A folded notification row, as `_produce_notifications` writes it. */
+function notification(
+  type: string,
+  payload: Record<string, unknown>,
+  overrides: Partial<AttentionItem> = {},
+): AttentionItem {
+  return item({
+    kind: "notification_unread",
+    severity: "queued",
+    dedup_key: "notification_unread:7",
+    payload_json: JSON.stringify({
+      notification_id: 7,
+      notification_type: type,
+      notification_payload: payload,
+    }),
+    ...overrides,
+  });
 }
 
 describe("sessionIsLive", () => {
@@ -170,6 +191,56 @@ describe("primaryAction — nothing to open", () => {
   });
 });
 
+describe("primaryAction — folded notifications (#270)", () => {
+  it("deep-links a task notification through the existing routing table", () => {
+    const action = primaryAction(notification("task_assigned", { task_id: 9 }));
+    expect(action).toEqual({
+      kind: "route",
+      label: "open task",
+      path: "/tasks/9",
+    });
+  });
+
+  it("prefers the session rule when the notification names a session", () => {
+    // `_produce_notifications` copies the payload's session onto the item, so
+    // a failed-session notification reaches the session rather than /command.
+    const action = primaryAction(
+      notification("session_failed", { session_id: "s9" }, { session_id: "s9" }),
+    );
+    expect(action).toEqual({
+      kind: "route",
+      label: "open session",
+      path: "/sessions/s9",
+    });
+  });
+
+  it("offers mark-all-read for the backlog row, which points nowhere else", () => {
+    const action = primaryAction(
+      item({ kind: "notification_backlog", dedup_key: "notification_backlog" }),
+    );
+    expect(action).toEqual({ kind: "markAllRead", label: "mark all read" });
+  });
+
+  it("is none when the routing table recognises nothing", () => {
+    // `notifRoute` answers "/" for a type it has never heard of. Dropping a
+    // user on the home screen is not a jump, so it counts as no destination.
+    expect(primaryAction(notification("something_new", {})).kind).toBe("none");
+  });
+
+  it("reads the notification id from the payload, not the dedup key", () => {
+    expect(notificationIdOf(notification("task_assigned", { task_id: 9 }))).toBe(7);
+    expect(notificationIdOf(item())).toBeNull();
+    expect(isNotificationItem(item({ kind: "notification_backlog" }))).toBe(true);
+    expect(isNotificationItem(item())).toBe(false);
+  });
+
+  it("survives a payload that is not JSON", () => {
+    const broken = item({ kind: "notification_unread", payload_json: "{oops" });
+    expect(primaryAction(broken).kind).toBe("none");
+    expect(notificationIdOf(broken)).toBeNull();
+  });
+});
+
 describe("inspectPath", () => {
   it("is the ticket's page when the primary action is not", () => {
     expect(inspectPath(item({ kind: "task_blocked", task_id: 42 }))).toBe(
@@ -183,6 +254,15 @@ describe("inspectPath", () => {
         item({ pane_id: "p1", session_id: "s1", session_status: "active", project_id: 2 }),
       ),
     ).toBe("/projects/2/context");
+  });
+
+  it("is null when it would duplicate the primary action", () => {
+    // One row, one meaning: two buttons going to the same page is noise.
+    expect(inspectPath(notification("task_assigned", { task_id: 9 }, { task_id: 9 }))).toBeNull();
+  });
+
+  it("is null for a folded notification, whose second action is mark read", () => {
+    expect(inspectPath(notification("session_failed", {}, { task_id: 4 }))).toBeNull();
   });
 
   it("is null when the item names neither a ticket nor a project", () => {

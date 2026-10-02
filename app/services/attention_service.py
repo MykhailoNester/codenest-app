@@ -38,6 +38,14 @@ keys — it would resolve every hook-sourced item on the first refresh after it
 was written. `refresh` therefore sweeps `DERIVED_KINDS` only, and the ingested
 kinds end instead by being answered (`respond`) or by expiring.
 
+The Notifications fold (#270)
+-----------------------------
+`notification_unread` and `notification_backlog` are derived, from the unread
+half of the `notifications` table. They exist because the app used to have two
+queues a human had to keep in agreement, and the one with fewer powers was a
+whole page. See `_produce_notifications` for what is folded and what is
+deliberately not.
+
 The three severities
 --------------------
 `blocking` — something cannot continue until a human acts. This is what the
@@ -113,7 +121,9 @@ logger = logging.getLogger(__name__)
 # its header), so these are the enforcement: a write outside them is a bug
 # here, not a row in the table.
 
-# The five P1 kinds, each computed by a producer below and closed by the sweep.
+# The derived kinds, each computed by a producer below and closed by the sweep.
+# The first five are P1's; the two `notification_*` kinds are #270's fold of the
+# Notifications page into this queue — see `_produce_notifications`.
 DERIVED_KINDS: frozenset[str] = frozenset(
     {
         "session_stalled",
@@ -121,10 +131,17 @@ DERIVED_KINDS: frozenset[str] = frozenset(
         "budget_threshold",
         "task_blocked",
         "inbox_backlog",
+        "notification_unread",
+        "notification_backlog",
     }
 )
 
-# The three #172 kinds, written from the hook handler and never derived. Keyed
+# The three #172 kinds, written from the hook handler and never derived. The
+# `notification` here is the Claude Code **hook event** of that name — a running
+# session announcing something — and has nothing to do with the
+# `notifications` *table*, which `notification_unread` above derives from. Two
+# unrelated things wear the word; the kinds are spelled apart so a query never
+# has to guess which one it meant. Keyed
 # by the `hooks_service.HookEvent.event` name that produces each, because the
 # recorder's only input is that name — a second mapping from kind back to
 # event would be a second thing to keep in step.
@@ -198,6 +215,30 @@ _FAILED_RUN_STATUSES: tuple[str, ...] = ("failed", "timed_out", "missed")
 # notification already exists and a queue entry for "half your budget is
 # unspent" is noise.
 _BUDGET_ALERT_FLOOR = 80
+
+# #270: which unread notifications get a row of their own.
+#
+# `notification_service.emit`'s callers already grade what they send: the two
+# that mean something went wrong — `cost_threshold` and `session_failed` —
+# pass `priority='high'`, and the announcements of ordinary progress
+# (`session_completed`, `task_assigned`, `blocker_resolved`, the sub-100%
+# budget steps) pass `normal`. That grading is the authors' own and predates
+# this fold, so it is the line used here rather than a list of type strings
+# this module would have to keep in step with every future emitter.
+#
+# A `high` unread notification is therefore one row each; everything else
+# unread is counted into one `notification_backlog` row, exactly as
+# `_produce_inbox_backlog` does for the inbox and for the same reason — forty
+# rows of "a session finished" is forty rows of the same sentence and makes
+# every genuine item unfindable.
+_NOTIFICATION_INDIVIDUAL_PRIORITY = "high"
+
+# ...and a ceiling even on those. A machine that has been failing sessions all
+# week must not be able to push everything else off the page; what spills past
+# the ceiling is still counted by the backlog row, so nothing is hidden
+# silently. Newest-first, because the cap decides which failures survive it and
+# the most recent one is the one still worth looking at.
+_NOTIFICATION_MAX_INDIVIDUAL = 25
 
 # Inbox statuses that mean "nobody has decided about this yet". `ready` is
 # excluded: it has been triaged, and it is waiting on promotion rather than on
@@ -524,6 +565,111 @@ async def _produce_inbox_backlog(
     ]
 
 
+def _notification_payload(raw: str | None) -> dict[str, Any]:
+    """A notification's `payload_json` as a dict, or `{}`.
+
+    Never raises. A row whose payload is malformed still becomes an item —
+    enrichment is not a precondition — it simply carries no subject pointer.
+    """
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+async def _produce_notifications(
+    db: aiosqlite.Connection, moment: datetime
+) -> list[dict[str, Any]]:
+    """#270: the Notifications page's queue, folded into this one.
+
+    Two queues a human has to keep in agreement is one too many, so the
+    unread half of the `notifications` table — the half that is actually
+    waiting on someone — is derived into attention items here and the page is
+    gone. The read half is not: a notification you have already seen is by
+    definition not waiting on you, and the bell in the chrome keeps the
+    history on every screen.
+
+    Severity is `queued` for all of them, including the `high`-priority ones.
+    A notification is an announcement that something already happened; nothing
+    is blocked by it and nothing stopped moving because of it, which are what
+    `blocking` and `stalled` mean on this page. `high` buys a row of its own,
+    not a louder severity.
+
+    Marking a notification read is what closes its item: the producer stops
+    emitting the key and the ordinary sweep resolves the row with
+    `condition_cleared`. Nothing here deletes a notification.
+    """
+    cur = await db.execute(
+        "SELECT id, type, title, body, payload_json, created_at "
+        "  FROM notifications "
+        " WHERE read_at IS NULL AND priority = ? "
+        " ORDER BY created_at DESC, id DESC LIMIT ?",
+        (_NOTIFICATION_INDIVIDUAL_PRIORITY, _NOTIFICATION_MAX_INDIVIDUAL),
+    )
+    rows = await cur.fetchall()
+
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        payload = _notification_payload(row["payload_json"])
+        session_id = payload.get("session_id")
+        task_id = payload.get("task_id")
+        items.append(
+            {
+                "kind": "notification_unread",
+                "severity": "queued",
+                # Keyed on the notification row: one notification is one
+                # condition, and reading it is what ends it.
+                "dedup_key": f"notification_unread:{row['id']}",
+                "title": _clip(row["title"] or "Notification", _MAX_TITLE),
+                "detail": _clip(row["body"], _MAX_DETAIL) if row["body"] else None,
+                # Subject pointers, so the generic jump rules reach the thing
+                # the notification is about without a notification-shaped
+                # special case in the page.
+                "session_id": session_id if isinstance(session_id, str) else None,
+                "task_id": task_id if isinstance(task_id, int) else None,
+                # The original type and payload travel with the item: they are
+                # what `notifRoute` needs for the types that point at a surface
+                # rather than at a row (a budget, a cost threshold).
+                "payload_json": json.dumps(
+                    {
+                        "notification_id": row["id"],
+                        "notification_type": row["type"],
+                        "notification_payload": payload,
+                    }
+                ),
+            }
+        )
+
+    cur = await db.execute(
+        "SELECT COUNT(*) AS pending, MIN(created_at) AS oldest "
+        "  FROM notifications WHERE read_at IS NULL"
+    )
+    totals = await cur.fetchone()
+    pending = int(totals["pending"]) if totals else 0
+    remainder = pending - len(items)
+    if remainder > 0:
+        waiting = _humanise_minutes(
+            _minutes_since(totals["oldest"] if totals else None, moment)
+        )
+        items.append(
+            {
+                "kind": "notification_backlog",
+                "severity": "queued",
+                # One constant key, like `inbox_backlog`: there is only ever
+                # one of these.
+                "dedup_key": "notification_backlog",
+                "title": f"{remainder} unread notification(s)",
+                "detail": (
+                    f"oldest waiting {waiting}" if waiting else "none of them urgent"
+                ),
+            }
+        )
+    return items
+
+
 _PRODUCERS: tuple[
     Callable[[aiosqlite.Connection, datetime], Awaitable[list[dict[str, Any]]]], ...
 ] = (
@@ -532,6 +678,7 @@ _PRODUCERS: tuple[
     _produce_budget_threshold,
     _produce_task_blocked,
     _produce_inbox_backlog,
+    _produce_notifications,
 )
 
 

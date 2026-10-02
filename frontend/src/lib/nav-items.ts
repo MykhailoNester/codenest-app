@@ -15,7 +15,6 @@
 export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
   attention: true,
   work: true,
-  notifications: true,
   parallel: true,
   preview: true,
   budgets: true,
@@ -78,14 +77,18 @@ export const FEATURE_CACHE_EVENT = "codenest:enabled-features";
 //   work          → Work board kanban (slugs: tasks, inbox).
 //                   `inbox` stays in this set for redirect compat — it
 //                   redirects to /tasks in the router.
-//   notifications → Notifications page (slug: notifications).
+//
+// `notifications` is gone (#270) and is a retired slug on the sidecar side
+// (`_RETIRED_FEATURES` in `settings_service.py`): the page it gated is folded
+// into Needs You and the bell in the chrome was never gated by it. Do not
+// re-add it here — a slug with no page behind it is a toggle that does
+// nothing.
 //
 // TODO: when the workflow_items and tasks tables are merged into one,
 // remove `inbox` from the `work` slug set and drop it from KNOWN_NAV_SLUGS.
 export const FEATURES: Readonly<Record<string, readonly string[]>> = {
   attention: ["attention"],
   work: ["tasks", "inbox"],
-  notifications: ["notifications"],
   schedules: ["schedules"],
   parallel: ["parallel"],
   preview: ["preview"],
@@ -109,7 +112,6 @@ export const FEATURES: Readonly<Record<string, readonly string[]>> = {
 export const KNOWN_FEATURES_ORDERED: readonly string[] = [
   "attention",
   "work",
-  "notifications",
   "schedules",
   "parallel",
   "preview",
@@ -202,13 +204,10 @@ export const NAV_ITEMS = [
     path: "/projects",
     group: "record",
   },
-  {
-    slug: "notifications",
-    label: "Notifications",
-    icon: "bell",
-    path: "/notifications",
-    group: "record",
-  },
+  // `notifications` used to sit here. #270 removed it: the queue it listed is
+  // part of Needs You now, and the bell in the top bar — which is on every
+  // screen, not one rail click away — keeps the history. The icon key `bell`
+  // is free again as a result; Needs You keeps `review`.
   // The design's After rail also shows "Sessions Log" here. It is deliberately
   // absent: the Session Inspector it would open is P4, and a nav entry with no
   // page behind it is worse than no entry.

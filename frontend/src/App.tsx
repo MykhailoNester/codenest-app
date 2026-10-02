@@ -76,7 +76,6 @@ import { FeedPage } from "./pages/feed";
 import { PluginsPage } from "./pages/plugins";
 import { IntegrationsPage } from "./pages/integrations";
 import { SyncPage } from "./pages/sync";
-import { NotificationsPage } from "./pages/notifications";
 import { OnboardingPage } from "./pages/onboarding";
 import { WorkspaceSettingsPage } from "./pages/settings/workspace-settings";
 import {
@@ -453,14 +452,11 @@ function AppInner(): ReactElement {
               TODO: remove InboxPage import and this redirect when workflow_items
               is merged into tasks. */}
         <Route path="/inbox" element={<Navigate to="/tasks" replace />} />
-        <Route
-          path="/notifications"
-          element={
-            <FeatureRoute navSlug="notifications">
-              <NotificationsPage />
-            </FeatureRoute>
-          }
-        />
+        {/* #270 — /notifications is gone. Its unread queue is folded into
+            Needs You (`attention_service._produce_notifications`) and the bell
+            in the chrome keeps the history, so a bookmark lands on the queue
+            rather than on a 404 that redirects to Command. */}
+        <Route path="/notifications" element={<Navigate to="/attention" replace />} />
         <Route
           path="/sessions/:sessionId"
           element={<SessionInspectorPage />}
