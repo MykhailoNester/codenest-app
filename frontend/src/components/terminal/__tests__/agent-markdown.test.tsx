@@ -155,6 +155,69 @@ describe("AgentMarkdown", () => {
     expect(pre!.textContent).toBe("make check-all\nls -la\n");
     expect(document.body.textContent).not.toContain("```");
   });
+
+  // `.dk-prose` has no `pre` rule at all, so the Deck conversion (#283) had to
+  // supply one through react-markdown's `components` map. These pin what that
+  // rule is for: a long unbroken line must stay inside the frame — scrolling
+  // the fence, not widening the pane and dragging the whole transcript
+  // sideways with it.
+  it("scrolls a fence rather than letting a long line widen the pane", () => {
+    render(
+      <AgentMarkdown
+        text={"```\n/a/very/long/path/that/keeps/going/and/going/and/going.ts\n```"}
+      />,
+    );
+    const pre = document.querySelector("pre")!;
+    expect(pre.style.overflowX).toBe("auto");
+    const code = pre.querySelector("code")!;
+    // `pre`, not `pre-wrap`: a wrapped command line or diff is harder to read
+    // than one the reader scrolls.
+    expect(code.style.whiteSpace).toBe("pre");
+    expect(code.style.wordBreak).toBe("normal");
+    // The fenced `code` must not keep the inline chip's background.
+    expect(code.style.background).toBe("none");
+  });
+
+  it("keeps the inline code chip distinct from a fenced block", () => {
+    render(<AgentMarkdown text={"a `chip` here"} />);
+    const code = document.querySelector("code")!;
+    expect(document.querySelector("pre")).toBeNull();
+    expect(code.style.background).toBe("var(--sel)");
+    // Inline code breaks mid-token so a long symbol cannot widen the reply.
+    expect(code.style.wordBreak).toBe("break-word");
+  });
+
+  it("scrolls a wide table inside its own wrapper", () => {
+    render(
+      <AgentMarkdown
+        text={["| a | b |", "| --- | --- |", "| 1 | 2 |", "| 3 | 4 |"].join("\n")}
+      />,
+    );
+    const table = document.querySelector("table")!;
+    expect((table.parentElement as HTMLElement).style.overflowX).toBe("auto");
+    // The header rules below itself and body cells rule above themselves, so
+    // no hairline is drawn after the last row — the old `tbody tr:last-child`
+    // reset, carried over without needing to know which row is last.
+    expect(document.querySelector("th")!.style.borderBottom).toBe("1px solid var(--line)");
+    const cells = Array.from(document.querySelectorAll("td"));
+    expect(cells.length).toBe(4);
+    for (const td of cells) {
+      expect(td.style.borderTop).toBe("1px solid var(--line)");
+      expect(td.style.borderBottom).toBe("");
+    }
+  });
+
+  it("drops the bullet from a GFM task list, keeping the checkbox as the marker", () => {
+    render(<AgentMarkdown text={"- [x] done\n- [ ] todo"} />);
+    const list = document.querySelector("ul")!;
+    expect(list.style.listStyle).toBe("none");
+    const boxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+    expect(boxes).toHaveLength(2);
+    for (const box of boxes) {
+      expect((box as HTMLInputElement).disabled).toBe(true);
+      expect((box as HTMLInputElement).style.pointerEvents).toBe("none");
+    }
+  });
 });
 
 describe("conversation text blocks", () => {

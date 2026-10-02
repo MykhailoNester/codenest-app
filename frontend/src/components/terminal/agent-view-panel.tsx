@@ -13,7 +13,7 @@
  * nested delegation cards read identically wherever they appear.
  */
 
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import {
   formatDuration,
   orchestrationPhaseTree,
@@ -28,14 +28,162 @@ import {
 import { ConversationTurns } from "./agent-conversation";
 import { subagentLabel } from "../../lib/agent-views";
 import type { DeckState } from "../deck/deck-grid";
-import styles from "./agent-view-panel.module.css";
+
+/* ── Local constants ─────────────────────────────────────────────────────
+   The non-main pane body: one sub-agent's task, or one orchestration's
+   phases. On Deck — the agent rows carry a state glyph in column one
+   (`.dk-s`), the chips are `.dk-tag`, and the returned result is `.dk-out` +
+   `.dk-term__b`. What is left is geometry, declared here rather than in
+   `components/deck/*` or `design/deck/*`, which #283 does not touch — the
+   precedent is the composer's `EDITOR_*` constants.
+
+   Plain content: the pane's single viewport (`VIEWPORT_STYLE`, agent-pane.tsx)
+   owns the scroll for every view, this one included, so switching views does
+   not shift the surrounding chrome. */
+
+const PANEL_STYLE: CSSProperties = {
+  padding: "var(--u3)",
+  fontFamily: "var(--mono)",
+  fontSize: "var(--fs-s)",
+  color: "var(--fg-2)",
+};
+
+const HEAD_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--u2)",
+  height: "var(--row)",
+  paddingBottom: "var(--u2)",
+  borderBottom: "1px solid var(--line)",
+  marginBottom: "var(--u3)",
+};
+
+const TITLE_STYLE: CSSProperties = {
+  color: "var(--fg)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  minWidth: 0,
+};
+
+/** The header's right-hand label — "sub-agent", or the run's status. */
+const KIND_STYLE: CSSProperties = {
+  color: "var(--fg-3)",
+  fontSize: "var(--fs-xs)",
+  letterSpacing: "1.1px",
+  textTransform: "uppercase",
+  flex: "none",
+};
+
+/** Elapsed, in both the panel header and an agent row. `marginLeft: auto`
+ *  pushes it to the right-hand end of the header, where the title does not
+ *  grow; in a row it is inert, because `AGENT_LABEL_STYLE` already absorbs the
+ *  slack. */
+const ELAPSED_LIVE_STYLE: CSSProperties = {
+  marginLeft: "auto",
+  color: "var(--run)",
+  flex: "none",
+};
+
+const ELAPSED_IDLE_STYLE: CSSProperties = {
+  marginLeft: "auto",
+  color: "var(--fg-3)",
+  flex: "none",
+};
+
+/** A "nothing here" line. Block-level prose, so it takes no part in the
+ *  header's flex row. */
+const MUTED_STYLE: CSSProperties = { color: "var(--fg-3)" };
+
+/** The delegated task. Sans, because it is the one paragraph of real prose on
+ *  this panel and `PANEL_STYLE` sets mono for the chrome around it. `.dk-prose`
+ *  is Deck's prose surface and is the wrong one here — it caps at 80ch and
+ *  styles descendant markup, where this is one preformatted string in a panel
+ *  that can be a third of the window wide. */
+const TASK_STYLE: CSSProperties = {
+  margin: "0 0 var(--u2)",
+  fontFamily: "var(--sans)",
+  fontSize: 13,
+  lineHeight: 1.65,
+  color: "var(--fg-2)",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+};
+
+const ACTIVITY_STYLE: CSSProperties = {
+  margin: "0 0 var(--u3)",
+  color: "var(--run)",
+};
+
+const SECTION_STYLE: CSSProperties = { marginBottom: "var(--u4)" };
+
+/** Deck's section-heading idiom, as an `h4` — `.dk-group__h` is an `h2` rule
+ *  with its own bottom margin and page padding, which inside a 300px panel is
+ *  the wrong geometry for the right type. */
+const SECTION_TITLE_STYLE: CSSProperties = {
+  margin: "0 0 var(--u2)",
+  fontWeight: 400,
+  fontSize: "var(--fs-xs)",
+  letterSpacing: "1.1px",
+  textTransform: "uppercase",
+  color: "var(--fg-3)",
+};
+
+/** The drilled-in agent's own stream. `PANEL_STYLE` sets mono for this panel's
+ *  chrome; the transcript's own blocks set their family and size for tool rows
+ *  and cards, but the message, speaker and error blocks inherit theirs — so the
+ *  stream restores the context they are written against rather than rendering
+ *  the agent's prose in the panel's chrome font. */
+const STREAM_STYLE: CSSProperties = {
+  fontFamily: "var(--sans)",
+  fontSize: 13,
+  marginBottom: "var(--u4)",
+};
+
+/** The `<pre>` inside `.dk-out`, which takes `.dk-term__b`'s own scrolling body
+ *  treatment. `wordBreak` is what keeps a returned path, stack trace or JSON
+ *  blob inside the frame instead of widening the pane. */
+const OUTPUT_STYLE: CSSProperties = { margin: 0, wordBreak: "break-word" };
+
+/** Inline, so the error tone wins over `.dk-term__b`'s own colour however the
+ *  bundler orders the stylesheets. */
+const OUTPUT_ERROR_STYLE: CSSProperties = { ...OUTPUT_STYLE, color: "var(--err)" };
+
+const AGENTS_STYLE: CSSProperties = { listStyle: "none", margin: 0, padding: 0 };
+
+/** One phase agent, on the line grid: glyph, name, marks, elapsed. */
+const AGENT_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--u2)",
+  height: "var(--row)",
+  minWidth: 0,
+};
+
+/** One character, never the thing a crowded row shrinks — `.dk-s` sets no width
+ *  of its own because on a Deck grid the column does, and this row is a flex
+ *  line rather than a grid. */
+const AGENT_GLYPH_STYLE: CSSProperties = { flex: "none", width: 10 };
+
+const AGENT_LABEL_STYLE: CSSProperties = {
+  color: "var(--fg)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  minWidth: 0,
+  flex: "1 1 auto",
+};
+
+const AGENT_META_STYLE: CSSProperties = { color: "var(--fg-3)", flex: "none" };
+
+const AGENT_ERROR_STYLE: CSSProperties = { color: "var(--err)", flex: "none" };
 
 /** Elapsed rendered the same way everywhere in this panel, with a live run
  *  saying so rather than showing a number frozen at the last render. */
 function Elapsed({ ms, running }: { ms: number | null; running: boolean }): ReactElement {
-  if (running) return <span className={styles.live}>running</span>;
-  if (ms === null) return <span className={styles.muted}>—</span>;
-  return <span className={styles.muted}>{formatDuration(ms)}</span>;
+  if (running) return <span style={ELAPSED_LIVE_STYLE}>running</span>;
+  if (ms === null) return <span style={ELAPSED_IDLE_STYLE}>—</span>;
+  return <span style={ELAPSED_IDLE_STYLE}>{formatDuration(ms)}</span>;
 }
 
 /**
@@ -74,20 +222,20 @@ function SubagentView({
   const resultNote = hasOutput ? null : subagentResultNote(block, sessionExited);
   return (
     <div
-      className={styles.panel}
+      style={PANEL_STYLE}
       data-testid="agent-view-panel"
       data-view-kind="subagent"
     >
-      <header className={styles.head}>
-        <span className={styles.title}>{subagentLabel(block)}</span>
-        <span className={styles.kind}>sub-agent</span>
+      <header style={HEAD_STYLE}>
+        <span style={TITLE_STYLE}>{subagentLabel(block)}</span>
+        <span style={KIND_STYLE}>sub-agent</span>
         <Elapsed ms={elapsed} running={running} />
       </header>
 
-      {block.argSummary ? <p className={styles.task}>{block.argSummary}</p> : null}
+      {block.argSummary ? <p style={TASK_STYLE}>{block.argSummary}</p> : null}
 
       {block.childTurns.length > 0 ? (
-        <section className={styles.stream} data-testid="subagent-stream">
+        <section style={STREAM_STYLE} data-testid="subagent-stream">
           <ConversationTurns
             turns={block.childTurns}
             sessionExited={sessionExited}
@@ -96,7 +244,7 @@ function SubagentView({
           />
         </section>
       ) : running ? (
-        <p className={styles.muted}>Still working — nothing reported back yet.</p>
+        <p style={MUTED_STYLE}>Still working — nothing reported back yet.</p>
       ) : null}
 
       {/* Always last, per the ticket: the returned result must stay the most
@@ -106,18 +254,19 @@ function SubagentView({
           still running with an empty stream, since the line above already
           covers that case. */}
       {hasOutput || resultNote !== null ? (
-        <section className={styles.section}>
-          <h4 className={styles.sectionTitle}>Result</h4>
+        <section style={SECTION_STYLE}>
+          <h4 style={SECTION_TITLE_STYLE}>Result</h4>
           {hasOutput ? (
             <div className="dk-out">
               <pre
-                className={`dk-term__b ${block.isError ? styles.outputError : styles.output}`}
+                className="dk-term__b"
+                style={block.isError ? OUTPUT_ERROR_STYLE : OUTPUT_STYLE}
               >
                 {block.output}
               </pre>
             </div>
           ) : (
-            <p className={styles.muted}>{resultNote}</p>
+            <p style={MUTED_STYLE}>{resultNote}</p>
           )}
         </section>
       ) : null}
@@ -155,17 +304,23 @@ function AgentRow({ agent }: { agent: OrchestrationAgent }): ReactElement {
   const running = agent.state === "start" || agent.state === "progress";
   const deckState = agentDeckState(agent.state);
   return (
-    <li className={styles.agent}>
-      <span className="dk-s" role="img" data-s={deckState} aria-label={AGENT_STATE_WORD[deckState]} />
-      <span className={styles.agentLabel}>{agent.label}</span>
+    <li style={AGENT_STYLE}>
+      <span
+        className="dk-s"
+        style={AGENT_GLYPH_STYLE}
+        role="img"
+        data-s={deckState}
+        aria-label={AGENT_STATE_WORD[deckState]}
+      />
+      <span style={AGENT_LABEL_STYLE}>{agent.label}</span>
       {agent.agentType ? <span className="dk-tag">{agent.agentType}</span> : null}
       {agent.cached ? <span className="dk-tag">cached</span> : null}
-      <span className={styles.agentMeta}>
+      <span style={AGENT_META_STYLE}>
         {agent.toolCalls !== null ? `${agent.toolCalls} tools` : null}
         {agent.tokens !== null ? ` · ${agent.tokens.toLocaleString("en-US")} tok` : null}
       </span>
       <Elapsed ms={agent.durationMs} running={running} />
-      {agent.error ? <span className={styles.err}>{agent.error}</span> : null}
+      {agent.error ? <span style={AGENT_ERROR_STYLE}>{agent.error}</span> : null}
     </li>
   );
 }
@@ -191,26 +346,26 @@ function WorkflowView({
   const tree = orchestrationPhaseTree(run);
   return (
     <div
-      className={styles.panel}
+      style={PANEL_STYLE}
       data-testid="agent-view-panel"
       data-view-kind="workflow"
     >
-      <header className={styles.head}>
-        <span className={styles.title}>{run.name ?? "Workflow"}</span>
-        <span className={styles.kind}>{run.status}</span>
+      <header style={HEAD_STYLE}>
+        <span style={TITLE_STYLE}>{run.name ?? "Workflow"}</span>
+        <span style={KIND_STYLE}>{run.status}</span>
         <Elapsed ms={elapsed} running={running} />
       </header>
 
-      {run.description ? <p className={styles.task}>{run.description}</p> : null}
-      {run.activity ? <p className={styles.activity}>{run.activity}</p> : null}
+      {run.description ? <p style={TASK_STYLE}>{run.description}</p> : null}
+      {run.activity ? <p style={ACTIVITY_STYLE}>{run.activity}</p> : null}
 
       {tree.map((group) => (
-        <section key={group.phaseIndex ?? "unphased"} className={styles.section}>
-          <h4 className={styles.sectionTitle}>{group.title}</h4>
+        <section key={group.phaseIndex ?? "unphased"} style={SECTION_STYLE}>
+          <h4 style={SECTION_TITLE_STYLE}>{group.title}</h4>
           {group.agents.length === 0 ? (
-            <p className={styles.muted}>Not started.</p>
+            <p style={MUTED_STYLE}>Not started.</p>
           ) : (
-            <ul className={styles.agents}>
+            <ul style={AGENTS_STYLE}>
               {group.agents.map((agent) => (
                 <AgentRow key={agent.index} agent={agent} />
               ))}
@@ -220,7 +375,7 @@ function WorkflowView({
       ))}
 
       {childTurns.length > 0 ? (
-        <section className={styles.stream} data-testid="workflow-stream">
+        <section style={STREAM_STYLE} data-testid="workflow-stream">
           <ConversationTurns
             turns={childTurns}
             sessionExited={sessionExited}

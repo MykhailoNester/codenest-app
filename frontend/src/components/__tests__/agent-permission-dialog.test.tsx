@@ -185,3 +185,62 @@ describe("AgentPermissionDialog request identity", () => {
     expect(screen.queryByText(/each part is approved separately/i)).toBeNull();
   });
 });
+
+// A restyle that changes which button is primary, or makes a deny look like an
+// approve, is a correctness bug rather than a cosmetic one — so the consent
+// affordances are pinned here rather than left to the eye. These assertions
+// only became possible with the Deck conversion (#283): the dialog's tone used
+// to live in a CSS module, and vitest stubs those, so neither the class nor the
+// colour was reachable from a test.
+describe("AgentPermissionDialog consent affordances", () => {
+  function dialog(): HTMLElement {
+    const el = document.querySelector("[data-permission-dialog]");
+    if (el === null) throw new Error("no permission dialog rendered");
+    return el as HTMLElement;
+  }
+
+  it("Allow is the one primary action and Deny the one destructive one", () => {
+    renderDialog();
+    const primaries = Array.from(dialog().querySelectorAll("button.pri"));
+    const dangers = Array.from(dialog().querySelectorAll("button.danger"));
+    expect(primaries).toHaveLength(1);
+    expect(primaries[0]!.textContent).toMatch(/^Allow\b/);
+    expect(primaries[0]!.textContent).not.toMatch(/session/i);
+    expect(dangers).toHaveLength(1);
+    expect(dangers[0]!.textContent).toMatch(/^Deny\b/);
+  });
+
+  it("Allow for this session is a plain secondary, neither primary nor destructive", () => {
+    renderDialog();
+    const session = screen.getByRole("button", { name: /allow for this session/i });
+    expect(session.classList.contains("pri")).toBe(false);
+    expect(session.classList.contains("danger")).toBe(false);
+  });
+
+  it("keeps Deny away from Allow — the two are not adjacent", () => {
+    renderDialog();
+    const deny = screen.getByRole("button", { name: /^deny/i });
+    const allow = screen.getByRole("button", { name: /^allow ⏎$/i });
+    expect(deny.previousElementSibling?.tagName).not.toBe("BUTTON");
+    expect(allow.nextElementSibling).not.toBe(deny);
+  });
+
+  it("wears the warn tone, not the destructive or the live one", () => {
+    renderDialog();
+    expect(dialog().style.borderColor).toBe("var(--warn)");
+    const heading = dialog().querySelector("h5");
+    expect(heading?.getAttribute("style")).toContain("var(--warn)");
+  });
+
+  it("caps the approved target's height so the buttons stay reachable", () => {
+    renderDialog({
+      request: makeRequest({ input: { command: "echo ".repeat(400) } }),
+    });
+    const target = dialog().querySelector("pre");
+    expect(target).not.toBeNull();
+    expect(target!.style.maxHeight).toBe("84px");
+    expect(target!.style.overflow).toBe("auto");
+    // A long unbroken command wraps inside the frame rather than widening it.
+    expect(target!.style.wordBreak).toBe("break-word");
+  });
+});

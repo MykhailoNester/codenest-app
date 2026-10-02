@@ -1,6 +1,40 @@
-import { useEffect, type ReactElement } from "react";
+import { useEffect, type CSSProperties, type ReactElement } from "react";
 import { openPath, openExternalUrl } from "../../lib/ipc";
-import styles from "./pane-context-menu.module.css";
+
+/* ── Local constants ─────────────────────────────────────────────────────
+   The right-click menu is Deck's `.dk-menu` — same box, same rows, same rule
+   between groups. It is NOT `<DeckMenu>`: that primitive owns a trigger button
+   and positions itself under it, whereas this menu has no trigger at all and
+   must appear at the pointer, through a `document.body` portal. The markup it
+   renders is the same, so the two look identical.
+
+   Declared here rather than in `components/deck/*` or `design/deck/*`, which
+   #283 does not touch — the precedent is the composer's `EDITOR_*` constants
+   and the launch composer's `SCRIM_STYLE`. */
+
+/** Carries Deck's tokens through the `document.body` portal without drawing a
+ *  box: `display: contents` removes the wrapper from layout while custom
+ *  properties and inherited values still pass to its children. */
+const DECK_SCOPE_STYLE: CSSProperties = { display: "contents" };
+
+/** Overrides `.dk-menu`'s own `position: absolute` and its `top`/`right`, which
+ *  anchor it under a trigger. Inline, so no stylesheet injection order can
+ *  decide it. `left`/`top` are merged in per render from the pointer. */
+const MENU_STYLE: CSSProperties = {
+  position: "fixed",
+  top: "auto",
+  right: "auto",
+  zIndex: 9000,
+  userSelect: "none",
+};
+
+/** The row is `.dk-menu button`; this adds only the trailing keystroke. */
+const SHORTCUT_STYLE: CSSProperties = {
+  marginLeft: "var(--u3)",
+  float: "right",
+  color: "var(--fg-4)",
+  fontSize: "var(--fs-xs)",
+};
 
 export interface ContextMenuTarget {
   /** URL detected at right-click position, if any. */
@@ -108,13 +142,13 @@ export function PaneContextMenu({
   return (
     // `deck` because this portals to `document.body`, outside the `.deck`
     // the Sessions page draws inside — without it the menu would resolve
-    // Deck's tokens to nothing. `styles.scope` is `display: contents`, so
+    // Deck's tokens to nothing. `DECK_SCOPE_STYLE` is `display: contents`, so
     // the wrapper carries the tokens and draws no box of its own.
-    <div className={`deck ${styles.scope}`}>
+    <div className="deck" style={DECK_SCOPE_STYLE}>
       <span
-        className={`dk-menu ${styles.menu}`}
+        className="dk-menu"
         role="menu"
-        style={{ left: x, top: y }}
+        style={{ ...MENU_STYLE, left: x, top: y }}
         // Stop the mousedown from propagating so the document handler above
         // doesn't immediately close the menu that was just opened.
         onMouseDown={(e) => e.stopPropagation()}
@@ -135,7 +169,7 @@ export function PaneContextMenu({
             >
               {item.label}
               {item.shortcut !== undefined ? (
-                <span className={styles.shortcut}>{item.shortcut}</span>
+                <span style={SHORTCUT_STYLE}>{item.shortcut}</span>
               ) : null}
             </button>
           </span>

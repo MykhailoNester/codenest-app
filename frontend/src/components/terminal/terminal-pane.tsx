@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactElement,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
@@ -29,7 +30,61 @@ import { SearchBar } from "./search-bar";
 import { PaneContextMenu, type ContextMenuTarget } from "./pane-context-menu";
 import { SessionHud } from "./session-hud";
 import { Icon } from "../icon";
-import styles from "./terminal-pane.module.css";
+
+/* ── Local constants ─────────────────────────────────────────────────────
+   What is left of the shell pane's own styling after the Deck conversion
+   (#293, finished for the pane's contents in #299): the pane frame, header and
+   mode footer are `.dk-pane*`, and the paste confirmation is `.dk-scrim` +
+   `.dk-modal`. Deck has no xterm host — that element's geometry is dictated by
+   FitAddon, not by the design system — and no portalled dialog, so the four
+   shapes below are declared here rather than in `components/deck/*` or
+   `design/deck/*`, which #283 does not touch. The precedent is the composer's
+   `EDITOR_*` constants and the launch composer's `SCRIM_STYLE`. */
+
+/**
+ * The xterm host.
+ *
+ * `padding: 0` is load-bearing, not cosmetic. xterm.js mounts directly into
+ * this element, and FitAddon computes available rows/cols from
+ * `getComputedStyle(container).height` minus the `.xterm` element's *own* CSS
+ * padding — padding on this container is not subtracted, so a non-zero value
+ * makes FitAddon over-count rows and the terminal renders past its content
+ * box. With `overflow: hidden` that clips the last row(s): the "bottom rows cut
+ * off" symptom. Spacing between the header and the canvas comes from the
+ * header's 1px bottom border instead.
+ */
+const TERMINAL_HOST_STYLE: CSSProperties = {
+  flex: "1 1 auto",
+  minHeight: 0,
+  width: "100%",
+  overflow: "hidden",
+  background: "var(--bg-1)",
+  padding: 0,
+};
+
+/** Carries Deck's tokens through the `document.body` portal without drawing a
+ *  box: `display: contents` removes the wrapper from layout while custom
+ *  properties and inherited values still pass to its children. */
+const DECK_SCOPE_STYLE: CSSProperties = { display: "contents" };
+
+/** `.dk-scrim` sits at z-index 60, which is right for a dialog inside a Deck
+ *  page but not for one portalled to `document.body` alongside this pane's own
+ *  context menu (9000) and the shortcuts panel (7001). Inline, so no
+ *  stylesheet injection order can decide it. */
+const PASTE_SCRIM_STYLE: CSSProperties = { zIndex: 8000 };
+
+/** The pasted text. Its own ceiling and wrapping; `.dk-term__b` is the nearest
+ *  Deck surface and is a flex *column body* that fills its parent, where this
+ *  is a block inside `.dk-modal__b` that must cap its own height. Long
+ *  unbroken input (a base64 blob, a one-line JSON payload) breaks rather than
+ *  widening the modal. */
+const PASTE_PREVIEW_STYLE: CSSProperties = {
+  margin: 0,
+  maxHeight: 220,
+  overflowY: "auto",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-all",
+};
 
 // ---------------------------------------------------------------------------
 // Theme helpers
@@ -398,6 +453,19 @@ export function TerminalPane({
     });
 
     term.open(containerRef.current);
+
+    // xterm.js's own two elements, styled here because a descendant selector is
+    // the one thing an inline style on the host cannot express and this file no
+    // longer owns a stylesheet. `.xterm` must fill the host or FitAddon measures
+    // against a collapsed box; the viewport's radius matches the pane frame's so
+    // the scrollback does not square off the pane's rounded corner.
+    const xtermEl = term.element;
+    if (xtermEl !== undefined) {
+      xtermEl.style.width = "100%";
+      xtermEl.style.height = "100%";
+      const viewport = xtermEl.querySelector<HTMLElement>(".xterm-viewport");
+      if (viewport !== null) viewport.style.borderRadius = "3px";
+    }
 
     termRef.current = term;
     fitRef.current = fit;
@@ -918,7 +986,7 @@ export function TerminalPane({
 
       <div
         ref={containerRef}
-        className={styles.terminal}
+        style={TERMINAL_HOST_STYLE}
         onMouseDown={onTerminalClick}
         onContextMenu={handleContextMenu}
       />
@@ -972,11 +1040,11 @@ export function TerminalPane({
         ? createPortal(
             // `deck` because this portals to `document.body`, outside the
             // `.deck` the Sessions page draws inside — without it the modal
-            // would resolve Deck's tokens to nothing. `styles.deckScope` is
+            // would resolve Deck's tokens to nothing. `DECK_SCOPE_STYLE` is
             // `display: contents`, so the wrapper carries the tokens and
             // draws no box of its own.
-            <div className={`deck ${styles.deckScope}`}>
-              <div className={`dk-scrim ${styles.pasteScrim}`}>
+            <div className="deck" style={DECK_SCOPE_STYLE}>
+              <div className="dk-scrim" style={PASTE_SCRIM_STYLE}>
                 <div
                   className="dk-modal"
                   role="dialog"
@@ -984,7 +1052,7 @@ export function TerminalPane({
                 >
                   <div className="dk-modal__h">paste multi-line content?</div>
                   <div className="dk-modal__b">
-                    <pre className={styles.pastePreview}>{pastePayload}</pre>
+                    <pre style={PASTE_PREVIEW_STYLE}>{pastePayload}</pre>
                   </div>
                   <div className="dk-modal__f">
                     <span className="dk-actions">

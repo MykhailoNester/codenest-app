@@ -245,4 +245,42 @@ describe("SessionHud", () => {
       expect(cell.textContent?.trim()).not.toBe("0");
     }
   });
+
+  // The strip's separators used to be a `border-right` plus a `:last-child`
+  // reset. The Deck conversion (#283) made both inline, so the reset is now
+  // `hudCells()` rather than the cascade — and, for the first time, assertable:
+  // vitest stubs CSS modules, so neither rule was reachable from a test before.
+  it("rules between cells but not after the last one", () => {
+    hudBox.current = fullHud();
+    gitBox.current = gitStatus();
+    render(<SessionHud paneId="pane-1" cwd="/repo" exited={false} />);
+    const cells = Array.from(
+      screen.getByTestId("session-hud").querySelectorAll<HTMLElement>("[data-cell]"),
+    );
+    expect(cells.length).toBeGreaterThan(1);
+    for (const cell of cells.slice(0, -1)) {
+      expect(cell.style.borderRight).toBe("1px solid var(--line)");
+    }
+    expect(cells.at(-1)!.style.borderRight).toBe("0px");
+  });
+
+  // The gear and the dot were `@keyframes`, which neither an inline style nor
+  // any Deck class can carry. They are the strip's only live signal, so they
+  // moved to the Web Animations API rather than being dropped — these two pin
+  // that they are still rendered, and still only when the pane is live.
+  it("marks the running tool and the thinking state with their own motion cues", () => {
+    hudBox.current = fullHud();
+    render(<SessionHud paneId="pane-1" cwd={undefined} exited={false} />);
+    const hud = screen.getByTestId("session-hud");
+    expect(hud.querySelector("[data-hud-spin]")).not.toBeNull();
+    expect(hud.querySelector("[data-hud-pulse]")).not.toBeNull();
+  });
+
+  it("shows neither motion cue on a dimmed pane", () => {
+    hudBox.current = fullHud({ status: "ended" });
+    render(<SessionHud paneId="pane-1" cwd={undefined} exited={false} />);
+    const hud = screen.getByTestId("session-hud");
+    expect(hud.querySelector("[data-hud-spin]")).toBeNull();
+    expect(hud.querySelector("[data-hud-pulse]")).toBeNull();
+  });
 });

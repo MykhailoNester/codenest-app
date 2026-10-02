@@ -13,7 +13,23 @@ import {
   formatModelLabel,
   formatTokens,
 } from "./session-hud-format";
-import styles from "./session-hud.module.css";
+import {
+  CELL_STYLE,
+  hudCells,
+  type HudCell,
+  KEY_STYLE,
+  STRIP_DIMMED_STYLE,
+  STRIP_STYLE,
+  THINK_STYLE,
+  VALUE_ACC_STYLE,
+  VALUE_INFO_STYLE,
+  VALUE_MUTED_STYLE,
+  VALUE_NUM_STYLE,
+  VALUE_OK_STYLE,
+  VALUE_STYLE,
+  VALUE_WARN_STYLE,
+} from "./session-hud-chrome";
+import { ThinkingDot, ToolSpinner } from "./pane-motion";
 
 // ─── Per-pane session-state strip ──────────────────────────────────────────
 //
@@ -77,12 +93,12 @@ export function SessionHud({
     return () => clearInterval(id);
   }, [ticking]);
 
-  const cells: ReactElement[] = [];
+  const cells: HudCell[] = [];
 
   if (hud?.model) {
     cells.push(
-      <div key="model" className={styles.cell} data-cell="model">
-        <span className={`${styles.value} ${styles.acc}`} title={hud.model}>
+      <div key="model" style={CELL_STYLE} data-cell="model">
+        <span style={VALUE_ACC_STYLE} title={hud.model}>
           {formatModelLabel(hud.model)}
         </span>
       </div>,
@@ -95,19 +111,19 @@ export function SessionHud({
       Math.round((hud.context_tokens / hud.context_window) * 100),
     );
     cells.push(
-      <div key="ctx" className={styles.cell} data-cell="ctx">
-        <span className={styles.key}>ctx</span>
+      <div key="ctx" style={CELL_STYLE} data-cell="ctx">
+        <span style={KEY_STYLE}>ctx</span>
         <span className="dk-meter">
           <i style={{ width: `${pct}%` }} />
         </span>
-        <span className={`${styles.value} ${styles.ok}`}>
+        <span style={VALUE_OK_STYLE}>
           {formatContextPercent(hud.context_tokens, hud.context_window)}
         </span>
       </div>,
     );
     cells.push(
-      <div key="tokens" className={styles.cell} data-cell="tokens">
-        <span className={`${styles.value} ${styles.num}`}>
+      <div key="tokens" style={CELL_STYLE} data-cell="tokens">
+        <span style={VALUE_NUM_STYLE}>
           {formatTokens(hud.context_tokens)}/{formatTokens(hud.context_window)}
         </span>
       </div>,
@@ -116,9 +132,9 @@ export function SessionHud({
 
   if (hud !== null) {
     cells.push(
-      <div key="cost" className={styles.cell} data-cell="cost">
+      <div key="cost" style={CELL_STYLE} data-cell="cost">
         <span
-          className={`${styles.value} ${styles.warn}`}
+          style={VALUE_WARN_STYLE}
           title="Estimated — all models are currently priced at Sonnet-4 rates"
         >
           {formatUSD(hud.cost_usd)}
@@ -136,8 +152,8 @@ export function SessionHud({
     // guessed (D11).
     if (elapsedSeconds !== null) {
       cells.push(
-        <div key="elapsed" className={styles.cell} data-cell="elapsed">
-          <span className={styles.value}>{formatElapsed(elapsedSeconds)}</span>
+        <div key="elapsed" style={CELL_STYLE} data-cell="elapsed">
+          <span style={VALUE_STYLE}>{formatElapsed(elapsedSeconds)}</span>
         </div>,
       );
     }
@@ -145,13 +161,13 @@ export function SessionHud({
 
   if (git !== null) {
     cells.push(
-      <div key="git" className={styles.cell} data-cell="git">
-        <span className={`${styles.value} ${styles.ok}`}>{git.branch}</span>
+      <div key="git" style={CELL_STYLE} data-cell="git">
+        <span style={VALUE_OK_STYLE}>{git.branch}</span>
         {git.dirty ? (
-          <span className={`${styles.value} ${styles.warn}`}>*</span>
+          <span style={VALUE_WARN_STYLE}>*</span>
         ) : null}
         {git.ahead != null && git.ahead > 0 ? (
-          <span className={`${styles.value} ${styles.info}`}>
+          <span style={VALUE_INFO_STYLE}>
             +{git.ahead}
           </span>
         ) : null}
@@ -167,12 +183,12 @@ export function SessionHud({
   ) {
     const toolElapsed = elapsedSecondsSince(hud.current_tool_started_at);
     cells.push(
-      <div key="tool" className={styles.cell} data-cell="tool">
-        <span className={styles.spin}>⚙</span>
-        <span className={`${styles.value} ${styles.info}`}>
+      <div key="tool" style={CELL_STYLE} data-cell="tool">
+        <ToolSpinner />
+        <span style={VALUE_INFO_STYLE}>
           {hud.current_tool}
         </span>
-        <span className={`${styles.value} ${styles.muted}`}>
+        <span style={VALUE_MUTED_STYLE}>
           {formatElapsed(toolElapsed)}
         </span>
       </div>,
@@ -183,12 +199,12 @@ export function SessionHud({
     cells.push(
       <div
         key="thinking"
-        className={styles.cell}
+        style={CELL_STYLE}
         data-cell="thinking"
         title="Inferred from the hook stream — Claude Code fires no thinking hook."
       >
-        <span className={styles.think}>
-          <span className={styles.thinkDot} />
+        <span style={THINK_STYLE}>
+          <ThinkingDot />
           Thinking
         </span>
       </div>,
@@ -200,12 +216,12 @@ export function SessionHud({
     const done = hud.todo_done ?? 0;
     const pct = Math.min(100, Math.round((done / total) * 100));
     cells.push(
-      <div key="todo" className={styles.cell} data-cell="todo">
-        <span className={styles.key}>todo</span>
+      <div key="todo" style={CELL_STYLE} data-cell="todo">
+        <span style={KEY_STYLE}>todo</span>
         <span className="dk-meter">
           <i style={{ width: `${pct}%` }} />
         </span>
-        <span className={`${styles.value} ${styles.num}`}>
+        <span style={VALUE_NUM_STYLE}>
           {done}/{total}
         </span>
       </div>,
@@ -216,11 +232,11 @@ export function SessionHud({
 
   return (
     <div
-      className={dimmed ? `${styles.strip} ${styles.dimmed}` : styles.strip}
+      style={dimmed ? STRIP_DIMMED_STYLE : STRIP_STYLE}
       data-testid="session-hud"
       data-dimmed={dimmed ? "true" : "false"}
     >
-      {cells}
+      {hudCells(cells)}
     </div>
   );
 }
