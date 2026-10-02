@@ -44,29 +44,29 @@ export function ActivityCard({
   const onComments = comments !== undefined && tab === "comments";
   return (
     <div className="td-card">
-      <div className="td-tabs" role="tablist" aria-label="Task sections">
+      <div className="dk-tabs" role="tablist" aria-label="Task sections">
         <button
           type="button"
           role="tab"
-          className={onComments ? undefined : "is-on"}
+          className={`dk-tab${onComments ? "" : " on"}`}
           aria-selected={onComments ? "false" : "true"}
           id="td-tab-activity"
           aria-controls="td-panel-activity"
           onClick={() => setTab("activity")}
         >
-          Activity
+          activity
         </button>
         {comments !== undefined ? (
           <button
             type="button"
             role="tab"
-            className={onComments ? "is-on" : undefined}
+            className={`dk-tab${onComments ? " on" : ""}`}
             aria-selected={onComments ? "true" : "false"}
             id="td-tab-comments"
             aria-controls="td-panel-comments"
             onClick={() => setTab("comments")}
           >
-            Comments
+            comments
           </button>
         ) : null}
       </div>

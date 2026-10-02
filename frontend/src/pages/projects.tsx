@@ -20,9 +20,10 @@ import {
 import { isHiddenCatchAllProject } from "../lib/project-display";
 import { DeckShell } from "../components/deck/deck-shell";
 import { DeckGrid, DeckHead, DeckLine } from "../components/deck/deck-grid";
+import { DeckMenu } from "../components/deck/deck-menu";
 
 const COLS_PROJECT =
-  "14px minmax(0, 1fr) 130px 100px 150px 80px auto";
+  "14px minmax(0, 1fr) 150px 110px 170px 90px auto";
 import { ImportProjectsModal } from "../components/import-projects-modal";
 import {
   ProjectAgents,
@@ -860,7 +861,7 @@ export function ProjectsPage(): ReactElement {
                       },
                       {
                         v: (
-                          <span className="acts" onClick={(e) => e.stopPropagation()}>
+                          <span className="dk-actions end" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
                               className="dk-btn bare"
@@ -875,61 +876,44 @@ export function ProjectsPage(): ReactElement {
                             >
                               context
                             </button>
-                            {p.path && (
-                              <button
-                                type="button"
-                                className="dk-btn bare"
-                                onClick={() =>
-                                  void navigate(`/editor?project_id=${p.id}&kind=claude`)
-                                }
-                              >
-                                CLAUDE.md
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className="dk-btn bare"
-                              onClick={() => {
-                                setConfirmDeleteId(null);
-                                setEditingProject(p);
-                              }}
-                            >
-                              edit
-                            </button>
-                            <button
-                              type="button"
-                              className="dk-btn bare"
-                              onClick={() => setAgentsPanelProject(p)}
-                              title="Manage per-project agents and skills"
-                            >
-                              agents
-                            </button>
-                            <button
-                              type="button"
-                              className="dk-btn bare"
-                              onClick={() => handleRescan(p)}
-                              disabled={rescanningId === p.id}
-                              title="Re-scan this project for new/removed agents and skills"
-                            >
-                              {rescanningId === p.id ? "rescanning…" : "rescan"}
-                            </button>
-                            {confirmDeleteId === p.id && (
-                              <button
-                                type="button"
-                                className="dk-btn bare"
-                                onClick={() => setConfirmDeleteId(null)}
-                              >
-                                cancel
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className={confirmDeleteId === p.id ? "dk-btn" : "dk-btn bare"}
-                              onClick={() => void handleDelete(p)}
-                              disabled={deleteProject.isPending && confirmDeleteId === p.id}
-                            >
-                              {confirmDeleteId === p.id ? "confirm delete" : "delete"}
-                            </button>
+                            <DeckMenu
+                              label={`Actions for ${p.name}`}
+                              items={[
+                                ...(p.path
+                                  ? [
+                                      {
+                                        label: "Open CLAUDE.md",
+                                        onSelect: () =>
+                                          void navigate(`/editor?project_id=${p.id}&kind=claude`),
+                                      },
+                                    ]
+                                  : []),
+                                {
+                                  label: "Edit project",
+                                  onSelect: () => {
+                                    setConfirmDeleteId(null);
+                                    setEditingProject(p);
+                                  },
+                                },
+                                {
+                                  label: "Manage agents and skills",
+                                  onSelect: () => setAgentsPanelProject(p),
+                                },
+                                {
+                                  label: rescanningId === p.id ? "Rescanning…" : "Rescan for agents",
+                                  disabled: rescanningId === p.id,
+                                  onSelect: () => handleRescan(p),
+                                },
+                                {
+                                  label:
+                                    confirmDeleteId === p.id ? "Confirm delete" : "Delete project",
+                                  danger: true,
+                                  separated: true,
+                                  disabled: deleteProject.isPending && confirmDeleteId === p.id,
+                                  onSelect: () => void handleDelete(p),
+                                },
+                              ]}
+                            />
                           </span>
                         ),
                         cls: "r",

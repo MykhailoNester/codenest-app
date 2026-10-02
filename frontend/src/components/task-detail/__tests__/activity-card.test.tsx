@@ -98,7 +98,7 @@ describe("ActivityCard", () => {
     const tabs = screen.getAllByRole("tab");
     expect(tabs.length).toBe(1);
     const [tab] = tabs;
-    expect(tab?.textContent).toBe("Activity");
+    expect(tab?.textContent).toMatch(/^activity$/i);
     expect(tab?.getAttribute("aria-selected")).toBe("true");
   });
 

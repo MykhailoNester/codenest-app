@@ -444,7 +444,7 @@ describe("TaskDetailPage", () => {
     expect(screen.queryByText("✓ Saved")).toBeNull();
 
     resolveUpdate?.();
-    await waitFor(() => screen.getByText("✓ Saved"));
+    await waitFor(() => screen.getByText(/✓ saved/i));
   });
 
   it("a rejected write shows a toast and never shows Saved", async () => {
@@ -741,7 +741,10 @@ describe("TaskDetailPage", () => {
     expect(doc?.querySelector(".d3-replay")).not.toBeNull();
   });
 
-  it("status badge colour comes from the taxonomy", () => {
+  // Deck carries status on the state glyph, not as a per-status hex from the
+  // taxonomy — the same decision #292 made for the board's `status_colors`.
+  // The contract is now "the badge names the status", not "it is this colour".
+  it("the status badge reflects the task's status", () => {
     setupMocks({
       lookups: makeLookups({
         workflow_task_statuses: [
@@ -756,7 +759,9 @@ describe("TaskDetailPage", () => {
       }),
     });
     const { container } = renderPage();
-    const badge = container.querySelector(".td-badge") as HTMLElement;
-    expect(badge.style.getPropertyValue("--c")).toBe("#123456");
+    const badge = container.querySelector(".dk-bar .dk-tag") as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent?.trim()).toMatch(/^to do$/i);
+    expect(badge.getAttribute("data-s")).toBe("todo");
   });
 });
