@@ -1,10 +1,10 @@
 import type { ReactElement } from "react";
 import { useProfiles, useSessionReplay } from "../../lib/api";
 import { NO_PROFILES } from "../../lib/profile-utils";
-import { ReplayPanel } from "../command-center/replay-panel";
+import { ReplayPanel } from "../sessions/replay-panel";
 
 /**
- * The runs card's Replay affordance: reuses the Command Center's own
+ * The runs card's Replay affordance: reuses the Sessions surface's own
  * `ReplayPanel` (no second replay implementation) rendered inline in
  * `.dk-detail__doc`, directly under `RunsCard`.
  *

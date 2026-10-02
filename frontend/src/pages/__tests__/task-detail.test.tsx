@@ -803,12 +803,18 @@ describe("TaskDetailPage", () => {
       isError: false,
     });
 
+    // Keyed on the panel's landmark, not on a class: #283 converted it to
+    // Deck, so the `.d3-replay` wrapper this used to look for is gone and
+    // nothing replaced it — Deck draws no box around a section.
     const { container } = renderPage();
-    expect(container.querySelector(".d3-replay")).toBeNull();
+    expect(container.querySelector('[aria-label="Session replay"]')).toBeNull();
 
     fireEvent.click(screen.getByText(/^replay$/i));
     const doc = container.querySelector(".dk-detail__doc");
-    expect(doc?.querySelector(".d3-replay")).not.toBeNull();
+    expect(doc?.querySelector('[aria-label="Session replay"]')).not.toBeNull();
+    // The panel's own transport and charts come with it, in the task mount
+    // as much as in the session one.
+    expect(doc?.querySelector('[aria-label="Session timeline scrubber"]')).not.toBeNull();
   });
 
   // Deck carries status on the state glyph, not as a per-status hex from the
