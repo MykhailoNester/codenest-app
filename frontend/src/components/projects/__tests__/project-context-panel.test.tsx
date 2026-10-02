@@ -1,20 +1,20 @@
+// #273 folded `pages/project-context.tsx` onto the Projects surface as a
+// project's detail. The report, its copy and its refusals are unchanged, so
+// these assertions are unchanged too — only the component under test and the
+// render harness moved (no route, no `Shell`).
+
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ProjectContextPage } from "../project-context";
-import type { ProjectContextReport } from "../../lib/api";
+import { MemoryRouter } from "react-router-dom";
+import { ProjectContextPanel } from "../project-context-panel";
+import type { ProjectContextReport } from "../../../lib/api";
 
 const { mockUseProjectContext } = vi.hoisted(() => ({
   mockUseProjectContext: vi.fn(),
 }));
 
-vi.mock("../../lib/api", () => ({
+vi.mock("../../../lib/api", () => ({
   useProjectContext: () => mockUseProjectContext(),
-}));
-
-vi.mock("../../components/layout/shell", () => ({
-  Shell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 afterEach(() => {
@@ -115,13 +115,8 @@ function report(over: Partial<ProjectContextReport> = {}) {
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={["/projects/3/context"]}>
-      <Routes>
-        <Route
-          path="/projects/:projectId/context"
-          element={<ProjectContextPage />}
-        />
-      </Routes>
+    <MemoryRouter>
+      <ProjectContextPanel projectId={3} />
     </MemoryRouter>,
   );
 }

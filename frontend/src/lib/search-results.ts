@@ -15,9 +15,13 @@ export function projectRoute(projectId: number): string {
   return `/tasks?project_id=${projectId}`;
 }
 
-/** `/projects/:projectId/context` — the #181 Project Context Map. */
+/**
+ * The #181 Project Context Map, which #273 folded onto the Projects surface as
+ * a project's detail. `/projects/:projectId/context` still redirects here, but
+ * a hit should land in one navigation, not two.
+ */
 export function projectContextRoute(projectId: number | string): string {
-  return `/projects/${projectId}/context`;
+  return `/projects?context=${encodeURIComponent(String(projectId))}`;
 }
 
 /**

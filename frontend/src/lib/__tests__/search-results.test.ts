@@ -21,9 +21,12 @@ describe("routeForResult", () => {
     expect(routeForResult(result("task", 42))).toBe("/tasks/42");
   });
 
+  // #273 moved the context map onto the Projects surface as a project's
+  // detail, so the hit lands there directly rather than through the
+  // `/projects/:projectId/context` redirect.
   it("project -> the #181 Context Map", () => {
     expect(routeForResult(result("project", 7))).toBe(projectContextRoute(7));
-    expect(routeForResult(result("project", 7))).toBe("/projects/7/context");
+    expect(routeForResult(result("project", 7))).toBe("/projects?context=7");
   });
 
   it("doc -> /docs?id=:id", () => {
@@ -64,7 +67,7 @@ describe("routeForResult", () => {
   it("every produced route matches a pattern the router actually declares", () => {
     const routePatterns = [
       /^\/tasks\/\d+$/,
-      /^\/projects\/\d+\/context$/,
+      /^\/projects\?context=\d+$/,
       /^\/docs\?id=\d+$/,
       /^\/inbox\?id=\d+$/,
       /^\/terminal\?view=runs(&session=.+&tab=inspect)?$/,

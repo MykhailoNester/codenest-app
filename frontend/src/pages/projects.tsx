@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient, useQueries } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -21,6 +21,7 @@ import { isHiddenCatchAllProject } from "../lib/project-display";
 import { DeckShell } from "../components/deck/deck-shell";
 import { DeckGrid, DeckHead, DeckLine } from "../components/deck/deck-grid";
 import { DeckMenu } from "../components/deck/deck-menu";
+import { ProjectContextPanel } from "../components/projects/project-context-panel";
 
 const COLS_PROJECT =
   "14px minmax(0, 1fr) 150px 110px 170px 90px auto";
@@ -301,6 +302,7 @@ function AgentsPanelModal({
 
 export function ProjectsPage(): ReactElement {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
   const { data: rawProjects = [] } = useProjects();
   const { data: providers = [] } = useProviders();
@@ -444,6 +446,40 @@ export function ProjectsPage(): ReactElement {
       },
     });
   };
+
+  // ── Project detail: the #181 context map (#273) ──────────────────────────
+  //
+  // `?context=<id>` turns this surface into one project's detail rather than
+  // the list. It was `/projects/:projectId/context`, a route and a stylesheet
+  // of its own; the old path still redirects here so a bookmark resolves.
+  const contextParam = searchParams.get("context");
+  const contextId = contextParam === null ? null : Number(contextParam);
+  if (contextId !== null && Number.isFinite(contextId)) {
+    const contextProject = projects.find((p) => p.id === contextId);
+    return (
+      <DeckShell
+        title="projects"
+        crumb={contextProject?.name ?? `project ${contextId}`}
+        actions={
+          <button
+            className="dk-btn"
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("context");
+              setSearchParams(next);
+            }}
+          >
+            ← all projects
+          </button>
+        }
+      >
+        <div style={{ padding: "0 24px 24px" }}>
+          <ProjectContextPanel projectId={contextId} />
+        </div>
+      </DeckShell>
+    );
+  }
 
   return (
     <DeckShell
@@ -871,7 +907,7 @@ export function ProjectsPage(): ReactElement {
                             <button
                               type="button"
                               className="dk-btn bare"
-                              onClick={() => void navigate(`/projects/${p.id}/context`)}
+                              onClick={() => setSearchParams({ context: String(p.id) })}
                             >
                               context
                             </button>

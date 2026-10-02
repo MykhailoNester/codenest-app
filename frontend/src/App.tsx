@@ -59,7 +59,6 @@ import { TerminalWindowRoot } from "./pages/terminal-window-root";
 import { ScreenshotRingPage } from "./pages/screenshot-ring";
 import { SettingsPage } from "./pages/settings";
 import { ProjectsPage } from "./pages/projects";
-import { ProjectContextPage } from "./pages/project-context";
 import { MarkdownEditorPage } from "./pages/markdown-editor";
 import { MarketplacePage } from "./pages/marketplace";
 import { ParallelRunsPage } from "./pages/parallel-runs";
@@ -110,6 +109,17 @@ function SessionRedirect(): ReactElement {
   return (
     <Navigate
       to={`/terminal?view=runs&session=${encodeURIComponent(sessionId)}&tab=inspect`}
+      replace
+    />
+  );
+}
+
+/** `/projects/:projectId/context` → the project's detail on Projects (#273). */
+function ProjectContextRedirect(): ReactElement {
+  const { projectId = "" } = useParams<{ projectId: string }>();
+  return (
+    <Navigate
+      to={`/projects?context=${encodeURIComponent(projectId)}`}
       replace
     />
   );
@@ -435,9 +445,11 @@ function AppInner(): ReactElement {
         <Route path="/" element={<DeckHomePage />} />
         <Route path="/mission-control" element={<DashboardPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
+        {/* #273 — the context map is a project's detail on the Projects
+            surface. The old path stays as a redirect, carrying its param. */}
         <Route
           path="/projects/:projectId/context"
-          element={<ProjectContextPage />}
+          element={<ProjectContextRedirect />}
         />
         {/* #280 — the Deck shell, reviewable beside the old one. Removed by #281/#282. */}
         <Route path="/deck" element={<DeckPreviewPage />} />
