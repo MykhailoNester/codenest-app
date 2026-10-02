@@ -147,6 +147,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .dk-group__h[data-s="stall"] { color: var(--warn); }
 .dk-group__h[data-s="run"] { color: var(--run); }
 .dk-group__h[data-s="done"] { color: var(--ok); }
+.dk-group__h[data-s="fail"] { color: var(--err); }
 
 /* ── Inline marks ────────────────────────────────────────────────────── */
 
@@ -156,10 +157,12 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .dk-tag[data-s="run"] { color: var(--run); background: var(--run-bg); }
 .dk-tag[data-s="done"] { color: var(--ok); background: var(--ok-bg); }
 
-.dk-bar { display: inline-block; vertical-align: middle; width: 46px; height: 3px; background: var(--line); border-radius: 99px; overflow: hidden; }
-.dk-bar i { display: block; height: 100%; background: var(--fg-3); }
-.dk-bar.warn i { background: var(--warn); }
-.dk-bar.err i { background: var(--err); }
+/* The gauge. Named apart from `.dk-bar`, the detail toolbar — they collided
+   and the toolbar won, which rendered every meter as a bordered flex row. */
+.dk-meter { display: inline-block; vertical-align: middle; width: 46px; height: 3px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.dk-meter i { display: block; height: 100%; background: var(--fg-3); }
+.dk-meter.warn i { background: var(--warn); }
+.dk-meter.err i { background: var(--err); }
 
 /* ── Controls ────────────────────────────────────────────────────────── */
 
@@ -449,3 +452,54 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
   align-items: center; min-height: var(--row); padding: 0 var(--u3); font-size: var(--fs-s); }
 .dk-kv > span:first-child { color: var(--fg-3); }
 .dk-kv + .dk-kv { border-top: 1px solid var(--line); }
+
+/* ── Dialog ──────────────────────────────────────────────────────────────
+   Deck had no modal, so every page that needed one kept a stylesheet just
+   for it — projects, schedules and the settings forms each invented the same
+   scrim and box.
+
+   The max-width reset is load-bearing: `.dk-page > *` caps its children at
+   --page-max, which on a window wider than that dims only the left 1200px and
+   leaves the dialog off-centre. A scrim is fixed to the viewport and must
+   escape that cap. */
+.dk-scrim { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  padding: var(--u6); background: rgba(0, 0, 0, 0.55); }
+.dk-page > .dk-scrim, .dk-page.flush > .dk-scrim { max-width: none; }
+[data-theme="light"] .dk-scrim { background: rgba(0, 0, 0, 0.35); }
+
+.dk-modal { display: flex; flex-direction: column; width: min(680px, 100%); max-height: 85vh;
+  background: var(--bg); border: 1px solid var(--line-2); border-radius: 4px; overflow: hidden; }
+.dk-modal.wide { width: min(900px, 100%); }
+.dk-modal__h { display: flex; align-items: center; gap: var(--u2); flex: none;
+  height: 34px; padding: 0 var(--u3); border-bottom: 1px solid var(--line);
+  font-size: var(--fs-s); letter-spacing: 1.1px; text-transform: uppercase; color: var(--fg-2); }
+.dk-modal__h .sp { margin-left: auto; }
+.dk-modal__b { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--u4); }
+.dk-modal__f { display: flex; align-items: center; gap: var(--u2); justify-content: flex-end;
+  flex: none; padding: var(--u3) var(--u4); border-top: 1px solid var(--line); }
+
+/* ── Form ────────────────────────────────────────────────────────────────
+   `.dk-field` and `.dk-sel` are row chrome — 24px tall, and the select is
+   capped at 160px. A twenty-field form needs a label over a control. */
+.dk-form { display: grid; gap: var(--u4); }
+.dk-form__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--u3) var(--u4); }
+@media (max-width: 700px) { .dk-form__grid { grid-template-columns: minmax(0, 1fr); } }
+.dk-form__row { display: grid; gap: 5px; min-width: 0; }
+.dk-form__row.full { grid-column: 1 / -1; }
+.dk-label { font-size: var(--fs-xs); letter-spacing: 1.1px; text-transform: uppercase; color: var(--fg-3); }
+.dk-help { font-size: var(--fs-s); color: var(--fg-3); line-height: 1.5; }
+.dk-ctl { width: 100%; min-height: 28px; padding: 0 var(--u2); border: 1px solid var(--line-2);
+  border-radius: 3px; background: var(--bg-1); color: var(--fg); font: inherit; font-size: var(--fs-s); }
+.dk-ctl:focus { outline: 0; border-color: var(--fg-4); }
+.dk-ctl:disabled { color: var(--fg-4); cursor: not-allowed; }
+textarea.dk-ctl { min-height: 92px; padding: var(--u2); line-height: 1.6; resize: vertical; font-family: var(--mono); }
+.dk-fieldset { display: grid; gap: var(--u3); padding-top: var(--u3); border-top: 1px solid var(--line); }
+.dk-fieldset > legend, .dk-fieldset__h { font-size: var(--fs-xs); letter-spacing: 1.1px;
+  text-transform: uppercase; color: var(--fg-3); padding: 0; }
+
+/* ── Standalone output pane ──────────────────────────────────────────────
+   `.dk-term` carries only a left border because it sits against the session
+   panes. On its own in a column it needs a frame and a ceiling. */
+.dk-out { display: flex; flex-direction: column; min-height: 0; max-height: 420px;
+  border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--bg-1); }
+.dk-out .dk-term__b { background: var(--bg); }
