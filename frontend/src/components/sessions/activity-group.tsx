@@ -14,8 +14,8 @@ import { Link } from "react-router-dom";
 import type { ProfileOut, RecentEvent } from "../../lib/api";
 import { profileColor } from "../../lib/profile-utils";
 import { relativeTime } from "../../lib/format-helpers";
-import { EventDetailModal } from "../command-center/event-detail-modal";
-import { eventLabel } from "../command-center/status-utils";
+import { EventDetailModal } from "./event-detail-modal";
+import { eventLabel } from "./status-utils";
 import { DeckGrid, DeckGroup, DeckHead, DeckLine } from "../deck/deck-grid";
 
 const COLS_ACTIVITY = "14px 90px minmax(0, 1fr) 150px 92px 62px";

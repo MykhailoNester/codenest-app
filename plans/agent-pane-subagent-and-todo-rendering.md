@@ -730,7 +730,7 @@ corroboration of §4.3's wire-name finding: this repo's own analytics code
 already had to handle both names.
 
 **The constellation ceiling does not move.** Command Center's
-`useConstellationLayout` (`frontend/src/components/command-center/use-constellation-layout.ts:28-73`)
+`useConstellationLayout` (`frontend/src/components/sessions/use-constellation-layout.ts:28-73`)
 has exactly three node kinds — `HubNode` (`id: "hub"`), `ProjectNode`
 (`id: "p:<name>"`), `SessionNode` (`parentId: ProjectNode.id`) — with no
 parent/child concept below a session. A 4th tier for subagents is a real

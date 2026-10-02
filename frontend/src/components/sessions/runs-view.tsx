@@ -55,9 +55,9 @@ import { COLS_RUN, RUN_HEAD } from "./run-cols";
 import { RunLine } from "./run-line";
 import { ActivityGroup } from "./activity-group";
 import { SessionDetail } from "./session-detail";
-import { useConstellationLayout } from "../command-center/use-constellation-layout";
-import type { ConstellationWindow } from "../command-center/use-constellation-layout";
-import { ConstellationOverlay } from "../command-center/constellation-overlay";
+import { useConstellationLayout } from "./use-constellation-layout";
+import type { ConstellationWindow } from "./use-constellation-layout";
+import { ConstellationOverlay } from "./constellation-overlay";
 
 type RunsFilter = "" | "running" | "ended";
 
