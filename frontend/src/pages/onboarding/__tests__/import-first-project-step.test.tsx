@@ -91,6 +91,20 @@ afterEach(() => {
   cleanup();
 });
 
+/**
+ * Wait until the scan has not only rendered but *settled* — the default
+ * selection is applied in an effect after the candidate list paints, and
+ * `commit()` reads `selected`. Waiting on the "Discovered repositories"
+ * heading alone let a commit run against an empty selection, where the
+ * component takes its "nothing selected, import nothing" branch and resolves
+ * instead of calling the import. That failed roughly one full-suite run in
+ * three while passing alone.
+ */
+async function scanSettled(): Promise<void> {
+  await screen.findByText(/Discovered repositories/);
+  await screen.findByText(/[1-9]\d* selected for import/);
+}
+
 describe("ImportFirstProjectStep", () => {
   it("leaves the root empty so the first Scan cannot walk the whole home tree", () => {
     renderStep();
@@ -166,7 +180,7 @@ describe("ImportFirstProjectStep", () => {
     renderStep();
     fireEvent.change(rootInput(), { target: { value: "/src" } });
     fireEvent.click(scanBtn());
-    await screen.findByText(/Discovered repositories/);
+    await scanSettled();
     // Only /src/a qualifies: b has no Claude tooling, c is already imported.
     expect(screen.getByText(/2 with Claude · 1 selected for import/)).toBeTruthy();
   });
@@ -181,6 +195,8 @@ describe("ImportFirstProjectStep", () => {
     renderStep();
     fireEvent.change(rootInput(), { target: { value: "/src" } });
     fireEvent.click(scanBtn());
+    // This case is *about* an empty selection, so the settled wait would
+    // never resolve — the rendered list is the whole precondition here.
     await screen.findByText(/Discovered repositories/);
     expect(screen.getByText(/0 selected for import/)).toBeTruthy();
 
@@ -205,7 +221,7 @@ describe("ImportFirstProjectStep", () => {
     const { commit } = renderStep();
     fireEvent.change(rootInput(), { target: { value: "/src" } });
     fireEvent.click(scanBtn());
-    await screen.findByText(/Discovered repositories/);
+    await scanSettled();
 
     await commit();
     expect(mockImport).toHaveBeenCalledWith([
@@ -221,6 +237,8 @@ describe("ImportFirstProjectStep", () => {
     const { commit } = renderStep();
     fireEvent.change(rootInput(), { target: { value: "/src" } });
     fireEvent.click(scanBtn());
+    // This case is *about* an empty selection, so the settled wait would
+    // never resolve — the rendered list is the whole precondition here.
     await screen.findByText(/Discovered repositories/);
 
     // Skipping the step must be a no-op, not an empty import.
@@ -238,7 +256,7 @@ describe("ImportFirstProjectStep", () => {
     const { commit } = renderStep();
     fireEvent.change(rootInput(), { target: { value: "/src" } });
     fireEvent.click(scanBtn());
-    await screen.findByText(/Discovered repositories/);
+    await scanSettled();
 
     await commit();
     expect(toastSuccess).toHaveBeenCalledWith("Imported 1 project · 1 skipped");
@@ -251,7 +269,7 @@ describe("ImportFirstProjectStep", () => {
     const { commit } = renderStep();
     fireEvent.change(rootInput(), { target: { value: "/src" } });
     fireEvent.click(scanBtn());
-    await screen.findByText(/Discovered repositories/);
+    await scanSettled();
 
     await expect(commit()).rejects.toThrow("sidecar down");
   });
