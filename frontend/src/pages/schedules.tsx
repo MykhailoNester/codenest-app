@@ -82,7 +82,6 @@ import {
   formatDurationMs as fmtDurationMs,
   formatCount,
 } from "../lib/format-helpers";
-import styles from "./schedules.module.css";
 
 /** CSS-module values are `string | undefined` under noUncheckedIndexedAccess. */
 function sx(...parts: (string | undefined | false)[]): string {
@@ -356,7 +355,7 @@ function LiveRunTerminal({ ptyId, preloadContent }: LiveRunTerminalProps): React
   return (
     <div
       ref={containerRef}
-      className={styles.liveTerm}
+      className={"dk-term__b"}
       aria-label="Live run output"
     />
   );
@@ -375,7 +374,7 @@ function OutPane({
   children: ReactNode;
 }): ReactElement {
   return (
-    <div className={styles.out}>
+    <div className={"dk-out"}>
       <div className="dk-term__h">
         <span>{label}</span>
         {head}
@@ -386,7 +385,7 @@ function OutPane({
 }
 
 function OutBody({ children }: { children: ReactNode }): ReactElement {
-  return <div className={sx("dk-term__b", styles.outBody)}>{children}</div>;
+  return <div className={sx("dk-term__b", "dk-term__b")}>{children}</div>;
 }
 
 type TranscriptQuery = ReturnType<typeof useScheduleRunTranscript>;
@@ -825,7 +824,7 @@ function ScheduleDetail({
         <div>
           {schedule.prompt && (
             <DeckGroup label="prompt" collapsible defaultOpen={false}>
-              <div className={styles.out}>
+              <div className={"dk-out"}>
                 <OutBody>{schedule.prompt}</OutBody>
               </div>
             </DeckGroup>
@@ -946,14 +945,14 @@ function CronBuilder({
   }
 
   return (
-    <div className={styles.grid}>
-      <div className={styles.field}>
-        <label className={styles.label} htmlFor="cb-preset">
+    <div className={"dk-form__grid"}>
+      <div className={"dk-form__row"}>
+        <label className={"dk-label"} htmlFor="cb-preset">
           repeat
         </label>
         <select
           id="cb-preset"
-          className={styles.ctl}
+          className={"dk-ctl"}
           value={preset}
           onChange={(e) => onPresetChange(e.target.value as PresetKind)}
         >
@@ -966,11 +965,11 @@ function CronBuilder({
       </div>
 
       {showTime && (
-        <div className={styles.field}>
-          <span className={styles.label}>time</span>
-          <div className={styles.row}>
+        <div className={"dk-form__row"}>
+          <span className={"dk-label"}>time</span>
+          <div className={"dk-form__row full"}>
             <select
-              className={sx(styles.ctl, styles.narrowCtl)}
+              className={sx("dk-ctl", "dk-ctl")}
               value={displayHour}
               onChange={(e) => {
                 const h12 = Number(e.target.value);
@@ -988,7 +987,7 @@ function CronBuilder({
             </select>
             <span className="dim">:</span>
             <select
-              className={sx(styles.ctl, styles.narrowCtl)}
+              className={sx("dk-ctl", "dk-ctl")}
               value={minute}
               onChange={(e) => onMinuteChange(Number(e.target.value))}
               aria-label="Minute"
@@ -1000,7 +999,7 @@ function CronBuilder({
               ))}
             </select>
             <select
-              className={sx(styles.ctl, styles.narrowCtl)}
+              className={sx("dk-ctl", "dk-ctl")}
               value={amPm}
               onChange={(e) => handleAmPm(e.target.value)}
               aria-label="AM/PM"
@@ -1013,8 +1012,8 @@ function CronBuilder({
       )}
 
       {preset === "weekly" && (
-        <div className={sx(styles.field, styles.full)}>
-          <span className={styles.label}>on</span>
+        <div className={sx("dk-form__row", "full")}>
+          <span className={"dk-label"}>on</span>
           <div className="dk-actions">
             {WEEKDAY_LABELS.map((label, idx) => (
               <button
@@ -1032,14 +1031,14 @@ function CronBuilder({
       )}
 
       {preset === "monthly" && (
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="cb-dom">
+        <div className={"dk-form__row"}>
+          <label className={"dk-label"} htmlFor="cb-dom">
             day
           </label>
-          <div className={styles.row}>
+          <div className={"dk-form__row full"}>
             <select
               id="cb-dom"
-              className={sx(styles.ctl, styles.narrowCtl)}
+              className={sx("dk-ctl", "dk-ctl")}
               value={dayOfMonth}
               onChange={(e) => onDayOfMonthChange(Number(e.target.value))}
             >
@@ -1049,20 +1048,20 @@ function CronBuilder({
                 </option>
               ))}
             </select>
-            <span className={styles.help}>of each month (max 28)</span>
+            <span className={"dk-help"}>of each month (max 28)</span>
           </div>
         </div>
       )}
 
       {preset === "every_n_hours" && (
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="cb-nhours">
+        <div className={"dk-form__row"}>
+          <label className={"dk-label"} htmlFor="cb-nhours">
             every
           </label>
-          <div className={styles.row}>
+          <div className={"dk-form__row full"}>
             <select
               id="cb-nhours"
-              className={sx(styles.ctl, styles.narrowCtl)}
+              className={sx("dk-ctl", "dk-ctl")}
               value={everyNHours}
               onChange={(e) => onEveryNHoursChange(Number(e.target.value))}
             >
@@ -1072,19 +1071,19 @@ function CronBuilder({
                 </option>
               ))}
             </select>
-            <span className={styles.help}>hour(s)</span>
+            <span className={"dk-help"}>hour(s)</span>
           </div>
         </div>
       )}
 
       {preset === "custom" && (
-        <div className={sx(styles.field, styles.full)}>
-          <label className={styles.label} htmlFor="cb-custom">
+        <div className={sx("dk-form__row", "full")}>
+          <label className={"dk-label"} htmlFor="cb-custom">
             cron
           </label>
           <input
             id="cb-custom"
-            className={styles.ctl}
+            className={"dk-ctl"}
             value={customCron}
             onChange={(e) => onCustomCronChange(e.target.value)}
             placeholder="0 9 * * *"
@@ -1131,7 +1130,7 @@ function CronPreviewBar({ previewInput }: { previewInput: CronPreviewInput }): R
       ) : !data && preview.isError ? (
         <span style={{ color: "var(--err)" }}>Invalid cron expression</span>
       ) : data ? (
-        <span className={styles.row}>
+        <span className={"dk-form__row full"}>
           <span className="dk-s" data-s="todo" role="img" aria-label="queued" />
           <span style={{ color: "var(--fg-2)" }}>{data.description}</span>
           {data.cron_expr && <span className="dk-tag">{data.cron_expr}</span>}
@@ -1294,20 +1293,20 @@ function Modal({
 
   return (
     <div
-      className={styles.scrim}
+      className={"dk-scrim"}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className={sx(styles.modal, narrow && styles.narrow)}
+        className={sx("dk-modal", narrow && "dk-ctl")}
         role="dialog"
         aria-modal="true"
         aria-label={title}
       >
-        <div className={styles.modalHead}>
+        <div className={"dk-modal__h"}>
           <h2>{title}</h2>
-          <span className={styles.spacer} />
+          <span className={"sp"} />
           <button
             type="button"
             className="dk-btn bare icon"
@@ -1317,8 +1316,8 @@ function Modal({
             ×
           </button>
         </div>
-        <div className={styles.modalBody}>{children}</div>
-        <div className={styles.modalFoot}>{footer}</div>
+        <div className={"dk-modal__b"}>{children}</div>
+        <div className={"dk-modal__f"}>{footer}</div>
       </div>
     </div>
   );
@@ -1497,7 +1496,7 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
       onClose={onClose}
       footer={
         <>
-          <span className={styles.spacer} />
+          <span className={"sp"} />
           <span className="dk-actions">
             <button type="button" className="dk-btn" onClick={onClose} disabled={isPending}>
               cancel
@@ -1520,13 +1519,13 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
         </>
       }
     >
-      <div className={styles.field}>
-        <label className={styles.label} htmlFor="sf-name">
+      <div className={"dk-form__row"}>
+        <label className={"dk-label"} htmlFor="sf-name">
           name
         </label>
         <input
           id="sf-name"
-          className={styles.ctl}
+          className={"dk-ctl"}
           value={form.name}
           onChange={(e) => patch("name", e.target.value)}
           placeholder="Daily digest"
@@ -1534,8 +1533,8 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
         />
       </div>
 
-      <div className={styles.section}>
-        <div className={styles.sectionHead}>when it fires</div>
+      <div className={"dk-fieldset"}>
+        <div className={"dk-fieldset__h"}>when it fires</div>
         <CronBuilder
           preset={form.preset}
           hour={form.hour}
@@ -1555,16 +1554,16 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
         <CronPreviewBar previewInput={previewInput} />
       </div>
 
-      <div className={styles.section}>
-        <div className={styles.sectionHead}>what it launches</div>
-        <div className={styles.grid}>
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="sf-project">
+      <div className={"dk-fieldset"}>
+        <div className={"dk-fieldset__h"}>what it launches</div>
+        <div className={"dk-form__grid"}>
+          <div className={"dk-form__row"}>
+            <label className={"dk-label"} htmlFor="sf-project">
               project
             </label>
             <select
               id="sf-project"
-              className={styles.ctl}
+              className={"dk-ctl"}
               value={form.projectId}
               onChange={(e) =>
                 patch("projectId", e.target.value === "" ? "" : Number(e.target.value))
@@ -1579,13 +1578,13 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
             </select>
           </div>
 
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="sf-provider">
+          <div className={"dk-form__row"}>
+            <label className={"dk-label"} htmlFor="sf-provider">
               provider
             </label>
             <select
               id="sf-provider"
-              className={styles.ctl}
+              className={"dk-ctl"}
               value={form.providerId}
               onChange={(e) =>
                 patch("providerId", e.target.value === "" ? "" : Number(e.target.value))
@@ -1601,20 +1600,20 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
               ))}
             </select>
             {providers.length === 0 && (
-              <span className={styles.help}>
+              <span className={"dk-help"}>
                 No providers configured yet — add one in Settings before a schedule can run.
               </span>
             )}
           </div>
 
           {form.providerId !== "" && (
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor="sf-model">
+            <div className={"dk-form__row"}>
+              <label className={"dk-label"} htmlFor="sf-model">
                 model
               </label>
               <select
                 id="sf-model"
-                className={styles.ctl}
+                className={"dk-ctl"}
                 value={form.model}
                 onChange={(e) => patch("model", e.target.value)}
               >
@@ -1637,13 +1636,13 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
             </div>
           )}
 
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="sf-agent">
+          <div className={"dk-form__row"}>
+            <label className={"dk-label"} htmlFor="sf-agent">
               agent
             </label>
             <select
               id="sf-agent"
-              className={styles.ctl}
+              className={"dk-ctl"}
               value={form.agentName}
               onChange={(e) => patch("agentName", e.target.value)}
             >
@@ -1657,13 +1656,13 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
             </select>
           </div>
 
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="sf-runmode">
+          <div className={"dk-form__row"}>
+            <label className={"dk-label"} htmlFor="sf-runmode">
               run mode
             </label>
             <select
               id="sf-runmode"
-              className={styles.ctl}
+              className={"dk-ctl"}
               value={form.runMode}
               onChange={(e) => patch("runMode", e.target.value as RunMode)}
             >
@@ -1672,13 +1671,13 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
             </select>
           </div>
 
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="sf-resultkind">
+          <div className={"dk-form__row"}>
+            <label className={"dk-label"} htmlFor="sf-resultkind">
               result type
             </label>
             <select
               id="sf-resultkind"
-              className={styles.ctl}
+              className={"dk-ctl"}
               value={form.resultKind}
               onChange={(e) => patch("resultKind", e.target.value as ResultKind)}
             >
@@ -1690,14 +1689,14 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
           </div>
 
           {form.resultKind === "artifact" && (
-            <div className={sx(styles.field, styles.full)}>
-              <label className={styles.label} htmlFor="sf-artifactdir">
+            <div className={sx("dk-form__row", "full")}>
+              <label className={"dk-label"} htmlFor="sf-artifactdir">
                 output path
               </label>
-              <div className={styles.row}>
+              <div className={"dk-form__row full"}>
                 <input
                   id="sf-artifactdir"
-                  className={styles.ctl}
+                  className={"dk-ctl"}
                   style={{ flex: "1 1 auto", width: "auto" }}
                   value={form.artifactDir}
                   onChange={(e) => patch("artifactDir", e.target.value)}
@@ -1723,20 +1722,20 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
                   browse…
                 </button>
               </div>
-              <span className={styles.help}>
+              <span className={"dk-help"}>
                 Where the agent saves its file. Leave empty to use the workspace default. The
                 exact file path is appended to the prompt so the run can capture it.
               </span>
             </div>
           )}
 
-          <div className={sx(styles.field, styles.full)}>
-            <label className={styles.label} htmlFor="sf-prompt">
+          <div className={sx("dk-form__row", "full")}>
+            <label className={"dk-label"} htmlFor="sf-prompt">
               prompt
             </label>
             <textarea
               id="sf-prompt"
-              className={styles.ctl}
+              className={"dk-ctl"}
               value={form.prompt}
               onChange={(e) => patch("prompt", e.target.value)}
               placeholder="Describe what the agent should do…"
@@ -1750,22 +1749,22 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
         open={showAdvanced}
         onToggle={(e) => setShowAdvanced((e.currentTarget as HTMLDetailsElement).open)}
       >
-        <summary className={styles.sectionHead} style={{ cursor: "pointer" }}>
+        <summary className={"dk-fieldset__h"} style={{ cursor: "pointer" }}>
           advanced
         </summary>
-        <div className={styles.grid} style={{ marginTop: "var(--u3)" }}>
+        <div className={"dk-form__grid"} style={{ marginTop: "var(--u3)" }}>
           {/* Permission mode — only the two modes that are safe for an
               unattended run are offered. 'default'/'plan'/'auto' would block on
               an interactive prompt that no one can answer (and stall the run),
               so they are intentionally not selectable; a legacy value already
               stored on the schedule is preserved. */}
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="sf-perm">
+          <div className={"dk-form__row"}>
+            <label className={"dk-label"} htmlFor="sf-perm">
               tool access
             </label>
             <select
               id="sf-perm"
-              className={styles.ctl}
+              className={"dk-ctl"}
               value={form.permissionMode}
               onChange={(e) => patch("permissionMode", e.target.value)}
             >
@@ -1775,20 +1774,20 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
                 <option value={form.permissionMode}>{form.permissionMode} (advanced)</option>
               )}
             </select>
-            <span className={styles.help}>
+            <span className={"dk-help"}>
               {form.permissionMode === "bypassPermissions"
                 ? "Unattended runs may use any tool (web, shell, file edits) without asking."
                 : "Only the tools listed below run; anything else is denied — the run never stalls."}
             </span>
           </div>
 
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="sf-notify">
+          <div className={"dk-form__row"}>
+            <label className={"dk-label"} htmlFor="sf-notify">
               notifications
             </label>
             <select
               id="sf-notify"
-              className={styles.ctl}
+              className={"dk-ctl"}
               value={form.notifyPolicy}
               onChange={(e) => patch("notifyPolicy", e.target.value as NotifyPolicy)}
             >
@@ -1798,29 +1797,29 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
             </select>
           </div>
 
-          <div className={sx(styles.field, styles.full)}>
-            <label className={styles.label} htmlFor="sf-tools">
+          <div className={sx("dk-form__row", "full")}>
+            <label className={"dk-label"} htmlFor="sf-tools">
               allowed tools
             </label>
             <input
               id="sf-tools"
-              className={styles.ctl}
+              className={"dk-ctl"}
               value={form.allowedTools}
               onChange={(e) => patch("allowedTools", e.target.value)}
               placeholder="Read,Bash,Edit"
             />
-            <span className={styles.help}>
+            <span className={"dk-help"}>
               Comma-separated tool names. Leave empty to allow all tools.
             </span>
           </div>
 
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="sf-budget">
+          <div className={"dk-form__row"}>
+            <label className={"dk-label"} htmlFor="sf-budget">
               max budget
             </label>
             <input
               id="sf-budget"
-              className={styles.ctl}
+              className={"dk-ctl"}
               type="number"
               min="0"
               step="0.01"
@@ -1828,16 +1827,16 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
               onChange={(e) => patch("maxBudgetUsd", e.target.value)}
               placeholder="e.g. 1.00"
             />
-            <span className={styles.help}>USD. Leave empty for no limit.</span>
+            <span className={"dk-help"}>USD. Leave empty for no limit.</span>
           </div>
 
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="sf-runtime">
+          <div className={"dk-form__row"}>
+            <label className={"dk-label"} htmlFor="sf-runtime">
               max runtime
             </label>
             <input
               id="sf-runtime"
-              className={styles.ctl}
+              className={"dk-ctl"}
               type="number"
               min="0"
               step="60"
@@ -1845,7 +1844,7 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
               onChange={(e) => patch("maxRuntimeSec", e.target.value)}
               placeholder="e.g. 3600"
             />
-            <span className={styles.help}>Seconds. Leave empty for no limit.</span>
+            <span className={"dk-help"}>Seconds. Leave empty for no limit.</span>
           </div>
         </div>
       </details>
@@ -1882,7 +1881,7 @@ function RetentionModal({ onClose }: { onClose: () => void }): ReactElement {
       narrow
       footer={
         <>
-          <span className={styles.spacer} />
+          <span className={"sp"} />
           <span className="dk-actions">
             <button type="button" className="dk-btn" onClick={onClose}>
               cancel
@@ -1904,13 +1903,13 @@ function RetentionModal({ onClose }: { onClose: () => void }): ReactElement {
         after this many days to reclaim disk space. The prune runs on startup and then once per
         day.
       </div>
-      <div className={styles.field}>
-        <label className={styles.label} htmlFor="ret-days">
+      <div className={"dk-form__row"}>
+        <label className={"dk-label"} htmlFor="ret-days">
           keep transcripts for (days)
         </label>
         <input
           id="ret-days"
-          className={styles.ctl}
+          className={"dk-ctl"}
           type="number"
           min="1"
           max="365"

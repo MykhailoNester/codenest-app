@@ -251,6 +251,8 @@ interface DeckGroupProps {
   /** Renders the heading as a disclosure. Children stay mounted when open. */
   collapsible?: boolean;
   defaultOpen?: boolean;
+  /** Right-aligned controls in the heading. `.dk-group__h .sp` exists for this. */
+  actions?: ReactNode;
   children: ReactNode;
 }
 
@@ -262,6 +264,7 @@ export function DeckGroup({
   state,
   collapsible,
   defaultOpen = true,
+  actions,
   children,
 }: DeckGroupProps): ReactElement {
   const id = useId();
@@ -290,6 +293,12 @@ export function DeckGroup({
           </button>
         ) : (
           heading
+        )}
+        {actions != null && (
+          <>
+            <span className="sp" />
+            <span className="dk-actions">{actions}</span>
+          </>
         )}
       </h2>
       {(!collapsible || open) && children}
