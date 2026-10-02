@@ -12,14 +12,15 @@ import type { ProviderModel } from "../../lib/api";
 export interface Tier {
   key: string;
   label: string;
-  dotColor: string;
 }
 
+// `dotColor` went with the Deck conversion: the tier dot it fed was its only
+// reader, and its values were old-theme tokens (`--violet`, `--accent`).
 export const TIERS: Tier[] = [
-  { key: "fable", label: "Fable", dotColor: "var(--warn, #f59e0b)" },
-  { key: "opus", label: "Opus", dotColor: "var(--violet, #a855f7)" },
-  { key: "sonnet", label: "Sonnet", dotColor: "var(--accent, #3b82f6)" },
-  { key: "haiku", label: "Haiku", dotColor: "var(--info, #38bdf8)" },
+  { key: "fable", label: "Fable" },
+  { key: "opus", label: "Opus" },
+  { key: "sonnet", label: "Sonnet" },
+  { key: "haiku", label: "Haiku" },
 ];
 
 /**

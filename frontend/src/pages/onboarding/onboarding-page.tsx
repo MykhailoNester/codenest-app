@@ -9,7 +9,6 @@ import { AgentsReviewStep } from "./agents-review-step";
 import { HooksStep } from "./hooks-step";
 import { BudgetsStep } from "./budgets-step";
 import { DoneStep } from "./done-step";
-import styles from "./onboarding-page.module.css";
 
 const STEPS: ReactorStep[] = [
   { code: "01", title: "Welcome" },
@@ -30,6 +29,23 @@ const STEP_CRUMB = [
   "Budgets",
   "Launch",
 ];
+
+/**
+ * Deck's `.dk-app` has no footer row — every converted surface puts its one
+ * primary action in the title bar. Onboarding cannot: Back/Continue are the
+ * flow's spine and have to stay reachable below a scrolling step, which is the
+ * behaviour the pre-Deck shell had and the brief says to keep. This is the
+ * footer band, drawn from Deck tokens only.
+ */
+const NAV_STYLE: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--u3)",
+  flex: "none",
+  padding: "var(--u3) var(--gut)",
+  borderTop: "1px solid var(--line)",
+  background: "var(--bg-1)",
+};
 
 export function OnboardingPage(): ReactElement {
   const [index, setIndex] = useState(0);
@@ -102,71 +118,40 @@ export function OnboardingPage(): ReactElement {
         : "Continue →";
 
   return (
-    <div className={styles.shell}>
-      {/* Ambient backdrop */}
-      <div className={`${styles.bgOrb} ${styles.bgOrbBlue}`} />
-      <div className={`${styles.bgOrb} ${styles.bgOrbViolet}`} />
-      <div className={`${styles.bgOrb} ${styles.bgOrbCyan}`} />
-      <div className={styles.bgGrid} />
-
-      {/* Mission rail */}
-      <aside className={styles.railCol}>
-        <div className={styles.brand}>
-          {/* Use the same SVG icon as the sidebar */}
-          <div className={styles.brandMark}>
-            <svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true">
-              <defs>
-                <linearGradient id="ob-brand-g" x1="0" x2="1" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#3b82f6" />
-                  <stop offset="100%" stopColor="#a855f7" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M4 9l12-6 12 6v14l-12 6-12-6V9z"
-                fill="url(#ob-brand-g)"
-                opacity="0.9"
-              />
-              <path
-                d="M4 9l12 6 12-6M16 15v14"
-                stroke="#fff"
-                strokeWidth="1.2"
-                fill="none"
-                opacity="0.85"
-              />
-            </svg>
+    <div className="deck">
+      <div className="dk-app">
+        {/* Setup rail */}
+        <aside className="dk-rail">
+          <div className="dk-rail__top">
+            <span className="dk-s" data-s="run" role="img" aria-label="running" />
+            <b style={{ fontWeight: 400 }}>codenest</b>
+            <span className="dim">setup</span>
           </div>
-          <div>
-            <div className={styles.brandName}>Codenest</div>
-            <div className={styles.brandSub}>Command Center</div>
+          <div className="dk-rail__nav">
+            <ReactorProgress
+              steps={STEPS}
+              current={index}
+              maxReached={maxReached}
+              onSelect={go}
+            />
           </div>
-        </div>
-        <ReactorProgress
-          steps={STEPS}
-          current={index}
-          maxReached={maxReached}
-          onSelect={go}
-        />
-        <div className={styles.railFoot}>
-          Workspace&nbsp;&middot;&nbsp;
-          <span className={styles.railMono}>
-            ~/Library/&hellip;/com.codenest.dashboard/workspace
-          </span>
-          <br />
-          <span className={styles.railMono}>v1 &middot; single workspace</span>
-        </div>
-      </aside>
+          <div className="dk-rail__foot">
+            <div className="dk-meta" style={{ whiteSpace: "normal" }}>
+              workspace · ~/Library/…/com.codenest.dashboard/workspace
+            </div>
+            <div className="dk-meta">v1 · single workspace</div>
+          </div>
+        </aside>
 
-      {/* Stage */}
-      <main className={styles.stage}>
-        <div className={styles.stageTop}>
-          <div className={styles.stageCrumb}>
-            First-Run Setup&nbsp;/&nbsp;
+        {/* Stage */}
+        <main className="dk-main">
+          <div className="dk-status">
+            <span>First-Run Setup</span>
+            <span className="sep">/</span>
             <b>{STEP_CRUMB[index]}</b>
           </div>
-        </div>
 
-        <div className={styles.scroll} id="ob-scroll">
-          <div className={styles.panel}>
+          <div className="dk-page" id="ob-scroll">
             {index === 0 && <WelcomeStep registerCommit={registerCommit} />}
             {index === 1 && (
               <ImportFirstProjectStep registerCommit={registerCommit} />
@@ -181,35 +166,35 @@ export function OnboardingPage(): ReactElement {
             {index === 5 && <BudgetsStep registerCommit={registerCommit} />}
             {index === 6 && <DoneStep registerCommit={registerCommit} />}
           </div>
-        </div>
 
-        {/* Footer nav — position:absolute per prototype */}
-        <nav className={styles.stageNav}>
-          <div className={styles.navLeft}>
-            <button
-              type="button"
-              className={`${styles.btn} ${styles.btnGhost}`}
-              onClick={back}
-              disabled={index === 0 || isPending}
-            >
-              &larr; Back
-            </button>
-            <span className={styles.navHint}>
+          <nav style={NAV_STYLE}>
+            <span className="dk-actions">
+              <button
+                type="button"
+                className="dk-btn"
+                onClick={back}
+                disabled={index === 0 || isPending}
+              >
+                ← Back
+              </button>
+            </span>
+            <span className="dk-meta">
               Step {STEPS[index]?.code ?? "01"} / 07
             </span>
-          </div>
-          <div className={styles.navRight}>
-            <button
-              type="button"
-              className={`${styles.btn} ${styles.btnPrimary}`}
-              onClick={() => void handleContinue()}
-              disabled={isPending}
-            >
-              {nextLabel}
-            </button>
-          </div>
-        </nav>
-      </main>
+            <span className="sp" style={{ marginLeft: "auto" }} />
+            <span className="dk-actions">
+              <button
+                type="button"
+                className="dk-btn pri"
+                onClick={() => void handleContinue()}
+                disabled={isPending}
+              >
+                {nextLabel}
+              </button>
+            </span>
+          </nav>
+        </main>
+      </div>
     </div>
   );
 }

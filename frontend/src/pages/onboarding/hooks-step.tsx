@@ -27,7 +27,7 @@ import {
   type LiveProbeOutcome,
   type RequestFailure,
 } from "./hook-verify-copy";
-import styles from "./onboarding-page.module.css";
+import { StepHead, StepField, StepHint, StepNote, Lit } from "./step-chrome";
 
 // Fallback shown only while the sidecar snippet endpoint is loading or errors.
 // Format matches the "command" hook type that the sidecar generates in
@@ -72,24 +72,44 @@ const FALLBACK_SNIPPET = `{
   }
 }`;
 
-function eventChipClassName(status: HookEventVerdict["status"]): string {
+/**
+ * Deck pages scroll as one, so N provider blocks would push Continue — the
+ * only way forward — off the end. Same cap the pre-Deck step applied, and it
+ * only engages past one provider, exactly as before.
+ */
+const PROVIDER_LIST_STYLE: React.CSSProperties = {
+  overflowY: "auto",
+  maxHeight: 520,
+  paddingRight: 4,
+};
+
+/** The verification bar is a footer, so its hairline sits above it. */
+const VERIFY_BAR_STYLE: React.CSSProperties = {
+  marginTop: "var(--u4)",
+  marginBottom: 0,
+  paddingTop: "var(--u3)",
+  paddingBottom: "var(--u3)",
+  borderTop: "1px solid var(--line)",
+  borderBottom: 0,
+};
+
+/** Deck's `.dk-tag` carries the same three tones through `data-s`. */
+function eventChipState(status: HookEventVerdict["status"]): string {
   const tone = eventChipTone(status);
-  if (tone === "ok") return `${styles.eventChip} ${styles.eventChipOk}`;
-  if (tone === "warn") return `${styles.eventChip} ${styles.eventChipWarn}`;
-  return `${styles.eventChip} ${styles.eventChipErr}`;
+  if (tone === "ok") return "done";
+  if (tone === "warn") return "wait";
+  return "fail";
 }
 
 // ─── Per-provider hook card ───────────────────────────────────────────────────
 
 interface ProviderCardProps {
   provider: Provider;
-  index: number;
   verify?: HookSettingsVerify;
 }
 
 function ProviderHookCard({
   provider,
-  index,
   verify,
 }: ProviderCardProps): ReactElement {
   const [copied, setCopied] = useState(false);
@@ -116,162 +136,114 @@ function ProviderHookCard({
     }
   };
 
+  /**
+   * The snippet block. Deck's `.dk-out` is the console-output surface and this
+   * is the same thing — a fixed-height, scrolling, monospace block — but
+   * `.dk-out` is a flex column sized by its parent, and a `<code>` inside a
+   * form needs its own height cap and horizontal scroll.
+   */
   const codeStyle: React.CSSProperties = {
-    fontFamily: "var(--font-mono, ui-monospace, monospace)",
-    fontSize: 11.5,
-    lineHeight: 1.65,
-    color: "var(--fg-1)",
-    background: "var(--bg-0)",
-    border: "1px solid var(--line-2)",
-    borderRadius: "var(--r-3, 8px)",
-    padding: "15px 16px",
-    overflowX: "auto",
-    whiteSpace: "pre",
-    maxHeight: 220,
     display: "block",
+    padding: "var(--u3)",
+    border: "1px solid var(--line-2)",
+    borderRadius: 3,
+    background: "var(--bg)",
+    color: "var(--fg-2)",
+    fontSize: "var(--fs-s)",
+    lineHeight: 1.65,
+    whiteSpace: "pre",
+    overflow: "auto",
+    maxHeight: 220,
   };
 
   return (
-    <div className={styles.card} style={{ marginTop: index > 0 ? 14 : 0 }}>
-      {/* Card header — provider alias label */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 14,
-          paddingBottom: 12,
-          borderBottom: "1px solid var(--line-1)",
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--font-mono, ui-monospace, monospace)",
-            fontSize: 10,
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            color: "var(--fg-3)",
-          }}
-        >
-          Provider
-        </span>
-        <code
-          style={{
-            fontFamily: "var(--font-mono, ui-monospace, monospace)",
-            fontSize: 12,
-            background: "rgba(168, 85, 247, 0.12)",
-            border: "1px solid rgba(168, 85, 247, 0.3)",
-            borderRadius: 4,
-            padding: "2px 8px",
-            color: "#c89bff",
-            fontWeight: 600,
-          }}
-        >
-          {provider.name}
-        </code>
+    <div className="dk-group">
+      <h2 className="dk-group__h">
+        <span>Provider</span>
+        <span className="n">{provider.name}</span>
         {provider.display_name !== provider.name && (
-          <span
-            style={{
-              fontSize: 12,
-              color: "var(--fg-2)",
-            }}
-          >
-            {provider.display_name}
-          </span>
+          <span className="note">{provider.display_name}</span>
         )}
-      </div>
-
-      {/* CONFIG HOME + TARGET FILE — read-only display fields */}
-      <div className={styles.grid2} style={{ marginBottom: 14 }}>
-        <div>
-          <label className={styles.fieldLabel}>Config home</label>
-          {configHome ? (
-            <input
-              className={`${styles.fld} ${styles.fldMono}`}
-              readOnly
-              value={configHome}
-              aria-label="Config home (read-only)"
-            />
-          ) : (
-            <div
-              style={{
-                padding: "9px 11px",
-                border: "1px solid var(--line-1)",
-                borderRadius: "var(--r-2, 6px)",
-                background: "rgba(245, 158, 11, 0.08)",
-                borderColor: "rgba(245, 158, 11, 0.35)",
-                fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                fontSize: 12,
-                color: "var(--warn, #f59e0b)",
-              }}
-            >
-              No config home set — edit this provider to add one
-            </div>
-          )}
-          <p className={styles.hint}>
-            The Claude config directory this alias uses.
-          </p>
-        </div>
-        <div>
-          <label className={styles.fieldLabel}>Target file</label>
-          <input
-            className={`${styles.fld} ${styles.fldMono}`}
-            readOnly
-            value={settingsPath}
-            aria-label="Target settings file (read-only)"
-          />
-          <p className={styles.hint}>
-            Merge the hook block below into this file.
-          </p>
-        </div>
-      </div>
-
-      {/* Hook block — same content for all providers (URL points at sidecar) */}
-      <label className={styles.fieldLabel}>Hook block</label>
-      <div className={styles.codeWrap}>
-        <div className={styles.codeActions}>
+        <span className="sp" />
+        <span className="dk-actions">
           <button
             type="button"
-            className={`${styles.btn} ${styles.btnSm}`}
+            className="dk-btn"
             onClick={() => void copy()}
-            disabled={!configHome}
+            disabled={configHome === null}
           >
             {copied ? "✓ Copied" : "⧉ Copy"}
           </button>
-        </div>
-        <code style={codeStyle}>{displaySnippet}</code>
-      </div>
+        </span>
+      </h2>
 
-      {/* Test hooks result — event chips + file/wrong-file detail. Absent
-          until the user has run Test hooks at least once. */}
-      {verify && (
-        <div style={{ marginTop: 14 }}>
-          <div className={styles.eventChips}>
-            {verify.events.map((ev) => (
-              <span
-                key={ev.event}
-                className={eventChipClassName(ev.status)}
-                title={ev.detail ?? undefined}
-              >
-                {ev.event}
-              </span>
-            ))}
-          </div>
-          {verify.detail && (
-            <p className={styles.hint} style={{ marginTop: 6 }}>
-              {verify.detail}
-            </p>
-          )}
-          {otherPath !== undefined && (
-            <p
-              className={styles.hint}
-              style={{ marginTop: 6, color: "var(--warn, #f59e0b)" }}
-            >
-              Found in <code>{otherPath}</code> — move it to the file above.
-            </p>
-          )}
+      <div className="dk-form">
+        <div className="dk-form__grid">
+          <StepField
+            label="Config home"
+            htmlFor={`ob-hook-home-${provider.id}`}
+            hint="The Claude config directory this alias uses."
+          >
+            {configHome !== null ? (
+              <input
+                id={`ob-hook-home-${provider.id}`}
+                className="dk-ctl"
+                readOnly
+                value={configHome}
+                aria-label="Config home (read-only)"
+              />
+            ) : (
+              <StepHint tone="warn">
+                No config home set — edit this provider to add one
+              </StepHint>
+            )}
+          </StepField>
+
+          <StepField
+            label="Target file"
+            htmlFor={`ob-hook-target-${provider.id}`}
+            hint="Merge the hook block below into this file."
+          >
+            <input
+              id={`ob-hook-target-${provider.id}`}
+              className="dk-ctl"
+              readOnly
+              value={settingsPath}
+              aria-label="Target settings file (read-only)"
+            />
+          </StepField>
         </div>
-      )}
+
+        <div className="dk-form__row full">
+          <span className="dk-label">Hook block</span>
+          <code style={codeStyle}>{displaySnippet}</code>
+        </div>
+
+        {/* Test hooks result — event chips + file/wrong-file detail. Absent
+            until the user has run Test hooks at least once. */}
+        {verify && (
+          <div className="dk-form__row full">
+            <span className="dk-actions">
+              {verify.events.map((ev) => (
+                <span
+                  key={ev.event}
+                  className="dk-tag"
+                  data-s={eventChipState(ev.status)}
+                  title={ev.detail ?? undefined}
+                >
+                  {ev.event}
+                </span>
+              ))}
+            </span>
+            {verify.detail != null && <StepHint>{verify.detail}</StepHint>}
+            {otherPath !== undefined && (
+              <StepHint tone="warn">
+                Found in <Lit>{otherPath}</Lit> — move it to the file above.
+              </StepHint>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -395,53 +367,31 @@ export function HooksStep({
 
   const tauriAvailable = isTauriAvailable();
   const barCopy = verifyBarCopy(report, live, connected, failure);
-  const verifyToneClass =
+  const verifyState =
     barCopy.tone === "ok"
-      ? styles.verifyOn
+      ? "done"
       : barCopy.tone === "warn"
-        ? styles.verifyWarn
+        ? "wait"
         : barCopy.tone === "error"
-          ? styles.verifyErr
-          : styles.verifyIdle;
+          ? "fail"
+          : "idle";
 
   return (
     <>
-      <div className={styles.kicker}>Step 05 &middot; Wire telemetry</div>
-      <h1 className={styles.title}>Connect Claude Code hooks</h1>
-      <p className={styles.lead}>
+      <StepHead kicker="step 05 · wire telemetry" title="Connect Claude Code hooks">
         For the command center to see sessions, prompts, tool calls and cost,
         Claude Code reports to the sidecar via hooks. For each provider below,
-        paste the hook block into the listed{" "}
-        <code
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "11px",
-            background: "rgba(255,255,255,.06)",
-            border: "1px solid var(--line-2)",
-            borderRadius: 4,
-            padding: "1px 5px",
-          }}
-        >
-          settings.json
-        </code>{" "}
-        — we never edit it for you.
-      </p>
+        paste the hook block into the listed <Lit>settings.json</Lit> — we never
+        edit it for you.
+      </StepHead>
 
-      {/* Scrollable card list — handles N providers without breaking layout */}
-      <div
-        style={{
-          overflowY: wiredProviders.length > 1 ? "auto" : undefined,
-          maxHeight: wiredProviders.length > 1 ? 520 : undefined,
-          paddingRight: wiredProviders.length > 1 ? 4 : undefined,
-        }}
-      >
+      {/* Scrollable list — handles N providers without pushing the footer off. */}
+      <div style={wiredProviders.length > 1 ? PROVIDER_LIST_STYLE : undefined}>
         {wiredProviders.length === 0 && providers.length === 0 && (
-          <div className={styles.card}>
-            <p style={{ color: "var(--fg-3)", fontSize: 13, margin: 0 }}>
-              No providers configured yet — go back to Step 03 to set up an
-              Anthropic alias.
-            </p>
-          </div>
+          <StepHint>
+            No providers configured yet — go back to Step 03 to set up an
+            Anthropic alias.
+          </StepHint>
         )}
 
         {wiredProviders.map((provider, i) => {
@@ -453,7 +403,6 @@ export function HooksStep({
             <ProviderHookCard
               key={provider.id}
               provider={provider}
-              index={i}
               verify={verify}
             />
           );
@@ -461,88 +410,63 @@ export function HooksStep({
 
         {/* Warn about providers that have no config home */}
         {unwiredProviders.length > 0 && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: "11px 14px",
-              border: "1px solid rgba(245, 158, 11, 0.3)",
-              borderRadius: "var(--r-3, 8px)",
-              background: "rgba(245, 158, 11, 0.08)",
-              fontSize: 12.5,
-              color: "var(--fg-2)",
-              lineHeight: 1.55,
-            }}
-          >
-            <strong style={{ color: "var(--warn, #f59e0b)" }}>
-              Missing config home
-            </strong>{" "}
-            — the following provider
+          <StepNote glyph="=" tone="warn">
+            <strong>Missing config home</strong> — the following provider
             {unwiredProviders.length === 1 ? "" : "s"} have no{" "}
-            <code
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                background: "rgba(255,255,255,.06)",
-                borderRadius: 3,
-                padding: "1px 4px",
-              }}
-            >
-              CLAUDE_CONFIG_DIR
-            </code>{" "}
-            set and will not be shown here:{" "}
+            <Lit>CLAUDE_CONFIG_DIR</Lit> set and will not be shown here:{" "}
             {unwiredProviders.map((p) => p.name).join(", ")}. Edit them on the
             Providers page to complete hook wiring.
-          </div>
+          </StepNote>
         )}
       </div>
 
-      <p className={styles.hint} style={{ marginTop: 8 }}>
+      <StepHint>
         The <strong>SessionStart</strong> hook injects your project name→path
-        registry into workspace sessions, and <strong>PostToolUse</strong>{" "}
-        powers per-file cost attribution.
-      </p>
+        registry into workspace sessions, and <strong>PostToolUse</strong> powers
+        per-file cost attribution.
+      </StepHint>
 
       {/* Actions — self-test the wiring without a Claude Code session. */}
-      <div
-        style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}
-      >
-        <div>
+      <div className="dk-bar" style={{ marginTop: "var(--u4)" }}>
+        <span className="dk-actions">
           <button
             type="button"
-            className={`${styles.btn} ${styles.btnGhost}`}
+            className="dk-btn"
             onClick={() => void onTestHooks()}
             disabled={wiredProviders.length === 0 || verifyM.isPending}
           >
             {verifyM.isPending ? "Testing…" : "Test hooks"}
           </button>
-          {wiredProviders.length === 0 && (
-            <p className={styles.hint} style={{ marginTop: 4 }}>
-              No provider has a config home yet — set CLAUDE_CONFIG_DIR on the
-              Providers page.
-            </p>
-          )}
-        </div>
-        <div>
           <button
             type="button"
-            className={`${styles.btn} ${styles.btnGhost}`}
+            className="dk-btn"
             onClick={() => void onLiveTest()}
             disabled={!tauriAvailable || probing}
           >
             {probing ? "Running…" : "Run live test"}
           </button>
-          {!tauriAvailable && (
-            <p className={styles.hint} style={{ marginTop: 4 }}>
-              The live test needs the desktop app.
-            </p>
-          )}
-        </div>
+        </span>
       </div>
 
+      {wiredProviders.length === 0 && (
+        <StepHint>
+          No provider has a config home yet — set CLAUDE_CONFIG_DIR on the
+          Providers page.
+        </StepHint>
+      )}
+      {!tauriAvailable && (
+        <StepHint>The live test needs the desktop app.</StepHint>
+      )}
+
       {/* Aggregate verification bar */}
-      <div className={`${styles.verify} ${verifyToneClass}`}>
-        <span className={styles.verifyDot} />
-        <span className={styles.verifyText}>{barCopy.message}</span>
+      <div className="dk-bar" style={VERIFY_BAR_STYLE}>
+        <span
+          className="dk-s"
+          data-s={verifyState}
+          role="img"
+          aria-label={barCopy.tone}
+        />
+        <span className="sans">{barCopy.message}</span>
       </div>
     </>
   );
