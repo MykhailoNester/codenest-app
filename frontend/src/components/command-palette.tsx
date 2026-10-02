@@ -23,7 +23,6 @@ import {
   typeIcon,
 } from "../lib/search-results";
 import { Icon } from "./icon";
-import styles from "./command-palette.module.css";
 
 // ─── Static fallback types (used when query < 2 chars) ───────────────────────
 
@@ -42,8 +41,25 @@ interface PaletteItem {
 // Strategy: HTML-escape the entire string first (so nothing in the raw text
 // can become an HTML attribute or tag), then re-introduce only bare <mark>/
 // </mark> tags by replacing the escaped forms of the FTS boundary markers.
-// This guarantees that the only tags in the output are attributeless <mark>
-// elements — no event handlers, no injected attributes are possible.
+// This guarantees that the only tags in the output are <mark> elements
+// carrying one attribute this file writes — no event handlers, and no
+// attribute whose value comes from the raw text, are possible.
+/**
+ * How a search hit is drawn inside the snippet (#283).
+ *
+ * Deck has no `mark` rule — `.dk-prose` stops at `p`/`ul`/`code`/`h1-h3` — so
+ * this is a missing primitive, and `components/deck/*` is out of scope. Deck's
+ * own idiom for "this substring is why the row matched" is the tree's
+ * `.dk-tree__n > .l b { color: var(--mark) }`: the marker colour on the ink,
+ * no fill, no weight change. This is that rule, as the one attribute we emit
+ * ourselves.
+ *
+ * It has to be an inline style rather than a class because the snippet is
+ * injected HTML: a class would need a descendant CSS rule, and the only place
+ * to put one is a stylesheet this ticket is removing.
+ */
+const SNIPPET_MARK_STYLE = "color:var(--mark);background:none";
+
 function sanitizeSnippet(raw: string): string {
   const escaped = raw
     .replace(/&/g, "&amp;")
@@ -53,9 +69,11 @@ function sanitizeSnippet(raw: string): string {
     .replace(/'/g, "&#39;");
   // SQLite FTS snippet() wraps matches in literal <mark>…</mark>.  After
   // escaping those become &lt;mark&gt; / &lt;/mark&gt;; re-introduce them as
-  // real, attributeless tags.
+  // real tags. The only attribute on them is the fixed style string above —
+  // it is a constant in this file, so nothing from `raw` can reach an
+  // attribute position and the escaping above is still the whole defence.
   return escaped
-    .replace(/&lt;mark&gt;/gi, "<mark>")
+    .replace(/&lt;mark&gt;/gi, `<mark style="${SNIPPET_MARK_STYLE}">`)
     .replace(/&lt;\/mark&gt;/gi, "</mark>");
 }
 
@@ -337,7 +355,6 @@ function PaletteInner({ onClose }: { onClose: () => void }): ReactElement {
           </span>
           {result.snippet && (
             <span
-              className={styles.snippet}
               style={{
                 display: "block",
                 fontSize: "11px",
