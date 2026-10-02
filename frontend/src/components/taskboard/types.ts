@@ -24,7 +24,7 @@ export interface ChipOption {
   color?: string | null;
   /** Section heading, e.g. "Humans" / "Agents". Rendered in first-appearance order. */
   group?: string;
-  /** Explanatory line rendered under the option (`.tb-pop__hint`). */
+  /** Explanatory line rendered under the option, on its second line. */
   hint?: string;
 }
 
