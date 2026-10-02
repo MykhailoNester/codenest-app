@@ -113,8 +113,11 @@ describe("ContextPicker", () => {
     renderComposer();
     openPicker();
 
+    // Deck's own title cell. The rows are `.dk-line`s now, so the hook is
+    // `.sub` — the class Deck gives the one cell that carries a row's name —
+    // rather than the CSS-module class this list used to generate.
     const titles = Array.from(
-      document.querySelectorAll("[class*='pickerRowTitle']"),
+      document.querySelectorAll("[role='option'] .sub"),
     ).map((el) => el.textContent);
     expect(titles).toEqual([
       "Ship the migration", // in-progress

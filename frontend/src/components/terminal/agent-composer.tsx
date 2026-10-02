@@ -28,7 +28,13 @@ import {
   useState,
 } from "react";
 import { useEscapeKey } from "../../hooks/use-escape-key";
-import type { DragEvent, KeyboardEvent, ReactElement, Ref } from "react";
+import type {
+  CSSProperties,
+  DragEvent,
+  KeyboardEvent,
+  ReactElement,
+  Ref,
+} from "react";
 import {
   useLibraryItems,
   useTasks,
@@ -93,6 +99,8 @@ import {
   layoutComposerEditor,
   resizeComposerEditor,
   syncComposerOverlay,
+  COMPOSER_EDITOR_MAX_HEIGHT_PX,
+  COMPOSER_EDITOR_MIN_HEIGHT_PX,
 } from "../../lib/composer-editor-layout";
 import {
   MAIN_VIEW,
@@ -102,7 +110,6 @@ import {
   type AgentViewOption,
 } from "../../lib/agent-views";
 import { sanitizeComposerInput } from "../../lib/composer-input";
-import styles from "./agent-composer.module.css";
 
 interface AgentComposerProps {
   leafId: string;
@@ -149,14 +156,275 @@ interface AgentComposerProps {
 }
 
 const MAX_HISTORY_PILLS = 6;
-// The mirror's inset inside `.editorStack` (matches `.editorMirror`'s
-// `top`/`left` in `agent-composer.module.css`), and the suggestion panel's
-// nominal width (`.suggest`'s `min-width`/`max-width` midpoint) — both feed
-// `caretAnchor` (Design decision 8/9).
-const MIRROR_PAD_LEFT_PX = 10;
-const MIRROR_PAD_TOP_PX = 8;
+
+/** The editor's hint. Painted by the overlay and carried as the textarea's
+ *  accessible name, so the two can never disagree. */
+const EDITOR_PLACEHOLDER = "Message the agent…";
+
+/* ── Local constants ─────────────────────────────────────────────────────
+   The places Deck has no primitive yet. Declared here rather than in
+   `components/deck/*` or `design/deck/*`, which #283 does not touch — the
+   precedent is `pages/attention.tsx`'s `ATTENTION_COLS`,
+   `components/sessions/run-cols.ts` and the launch composer's
+   `SCRIM_STYLE`/`MODAL_STYLE`.
+
+   Everything here is geometry, not decoration. Deck draws rows, tags, buttons
+   and selects; it has no overlay-mirrored text editor and no popover anchored
+   to a box rather than to a trigger, and those are the two shapes below. The
+   chrome each one sits in — headers, rows, metas, buttons, the picker's search
+   field — is Deck's own. */
+
+/** The editor stack's inset. One constant, not two mirrored declarations: the
+ *  overlay, the caret mirror and `caretAnchor`'s `padLeft`/`padTop` must agree
+ *  exactly or the `@`-mention highlight drifts off the text it highlights, and
+ *  the suggestion panel opens away from the caret. The old CSS stated these
+ *  twice (the overlay/the caret mirror) and a third time as
+ *  `MIRROR_PAD_*_PX` here, kept in sync by hand. */
+const EDITOR_PAD_LEFT_PX = 10;
+const EDITOR_PAD_TOP_PX = 8;
+/** The gutter counter's reserved strip at the bottom of `EDITOR_STACK_STYLE`'s
+ *  padding. The counter is positioned over the box, so anything laid out under
+ *  it would render behind the draft's last row. */
+const EDITOR_PAD_BOTTOM_PX = 20;
+/** The suggestion panel's nominal width — the midpoint of the min/max it is
+ *  actually drawn with in `composer-suggest.tsx` — and its gap from the caret.
+ *  Both feed `caretAnchor` (Design decision 8/9), which only needs a width
+ *  good enough to keep the panel off the pane edge. */
 const SUGGEST_PANEL_WIDTH_PX = 320;
 const SUGGEST_GAP_PX = 6;
+
+/** The fixed width of the two panels that are not caret-anchored. The same
+ *  number as `SUGGEST_PANEL_WIDTH_PX` by coincidence, not by dependency: this
+ *  one is a real width, that one is an estimate used for a calculation. */
+const FLOATING_PANEL_WIDTH_PX = 320;
+
+/** The box the editor and its three floating panels share. `.dk-field` is the
+ *  nearest Deck primitive and is the wrong shape — a 24px-high single-line
+ *  flex row — so only its focus affordance is reproduced, via `editorFocused`
+ *  below (a `:focus-within` equivalent an inline style cannot express). */
+const EDITOR_BOX_STYLE: CSSProperties = {
+  position: "relative",
+  background: "var(--bg)",
+  border: "1px solid var(--line-2)",
+  borderRadius: 3,
+};
+
+/** `min-height` is the sum of the parts (pad-top + the textarea's 48 +
+ *  pad-bottom), so the empty box does not jump on the first keystroke. The
+ *  numbers are duplicated in `lib/composer-editor-layout.ts`, which measures
+ *  against them. */
+const EDITOR_STACK_STYLE: CSSProperties = {
+  position: "relative",
+  padding: `${EDITOR_PAD_TOP_PX}px ${EDITOR_PAD_LEFT_PX}px ${EDITOR_PAD_BOTTOM_PX}px`,
+  minHeight: EDITOR_PAD_TOP_PX + COMPOSER_EDITOR_MIN_HEIGHT_PX + EDITOR_PAD_BOTTOM_PX,
+};
+
+/** Font metrics the textarea, the painted overlay and the caret mirror must
+ *  share to the pixel. Spread into all three from one object, which is what
+ *  the old stylesheet's shared rule group did — and is now structural rather
+ *  than three selectors that happen to be listed together. */
+const EDITOR_TEXT_STYLE: CSSProperties = {
+  fontFamily: "var(--mono)",
+  fontSize: 12,
+  lineHeight: 1.6,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+  margin: 0,
+  padding: 0,
+  border: 0,
+};
+
+/** Width and height come from `syncComposerOverlay`, inline off the textarea's
+ *  own `clientWidth`/`clientHeight`, not from `right`/`bottom` insets: past
+ *  `max-height` the textarea grows a scrollbar that narrows its own line box,
+ *  and an inset-positioned overlay would keep wrapping at the wider measure
+ *  and paint the draft a line further off with every wrapped row. */
+const EDITOR_OVERLAY_STYLE: CSSProperties = {
+  ...EDITOR_TEXT_STYLE,
+  position: "absolute",
+  top: EDITOR_PAD_TOP_PX,
+  left: EDITOR_PAD_LEFT_PX,
+  color: "var(--fg)",
+  pointerEvents: "none",
+  overflow: "hidden",
+};
+
+/** Caret-coordinate mirror — never visible, never the measuring surface for
+ *  the mention highlight's own drift. Width is set inline from
+ *  `textarea.clientWidth` for the reason the overlay's is. */
+const EDITOR_MIRROR_STYLE: CSSProperties = {
+  ...EDITOR_TEXT_STYLE,
+  position: "absolute",
+  top: EDITOR_PAD_TOP_PX,
+  left: EDITOR_PAD_LEFT_PX,
+  visibility: "hidden",
+  pointerEvents: "none",
+};
+
+/** The span whose rect is the caret's position. Must add no box of its own. */
+const MIRROR_MARK_STYLE: CSSProperties = { padding: 0, background: "none" };
+
+/** The `@mention` highlight. `.dk-tag[data-s="run"]` carries the same two
+ *  colours but is `inline-block` at `--fs-xs` with its own padding, and any of
+ *  those shifts the glyphs off the transparent text underneath — the overlay
+ *  only works while every span in it keeps the textarea's metrics exactly. */
+const MENTION_STYLE: CSSProperties = {
+  color: "var(--run)",
+  background: "var(--run-bg)",
+  borderRadius: 2,
+  padding: "0 2px",
+};
+
+/** The real input. Its own glyphs are transparent because the overlay paints
+ *  the visible, highlighted copy on top. */
+const EDITOR_TEXTAREA_STYLE: CSSProperties = {
+  ...EDITOR_TEXT_STYLE,
+  position: "relative",
+  display: "block",
+  width: "100%",
+  resize: "none",
+  background: "transparent",
+  color: "transparent",
+  caretColor: "var(--fg)",
+  outline: "none",
+  minHeight: COMPOSER_EDITOR_MIN_HEIGHT_PX,
+  maxHeight: COMPOSER_EDITOR_MAX_HEIGHT_PX,
+  overflowY: "auto",
+};
+
+/** The placeholder is painted by the overlay, not by the textarea's own
+ *  `::placeholder`. A pseudo-element cannot be set inline, and the UA default
+ *  is not a safe fallback here: the textarea's `color` is `transparent`, and
+ *  Chromium's current UA rule derives the placeholder from `currentcolor` —
+ *  which on the Windows/Linux WebView2 and WebKitGTK targets would render the
+ *  hint invisible. Painting it in the overlay removes the UA dependency, and
+ *  makes the hint assertable in jsdom, which a pseudo-element never was. */
+const PLACEHOLDER_STYLE: CSSProperties = { color: "var(--fg-4)" };
+
+/** Cosmetic only, like the overlay and the gutter: without `pointer-events:
+ *  none` it sits above the textarea and swallows dragover/drop once mounted,
+ *  so a drop released while it is visible reaches the pane's append handler
+ *  instead of the caret-precise one, or is cancelled outright. */
+const DROPZONE_STYLE: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  pointerEvents: "none",
+  border: "1px dashed var(--mark)",
+  borderRadius: 3,
+  background: "var(--bg)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: "var(--fs-s)",
+  color: "var(--mark)",
+  whiteSpace: "normal",
+};
+
+/** The gutter counter sits inside `EDITOR_STACK_STYLE`'s reserved bottom
+ *  strip. Typography is `.dk-meta`'s; only the placement is local. */
+const GUTTER_STYLE: CSSProperties = {
+  position: "absolute",
+  right: 9,
+  bottom: 4,
+  pointerEvents: "none",
+};
+
+/** Chrome shared by the three panels that float over the editor. `.dk-menu` is
+ *  Deck's popover, and it anchors to a trigger (`top: 26px; right: var(--u2)`)
+ *  and lays its children out as full-width 26px buttons — neither of which a
+ *  panel anchored to the editor box, or one holding a search field and a
+ *  three-column list, can use. */
+const PANEL_STYLE: CSSProperties = {
+  position: "absolute",
+  overflowY: "auto",
+  background: "var(--bg-2)",
+  border: "1px solid var(--line-2)",
+  borderRadius: 3,
+  fontSize: "var(--fs-s)",
+  zIndex: 10,
+};
+
+/** Opens upward from the editor box's top-left corner. */
+const PANEL_ABOVE_STYLE: CSSProperties = {
+  ...PANEL_STYLE,
+  left: 8,
+  bottom: "calc(100% + 6px)",
+};
+
+/** Taller than a menu because the search row costs a line and the list holds
+ *  every open task, not only the in-progress ones. */
+const PICKER_PANEL_STYLE: CSSProperties = {
+  ...PANEL_ABOVE_STYLE,
+  width: FLOATING_PANEL_WIDTH_PX,
+  maxHeight: 320,
+};
+
+/** Sticky so the filter stays reachable while scrolling a long backlog. */
+const PICKER_SEARCH_STYLE: CSSProperties = {
+  position: "sticky",
+  top: 0,
+  padding: 6,
+  background: "var(--bg-2)",
+  borderBottom: "1px solid var(--line)",
+  zIndex: 1,
+};
+
+/** Id, title, status. The title is the only part allowed to consume slack, and
+ *  `.dk-line > *` truncates it rather than wrapping, so every row stays one
+ *  line and the list stays scannable. */
+const PICKER_COLS = "auto minmax(0, 1fr) auto";
+
+/** Spans the editor box instead of taking the picker's fixed width: a JSON
+ *  envelope is wide and an agent pane can be a third of the window. */
+const WIRE_PANEL_STYLE: CSSProperties = {
+  ...PANEL_ABOVE_STYLE,
+  right: 8,
+  maxHeight: 240,
+  padding: "7px 9px 8px",
+  display: "flex",
+  flexDirection: "column",
+  gap: 5,
+  color: "var(--fg-3)",
+  fontSize: "var(--fs-xs)",
+};
+
+/** The literal stdin line. `.dk-tag[data-s="done"]` carries the same two
+ *  colours but is a one-line inline-block pill; this wraps and scrolls. */
+const WIRE_CODE_STYLE: CSSProperties = {
+  color: "var(--ok)",
+  background: "var(--ok-bg)",
+  padding: "1px 4px",
+  borderRadius: 2,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-all",
+  overflowY: "auto",
+  maxHeight: 170,
+  fontSize: "var(--fs-xs)",
+  lineHeight: 1.5,
+};
+
+/** Same chrome as the picker, but static: nothing in it is selectable, so its
+ *  rows never get a hover or active state and are not `.dk-line`s. */
+const HELP_PANEL_STYLE: CSSProperties = {
+  ...PANEL_ABOVE_STYLE,
+  width: FLOATING_PANEL_WIDTH_PX,
+  maxHeight: 320,
+};
+
+const HELP_HEAD_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "6px 9px",
+  borderBottom: "1px solid var(--line)",
+};
+
+const HELP_ROW_STYLE: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+  padding: "6px 9px",
+};
 
 function pillToMessagePill(pill: ContextPill): UserMessagePill {
   switch (pill.kind) {
@@ -209,14 +477,18 @@ function pillKey(pill: ContextPill): string {
   }
 }
 
-/** Highlights `@token` runs for the read-only overlay behind the textarea. */
-function renderMentionOverlay(text: string): ReactElement {
+/** Highlights `@token` runs for the read-only overlay behind the textarea.
+ *  An empty draft paints the placeholder instead — see `PLACEHOLDER_STYLE`. */
+function renderMentionOverlay(text: string, placeholder: string): ReactElement {
+  if (text.length === 0) {
+    return <span style={PLACEHOLDER_STYLE}>{placeholder}</span>;
+  }
   const parts = text.split(/(@\S+)/g);
   return (
     <>
       {parts.map((part, i) =>
         part.startsWith("@") ? (
-          <span key={i} className={styles.mention}>
+          <span key={i} style={MENTION_STYLE}>
             {part}
           </span>
         ) : (
@@ -233,7 +505,7 @@ function renderMentionOverlay(text: string): ReactElement {
  * always wraps at least the sigil character (`start` is the `/` or `@`'s own
  * index, `end` is the caret), so its rect is never degenerate — including at
  * the start of a wrapped or freshly-newlined line. Rendered into a hidden
- * mirror div that shares `.editorOverlay`/`.editorTextarea`'s font metrics
+ * mirror div that shares the overlay and the textarea's font metrics
  * and wrapping by construction (same CSS rule group), so no
  * `getComputedStyle` copying is needed.
  */
@@ -246,7 +518,7 @@ function renderMirror(
   return (
     <>
       {text.slice(0, start)}
-      <span ref={markerRef} className={styles.mirrorMark}>
+      <span ref={markerRef} style={MIRROR_MARK_STYLE}>
         {text.slice(start, end)}
       </span>
       {text.slice(end)}
@@ -311,10 +583,18 @@ function ContextPicker({
     .sort((a, b) => taskRank(a.status) - taskRank(b.status) || b.id - a.id);
 
   return (
-    <div className={styles.pickerPanel} role="listbox" ref={panelRef}>
-      <div className={styles.pickerSearch}>
+    <div
+      className="dk-list"
+      style={{ ...PICKER_PANEL_STYLE, ["--cols" as string]: PICKER_COLS }}
+      role="listbox"
+      ref={panelRef}
+    >
+      <div style={PICKER_SEARCH_STYLE}>
+        {/* `.dk-field` is the Deck control that carries both affordances this
+            needs and an inline style cannot: `:focus-within` on the frame and
+            `::placeholder` on the input inside it. */}
+        <label className="dk-field">
         <input
-          className={styles.pickerInput}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter templates and tasks…"
@@ -328,10 +608,11 @@ function ContextPicker({
           autoCapitalize="off"
           autoComplete="off"
         />
+        </label>
       </div>
-      <div className={styles.pickerHeader}>Templates</div>
+      <div className="dk-grp__h">Templates</div>
       {templates.length === 0 ? (
-        <div className={styles.pickerEmpty}>
+        <div className="dk-note">
           {needle === "" ? "No templates yet" : "No matching templates"}
         </div>
       ) : (
@@ -339,19 +620,25 @@ function ContextPicker({
           <button
             key={item.slug}
             type="button"
-            className={styles.pickerRow}
+            role="option"
+            aria-selected={false}
+            className="dk-line"
             onClick={() => {
               onPick({ id: crypto.randomUUID(), kind: "template", slug: item.slug, title: item.title, body: item.body });
               onClose();
             }}
           >
-            {item.title}
+            {/* The same three cells a task row carries, so the two groups
+                align on one grid. A template has no id and no status. */}
+            <span className="id" />
+            <span className="sub">{item.title}</span>
+            <span className="dk-meta" />
           </button>
         ))
       )}
-      <div className={styles.pickerHeader}>Tasks</div>
+      <div className="dk-grp__h">Tasks</div>
       {pickableTasks.length === 0 ? (
-        <div className={styles.pickerEmpty}>
+        <div className="dk-note">
           {needle === "" ? "No open tasks" : "No matching tasks"}
         </div>
       ) : (
@@ -359,7 +646,9 @@ function ContextPicker({
           <button
             key={task.id}
             type="button"
-            className={styles.pickerRow}
+            role="option"
+            aria-selected={false}
+            className="dk-line"
             onClick={() => {
               onPick({
                 id: crypto.randomUUID(),
@@ -372,9 +661,9 @@ function ContextPicker({
             }}
             title={`#${task.id} · ${task.status}`}
           >
-            <span className={styles.pickerRowId}>#{task.id}</span>
-            <span className={styles.pickerRowTitle}>{task.title}</span>
-            <span className={styles.pickerRowMeta}>{task.status}</span>
+            <span className="id">#{task.id}</span>
+            <span className="sub">{task.title}</span>
+            <span className="dk-meta">{task.status}</span>
           </button>
         ))
       )}
@@ -391,7 +680,7 @@ function ContextPicker({
  *
  * Dismissal mirrors `ContextPicker` above: outside `mousedown` + Escape, plus
  * an explicit `×` because this panel opens over its own trigger (it anchors
- * upward from `.cedit`, the same box `ContextPicker` uses) and so a
+ * upward from the editor box, the same box `ContextPicker` uses) and so a
  * pointer-only user needs some way to close it that isn't "click elsewhere".
  */
 function WirePreview({
@@ -416,26 +705,27 @@ function WirePreview({
 
   return (
     <div
-      className={styles.previewPanel}
+      style={WIRE_PANEL_STYLE}
       role="group"
       aria-label="Wire preview"
       id={panelId}
       ref={panelRef}
     >
-      <div className={styles.previewHead}>
-        <span className={styles.previewLabel}>WRITES</span>
-        <span className={styles.previewMeta}>{line.length} chars</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <span className="dk-label">writes</span>
+        <span className="dk-meta">{line.length} chars</span>
+        <span className="sp" style={{ marginLeft: "auto" }} />
         <button
           type="button"
-          className={styles.previewClose}
+          className="dk-btn bare icon"
           aria-label="Close preview"
           onClick={onClose}
         >
           ×
         </button>
       </div>
-      <code className={styles.previewCode}>{line}</code>
-      <span className={styles.previewNote}>
+      <code style={WIRE_CODE_STYLE}>{line}</code>
+      <span className="dk-help">
         → claude --print --input-format stream-json · one JSON line on stdin
       </span>
     </div>
@@ -717,7 +1007,7 @@ export function AgentComposer({
   });
 
   // One state, not two booleans: `ContextPicker` and `WirePreview` are both
-  // absolutely-positioned children of `.cedit`, so two independent booleans
+  // absolutely-positioned children of the editor box, so two independent booleans
   // would let them overlap. This makes mutual exclusion structural.
   const [popover, setPopover] = useState<"context" | "preview" | null>(null);
   const previewPanelId = useId();
@@ -726,6 +1016,10 @@ export function AgentComposer({
   // keystroke, which makes that worth doing here.
   const closePopover = useCallback(() => setPopover(null), []);
   const [dragCount, setDragCount] = useState<number | null>(null);
+  // The `:focus-within` the editor box used to get from CSS. Kept as state
+  // because an inline style cannot carry a pseudo-class — and, unlike the CSS,
+  // this is assertable.
+  const [editorFocused, setEditorFocused] = useState(false);
   const [caret, setCaret] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -913,7 +1207,7 @@ export function AgentComposer({
   // is open, so it costs nothing in the normal case.
   //
   // `caretAnchor` derives `bottom` from `hostHeight`, so the result is only
-  // valid for the `.editorStack` box it was measured against. Every caller
+  // valid for the the editor stack box it was measured against. Every caller
   // below re-runs the whole measurement rather than patching the anchor.
   const measureAnchor = useCallback((): void => {
     const textarea = textareaRef.current;
@@ -922,7 +1216,7 @@ export function AgentComposer({
     const stack = stackRef.current;
     if (!textarea || !mirror || !marker || !stack) return;
     // Width-matched to `clientWidth`, not to the overlay's `left`/`right`
-    // insets: past 240px `.editorTextarea` grows a scrollbar that narrows its
+    // insets: past 240px the textarea grows a scrollbar that narrows its
     // own line box but would not narrow an inset-positioned mirror's, which
     // would make long-draft wrapping (and the caret line with it) diverge.
     mirror.style.width = `${textarea.clientWidth}px`;
@@ -935,8 +1229,8 @@ export function AgentComposer({
         scrollTop: textarea.scrollTop,
         hostWidth: stack.clientWidth,
         hostHeight: stack.clientHeight,
-        padLeft: MIRROR_PAD_LEFT_PX,
-        padTop: MIRROR_PAD_TOP_PX,
+        padLeft: EDITOR_PAD_LEFT_PX,
+        padTop: EDITOR_PAD_TOP_PX,
         panelWidth: SUGGEST_PANEL_WIDTH_PX,
         gapPx: SUGGEST_GAP_PX,
       }),
@@ -950,12 +1244,12 @@ export function AgentComposer({
     // boot effect: re-measure exactly when the menu opens/closes, the
     // command line's sigil moves, the draft's layout could have changed, or
     // the row count (and with it the panel's own height) changed. Changes
-    // that alter `.editorStack`'s own box are covered by the observer below
+    // that alter the editor stack's own box are covered by the observer below
     // instead — this effect cannot see them, since they originate in state it
     // does not depend on.
   }, [menuOpen, trigger?.start, draft, menuRows.length, measureAnchor]);
 
-  // Re-anchor on any change to `.editorStack`'s box while a menu is open.
+  // Re-anchor on any change to the editor stack's box while a menu is open.
   //
   // The deps above are all *inputs* to the caret's position within the stack;
   // none of them describe the stack's own height. Attaching a context pill
@@ -1520,7 +1814,19 @@ export function AgentComposer({
         </button>
       </div>
 
-      <div className={styles.cedit}>
+      {/* React's onFocus/onBlur are focusin/focusout, so they bubble — which
+          is what makes this a true `:focus-within` for the whole box
+          (the picker's search field included), not just the textarea. */}
+      <div
+        style={{
+          ...EDITOR_BOX_STYLE,
+          borderColor: editorFocused ? "var(--fg-3)" : "var(--line-2)",
+        }}
+        data-editor-box
+        data-focused={editorFocused ? "true" : undefined}
+        onFocus={() => setEditorFocused(true)}
+        onBlur={() => setEditorFocused(false)}
+      >
         {popover === "context" ? (
           <ContextPicker
             onPick={(pill) => useComposerStore.getState().addPills(leafId, [pill])}
@@ -1539,39 +1845,44 @@ export function AgentComposer({
           />
         ) : null}
         {helpOpen ? (
-          <div className={styles.helpPanel} role="note">
-            <div className={styles.helpPanelHeader}>
-              Commands
+          <div style={HELP_PANEL_STYLE} role="note">
+            <div style={HELP_HEAD_STYLE}>
+              <span className="dk-label">commands</span>
               <button
                 type="button"
-                className={styles.helpClose}
+                className="dk-btn bare icon"
                 aria-label="Close command help"
                 onClick={() => setHelpOpen(false)}
               >
                 ×
               </button>
             </div>
-            {helpRows(commandSources).map((row) => (
-              <div key={row.name} className={styles.helpRow}>
-                <span className={styles.helpName}>
+            {helpRows(commandSources).map((row, i, all) => (
+              <div
+                key={row.name}
+                style={{
+                  ...HELP_ROW_STYLE,
+                  // `:last-child` has no inline equivalent, so the divider is
+                  // placed by index instead of removed from the final row.
+                  borderBottom:
+                    i === all.length - 1 ? undefined : "1px solid var(--line)",
+                }}
+              >
+                <span style={{ color: "var(--run)" }}>
                   /{row.name}
                   {row.argHint ? ` ${row.argHint}` : ""}
                 </span>
-                <span className={styles.helpSummary}>{row.summary}</span>
+                <span className="dk-help">{row.summary}</span>
               </div>
             ))}
           </div>
         ) : null}
-        <div className={styles.editorStack} ref={stackRef}>
-          <div
-            className={styles.editorOverlay}
-            aria-hidden="true"
-            ref={overlayRef}
-          >
-            {renderMentionOverlay(draft)}
+        <div style={EDITOR_STACK_STYLE} ref={stackRef}>
+          <div style={EDITOR_OVERLAY_STYLE} aria-hidden="true" ref={overlayRef}>
+            {renderMentionOverlay(draft, EDITOR_PLACEHOLDER)}
           </div>
           {menuOpen && trigger !== null ? (
-            <div className={styles.editorMirror} aria-hidden="true" ref={mirrorRef}>
+            <div style={EDITOR_MIRROR_STYLE} aria-hidden="true" ref={mirrorRef}>
               {renderMirror(draft, trigger.start, caret, markerRef)}
             </div>
           ) : null}
@@ -1584,7 +1895,7 @@ export function AgentComposer({
             ref={textareaRef}
             data-agent-composer
             data-composer-pane-id={leafId}
-            className={styles.editorTextarea}
+            style={EDITOR_TEXTAREA_STYLE}
             value={draft}
             onChange={(e) => handleDraftChange(e.currentTarget)}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
@@ -1599,18 +1910,18 @@ export function AgentComposer({
             onDragOver={handleDragOver}
             onDragLeave={() => setDragCount(null)}
             onDrop={handleDrop}
-            placeholder="Message the agent…"
+            aria-label={EDITOR_PLACEHOLDER}
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
             autoComplete="off"
           />
-          <span className={styles.gut}>
+          <span className="dk-meta" style={GUTTER_STYLE}>
             {rowCount} {rowCount === 1 ? "line" : "lines"} · {draft.length}{" "}
             {draft.length === 1 ? "char" : "chars"}
           </span>
           {dragCount !== null ? (
-            <div className={styles.dropzone}>
+            <div style={DROPZONE_STYLE}>
               drop to insert
               <b style={{ marginLeft: 5 }}>
                 {dragCount} {dragCount === 1 ? "path" : "paths"}

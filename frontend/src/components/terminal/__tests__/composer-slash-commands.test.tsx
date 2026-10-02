@@ -15,7 +15,7 @@ import { useAgentCatalogStore } from "../../../stores/agent-catalog-store";
 import { emptyConversation, type ConversationState } from "../../../lib/agent-conversation";
 
 // jsdom ships no `ResizeObserver`; the composer constructs one over
-// `.editorStack` to re-anchor the open command menu. Nothing here asserts on
+// the editor stack to re-anchor the open command menu. Nothing here asserts on
 // the anchor, so a no-op is enough — see `composer-mention-menu.test.tsx` for
 // the stub that actually drives a resize.
 class StubResizeObserver {
@@ -210,7 +210,7 @@ function renderComposer(
 }
 
 function editor(): HTMLTextAreaElement {
-  return screen.getByPlaceholderText("Message the agent…") as HTMLTextAreaElement;
+  return screen.getByLabelText("Message the agent…") as HTMLTextAreaElement;
 }
 
 function typeDraft(text: string): void {

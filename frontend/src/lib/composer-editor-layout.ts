@@ -3,8 +3,8 @@
  * the transparent-text overlay is kept on top of it, and how many rows the
  * gutter counter reports.
  *
- * All three are one measurement. `.editorTextarea` paints its own text
- * `transparent` and the visible copy comes from `.editorOverlay`, a sibling
+ * All three are one measurement. the textarea paints its own text
+ * `transparent` and the visible copy comes from the overlay, a sibling
  * that mirrors the draft with `@mention` spans — so the two boxes must wrap
  * identically and scroll together or the user sees blank space where their
  * text is. Deriving the box height, the overlay's geometry and the row count
@@ -16,19 +16,20 @@
  * cycle.
  */
 
-/** Mirrors `.editorTextarea { min-height: 48px }` in
- * `agent-composer.module.css` — the empty box's height. */
+/** The empty editor box's height. Consumed by `EDITOR_TEXTAREA_STYLE` and
+ * `EDITOR_STACK_STYLE` in `components/terminal/agent-composer.tsx`, which is
+ * now where the box is drawn — this module is the one definition of both. */
 export const COMPOSER_EDITOR_MIN_HEIGHT_PX = 48;
 
-/** Mirrors `.editorTextarea { max-height: 264px }` in
- * `agent-composer.module.css` — the auto-grow clamp. Kept as a literal here
- * rather than read from CSS; the two must be kept in sync by hand. Raised
+/** The auto-grow clamp, applied by `EDITOR_TEXTAREA_STYLE` in
+ * `components/terminal/agent-composer.tsx`. Declared here rather than beside
+ * the style so the measurement and the box cannot disagree. Raised
  * 240 -> 264 when the persistent `.wire` strip became the `{}` popover and
  * freed that vertical space for the editor. */
 export const COMPOSER_EDITOR_MAX_HEIGHT_PX = 264;
 
 /** Mirrors the shared `font-size: 12px; line-height: 1.6` rule that
- * `.editorOverlay`, `.editorTextarea` and `.editorMirror` share — 12 × 1.6.
+ * the overlay, the textarea and the caret mirror share — 12 × 1.6.
  * Only ever used to divide a measured content height into rows, so a rounding
  * disagreement with the browser costs a row at worst, never layout. */
 export const COMPOSER_EDITOR_LINE_HEIGHT_PX = 19.2;
