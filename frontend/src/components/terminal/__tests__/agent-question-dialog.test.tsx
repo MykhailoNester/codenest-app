@@ -216,3 +216,45 @@ describe("AgentQuestionDialog", () => {
     );
   });
 });
+
+// Same reasoning as the permission dialog's own affordance block: this is a
+// consent surface, so which button is primary and which is destructive is
+// behaviour, not decoration. Assertable since the Deck conversion (#283) put
+// the tone in an inline style — vitest stubs CSS modules, so the old classes
+// resolved to nothing in a test.
+describe("AgentQuestionDialog consent affordances", () => {
+  function dialog(): HTMLElement {
+    const el = document.querySelector("[data-question-dialog]");
+    if (el === null) throw new Error("no question dialog rendered");
+    return el as HTMLElement;
+  }
+
+  it("Answer is the one primary action and Deny the one destructive one", () => {
+    renderConv(stateWith(askRequest(restoreInput)));
+    const primaries = Array.from(dialog().querySelectorAll("button.pri"));
+    const dangers = Array.from(dialog().querySelectorAll("button.danger"));
+    expect(primaries).toHaveLength(1);
+    expect(primaries[0]!.textContent).toMatch(/^Answer\b/);
+    expect(dangers).toHaveLength(1);
+    expect(dangers[0]!.textContent).toMatch(/^Deny\b/);
+  });
+
+  it("keeps Deny away from Answer — the two are not adjacent", () => {
+    renderConv(stateWith(askRequest(restoreInput)));
+    const deny = screen.getByRole("button", { name: /^Deny/ });
+    expect(deny.previousElementSibling?.tagName).not.toBe("BUTTON");
+  });
+
+  it("leaves the options as radios, never as buttons that could read as submitting", () => {
+    renderConv(stateWith(askRequest(restoreInput)));
+    const options = dialog().querySelectorAll('[role="radiogroup"] button');
+    expect(options).toHaveLength(0);
+    expect(screen.getAllByRole("radio").length).toBeGreaterThan(0);
+  });
+
+  it("wears the live tone, not the permission ask's warn one", () => {
+    renderConv(stateWith(askRequest(restoreInput)));
+    expect(dialog().style.borderColor).toBe("var(--run)");
+    expect(dialog().style.borderColor).not.toBe("var(--warn)");
+  });
+});
