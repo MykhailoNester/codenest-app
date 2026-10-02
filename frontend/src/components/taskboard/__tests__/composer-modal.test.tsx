@@ -257,6 +257,163 @@ describe("ComposerModal", () => {
     spy.mockRestore();
   });
 
+  // ── Chrome ────────────────────────────────────────────────────────────
+  //
+  // Assertable for the first time: the Composer's `tb-*` classes lived in a
+  // plain stylesheet vitest never loaded, so none of this could be checked
+  // except by eye. The `.deck` wrapper is the one that matters — this dialog
+  // portals to `document.body`, and outside a `.deck` every token resolves to
+  // nothing and it ships as an unstyled white box.
+
+  function dialog(): HTMLElement {
+    return screen.getByRole("dialog", { name: "New task" });
+  }
+
+  it("portals the dialog inside a .deck wrapper so Deck tokens resolve", () => {
+    render(<ComposerModal {...baseProps()} />);
+    const deck = dialog().closest(".deck");
+    expect(deck).not.toBeNull();
+    expect((deck as HTMLElement).style.display).toBe("contents");
+  });
+
+  it("is a .dk-modal inside a .dk-scrim that stays above the terminal portals", () => {
+    render(<ComposerModal {...baseProps()} />);
+    expect(dialog().classList.contains("dk-modal")).toBe(true);
+    const scrim = dialog().parentElement as HTMLElement;
+    expect(scrim.classList.contains("dk-scrim")).toBe(true);
+    // `.dk-scrim` is z-index 60, which is a scrim inside a page. The pickers'
+    // popovers sit at 199/200 and must still clear this one.
+    expect(scrim.style.zIndex).toBe("150");
+  });
+
+  it("clicking the scrim closes, clicking the dialog does not", () => {
+    const onClose = vi.fn();
+    render(<ComposerModal {...baseProps({ onClose })} />);
+    fireEvent.click(dialog());
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(dialog().parentElement as HTMLElement);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("the header close button closes without creating", () => {
+    const onClose = vi.fn();
+    render(<ComposerModal {...baseProps({ onClose })} />);
+    fireEvent.click(screen.getByLabelText("Close"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
+  it("the title and description are labelled Deck form controls", () => {
+    render(<ComposerModal {...baseProps()} />);
+    const title = screen.getByLabelText("Title");
+    expect(title.classList.contains("dk-ctl")).toBe(true);
+    expect(title.getAttribute("placeholder")).toBe("What needs doing?");
+
+    fireEvent.click(screen.getByRole("button", { name: /Add description/ }));
+    const desc = screen.getByLabelText("Description");
+    expect(desc.tagName).toBe("TEXTAREA");
+    expect(desc.classList.contains("dk-ctl")).toBe(true);
+    // `textarea.dk-ctl` is `resize: vertical`, which a self-sizing field
+    // overwrites on the next keystroke.
+    expect((desc as HTMLElement).style.resize).toBe("none");
+  });
+
+  it("the description field replaces its own add button and keeps what is typed", () => {
+    render(<ComposerModal {...baseProps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add description/ }));
+    expect(screen.queryByRole("button", { name: /Add description/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "the detail" },
+    });
+    expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe(
+      "the detail",
+    );
+  });
+
+  it("sends the typed description, trimmed, and null when it is blank", async () => {
+    mockCreateTask.mockResolvedValue({ id: 7 });
+    render(<ComposerModal {...baseProps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add description/ }));
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "  the detail  " },
+    });
+    typeTitle("Ship the thing");
+    cmdEnter();
+    await waitFor(() => expect(mockCreateTask).toHaveBeenCalledTimes(1));
+    expect(mockCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "the detail" }),
+    );
+  });
+
+  it("Create is a single primary, disabled until there is a title", () => {
+    render(<ComposerModal {...baseProps()} />);
+    const create = screen.getByRole("button", { name: "Create" });
+    expect(create.className).toBe("dk-btn pri");
+    expect((create as HTMLButtonElement).disabled).toBe(true);
+    typeTitle("Ship the thing");
+    expect((create as HTMLButtonElement).disabled).toBe(false);
+    // Deck's rule: one primary per surface. Cancel is the bare secondary.
+    expect(dialog().querySelectorAll(".dk-btn.pri").length).toBe(1);
+    expect(screen.getByRole("button", { name: "Cancel" }).className).toBe("dk-btn bare");
+  });
+
+  it("the Create button submits, the Cancel button does not", async () => {
+    const onClose = vi.fn();
+    mockCreateTask.mockResolvedValue({ id: 42 });
+    render(<ComposerModal {...baseProps({ onClose })} />);
+    typeTitle("Ship the thing");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(mockCreateTask).toHaveBeenCalledTimes(1));
+  });
+
+  it("the validation message is an alert in Deck's broken semantic", async () => {
+    render(<ComposerModal {...baseProps({ projects: [], defaultProjectId: "" })} />);
+    typeTitle("Ship the thing");
+    cmdEnter();
+    const err = await screen.findByRole("alert");
+    expect(err.textContent).toBe("Project is required");
+    expect(err.style.color).toBe("var(--err)");
+  });
+
+  it("picking a project clears the validation message", async () => {
+    render(<ComposerModal {...baseProps({ defaultProjectId: "" })} />);
+    typeTitle("Ship the thing");
+    cmdEnter();
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByLabelText("Project: Project"));
+    fireEvent.click(screen.getByRole("option", { name: "Alpha" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("every picker says what it sets, not just what it is set to", () => {
+    render(<ComposerModal {...baseProps()} />);
+    const labels = Array.from(dialog().querySelectorAll(".dk-form__grid .dk-label")).map(
+      (el) => el.textContent,
+    );
+    expect(labels).toEqual([
+      "Status",
+      "Priority",
+      "Project",
+      "Assignee",
+      "Effort",
+      "Labels",
+    ]);
+  });
+
+  it("the footer keeps 'Create another' left of the shortcut hint", () => {
+    render(<ComposerModal {...baseProps()} />);
+    const foot = dialog().querySelector(".dk-modal__f") as HTMLElement;
+    expect(foot).not.toBeNull();
+    const check = screen.getByLabelText("Create another").closest("label") as HTMLElement;
+    // `.sp` is `margin-left: auto` only inside the headers deck.css names, so
+    // a right-aligned footer pushes from the left item instead.
+    expect(check.style.marginRight).toBe("auto");
+    expect(foot.querySelector(".dk-meta")?.textContent).toBe("⌘↩ to create");
+  });
+
   it("Escape inside a chip picker closes only the picker", () => {
     const onClose = vi.fn();
     render(<ComposerModal {...baseProps({ onClose })} />);
