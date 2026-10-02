@@ -17,13 +17,18 @@ vi.mock("../../lib/api", () => ({
   useCreateBudget: () => idle,
   useUpdateBudget: () => idle,
   useDeleteBudget: () => idle,
+  useCostMetrics: () => ({ data: undefined, isError: false }),
+  useDailySpend: () => ({ data: undefined }),
+  useInvocables: () => ({ data: undefined }),
   USAGE_WINDOWS: ["24h", "7d", "30d"],
   useUsageConsumption: () => ({ data: undefined, isPending: true }),
   usePlanUsage: () => ({ data: undefined, isLoading: true }),
 }));
 
-vi.mock("../../components/layout/shell", () => ({
-  Shell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+// Stubbed for the same reason the old Shell was: this file tests the
+// query-source split, not the chrome.
+vi.mock("../../components/deck/deck-shell", () => ({
+  DeckShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 afterEach(() => {

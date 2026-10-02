@@ -1,6 +1,24 @@
+/**
+ * Settings — kept by the supervision pivot because providers and models are
+ * what make model selection possible. Everything else here is the small set of
+ * things that have nowhere else to live: profiles, workflow labels and
+ * categories, terminal, notifications, telemetry, identity and the reset.
+ *
+ * The Features tab stays. It is the only writer of `enabled_features`, and
+ * seven slugs still ship off (`_FEATURES_DEFAULT` in `settings_service.py`);
+ * removing the tab before #274 deletes those pages would make them permanently
+ * unreachable, which is the exact failure the "frontend chrome renders only
+ * from known-good state" rule exists to prevent. See the ticket #343 report.
+ *
+ * Four sections — providers, workflow labels, features and telemetry — are
+ * still their pre-Deck components under `components/settings/`. They are
+ * outside this ticket's file scope and render on Deck's bridge tokens.
+ */
+
 import {
   useCallback,
   useEffect,
+  useMemo,
   useState,
   type ReactElement,
   type ReactNode,
@@ -30,17 +48,21 @@ import {
   parseNotifPrefs,
   type NotifPrefs,
 } from "../lib/notif-prefs";
-import { Shell } from "../components/layout/shell";
+import { DeckShell } from "../components/deck/deck-shell";
+import {
+  DeckGrid,
+  DeckHead,
+  DeckLine,
+  type DeckState,
+} from "../components/deck/deck-grid";
+import { DeckMenu } from "../components/deck/deck-menu";
 import {
   useTerminalStore,
   TERMINAL_STORAGE_KEY,
 } from "../stores/terminal-store";
 import { collectLeaves, paneKind } from "../lib/layout-tree";
 import { agentStop, closeTerminal } from "../lib/ipc";
-import {
-  SettingsNav,
-  type SettingsSectionId,
-} from "../components/settings/settings-nav";
+import { type SettingsSectionId } from "../components/settings/settings-nav";
 import { ProvidersTab } from "../components/settings/providers-tab";
 import { WorkflowLabelsTab } from "../components/settings/workflow-labels-tab";
 import { FeaturesTab } from "../components/settings/features-tab";
@@ -62,23 +84,116 @@ const NO_COLORS: Record<string, string> = {};
 const HOTKEY_RE =
   /^(Ctrl|Cmd|Command|Alt|Option|Shift|Super|Meta)(\+(Ctrl|Cmd|Command|Alt|Option|Shift|Super|Meta))*\+\S+$/i;
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "6px 10px",
-  background: "var(--bg-3)",
-  border: "1px solid var(--line-2)",
-  color: "var(--fg-0)",
-  borderRadius: 6,
-  fontSize: 13,
-  boxSizing: "border-box",
-};
+/* ── Shared Deck pieces ──────────────────────────────────────────────── */
 
-const fieldLabel: React.CSSProperties = {
-  fontSize: 11,
-  color: "var(--fg-3)",
-  display: "block",
-  marginBottom: 4,
-};
+/**
+ * A section's heading and its actions in one container. Deck's rule is that
+ * every action lives in a container and clusters use `.dk-actions`; `.dk-bar`
+ * is the container the detail pages already use for exactly this.
+ */
+function SectionHead({
+  label,
+  note,
+  actions,
+}: {
+  label: string;
+  note?: ReactNode;
+  actions?: ReactNode;
+}): ReactElement {
+  return (
+    <div className="dk-bar">
+      <h2
+        style={{
+          margin: 0,
+          font: "inherit",
+          fontSize: 12,
+          fontWeight: 400,
+          letterSpacing: "1.3px",
+          textTransform: "uppercase",
+          color: "var(--fg-2)",
+        }}
+      >
+        {label}
+      </h2>
+      {note != null && <span className="dk-bar__ref">{note}</span>}
+      {actions != null && (
+        <>
+          <span className="sp" />
+          <span className="dk-actions">{actions}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** A labelled control. Deck has no form primitive of its own. */
+function Field({
+  label,
+  hint,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  htmlFor?: string;
+  children: ReactNode;
+}): ReactElement {
+  return (
+    <label
+      htmlFor={htmlFor}
+      style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}
+    >
+      <span className="dim" style={{ fontSize: "var(--fs-xs)" }}>
+        {label}
+        {hint && <span style={{ color: "var(--fg-4)" }}> — {hint}</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+/** The panel an inline editor sits in: one hairline, no card, no shadow. */
+function Panel({ children }: { children: ReactNode }): ReactElement {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--u3)",
+        padding: "var(--u3)",
+        marginTop: "var(--u4)",
+        border: "1px solid var(--line)",
+        borderRadius: 3,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function FieldGrid({ children }: { children: ReactNode }): ReactElement {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+        gap: "var(--u3)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ErrorNote({ message }: { message: string }): ReactElement {
+  return (
+    <div className="dk-note" style={{ color: "var(--err)", padding: 0 }}>
+      {message}
+    </div>
+  );
+}
+
+/* ── Profile form state ──────────────────────────────────────────────── */
 
 interface ProfileFormState {
   name: string;
@@ -158,47 +273,77 @@ class SectionErrorBoundary extends Component<
       return (
         <div
           style={{
-            padding: "20px 16px",
-            background: "var(--bg-3)",
-            border: "1px solid #ef444450",
-            borderRadius: 8,
-            color: "var(--fg-1)",
+            padding: "var(--u3)",
+            border: "1px solid var(--err)",
+            borderRadius: 3,
           }}
         >
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#ef4444",
-              marginBottom: 6,
-            }}
-          >
-            This section failed to render
+          <div style={{ color: "var(--err)", marginBottom: "var(--u2)" }}>
+            this section failed to render
           </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--fg-3)",
-              fontFamily: "var(--font-mono)",
-              wordBreak: "break-all",
-            }}
-          >
+          <div className="dk-note" style={{ padding: 0 }}>
             {this.state.error.message}
           </div>
-          <button
-            type="button"
-            className="d3-btn d3-btn--ghost"
-            style={{ marginTop: 12, fontSize: 12 }}
-            onClick={() => this.setState({ error: null })}
-          >
-            Retry
-          </button>
+          <span className="dk-actions" style={{ marginTop: "var(--u3)" }}>
+            <button
+              type="button"
+              className="dk-btn"
+              onClick={() => this.setState({ error: null })}
+            >
+              retry
+            </button>
+          </span>
         </div>
       );
     }
     return this.props.children;
   }
 }
+
+/* ── Section rail ────────────────────────────────────────────────────── */
+
+interface SectionGroup {
+  heading: string;
+  items: { id: SettingsSectionId; label: string }[];
+}
+
+/** Lowercase, because Deck labels are. Mirrors `SettingsSectionId`. */
+const SECTION_GROUPS: readonly SectionGroup[] = [
+  {
+    heading: "workspace",
+    items: [
+      { id: "providers", label: "providers" },
+      { id: "profiles", label: "profiles" },
+      { id: "features", label: "features" },
+    ],
+  },
+  {
+    heading: "workflow",
+    items: [
+      { id: "workflow-labels", label: "workflow labels" },
+      { id: "categories", label: "categories" },
+    ],
+  },
+  {
+    heading: "interface",
+    items: [{ id: "terminal", label: "terminal" }],
+  },
+  {
+    heading: "system",
+    items: [
+      { id: "notifications", label: "notifications" },
+      // #179. In Settings rather than behind a nav slug on purpose: this is
+      // where telemetry is consented to *and* withdrawn, and Settings is the
+      // one surface in the app that cannot be switched off in Features.
+      { id: "telemetry", label: "telemetry" },
+      { id: "general", label: "general" },
+    ],
+  },
+];
+
+const SECTION_LABEL: Record<string, string> = Object.fromEntries(
+  SECTION_GROUPS.flatMap((g) => g.items.map((i) => [i.id, i.label])),
+);
 
 const VALID_SECTIONS = new Set<SettingsSectionId>([
   "providers",
@@ -230,6 +375,73 @@ function resolveSection(s: string | null): SettingsSectionId {
   return "profiles";
 }
 
+function SectionRail({
+  active,
+  onChange,
+}: {
+  active: SettingsSectionId;
+  onChange: (section: SettingsSectionId) => void;
+}): ReactElement {
+  const [query, setQuery] = useState("");
+
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return SECTION_GROUPS;
+    return SECTION_GROUPS.map((g) => ({
+      ...g,
+      items: g.items.filter((i) => i.label.includes(q)),
+    })).filter((g) => g.items.length > 0);
+  }, [query]);
+
+  return (
+    <nav aria-label="Settings sections" style={{ minWidth: 0 }}>
+      <span className="dk-field" style={{ marginBottom: "var(--u3)" }}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="filter sections…"
+          aria-label="Search settings"
+        />
+      </span>
+
+      {groups.length === 0 && (
+        <div className="dk-note" style={{ padding: "var(--u2)" }}>
+          no matching settings.
+        </div>
+      )}
+
+      {groups.map((group) => (
+        <div className="dk-grp" key={group.heading}>
+          <div className="dk-grp__h">{group.heading}</div>
+          {group.items.map((item) => {
+            const on = active === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`dk-nav${on ? " on" : ""}`}
+                aria-current={on ? "page" : undefined}
+                onClick={() => onChange(item.id)}
+              >
+                <span
+                  className="dk-s dk-nav__g"
+                  role="img"
+                  aria-label={on ? "running" : "inert"}
+                  data-s={on ? "run" : "idle"}
+                />
+                <span className="trunc">{item.label}</span>
+                <span className="dk-nav__n" />
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+/* ── Page ────────────────────────────────────────────────────────────── */
+
 export function SettingsPage(): ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawSection = searchParams.get("section");
@@ -240,35 +452,43 @@ export function SettingsPage(): ReactElement {
   }
 
   return (
-    <Shell>
-      <div style={{ padding: "0 24px 24px" }}>
-        <div
-          style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 28 }}
-        >
-          <SettingsNav active={activeSection} onChange={handleSectionChange} />
+    <DeckShell
+      title="settings"
+      crumb={`${SECTION_LABEL[activeSection] ?? activeSection} · providers, models, and the little that is left`}
+    >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "176px minmax(0, 1fr)",
+          gap: "var(--u8)",
+          alignItems: "start",
+        }}
+      >
+        <SectionRail active={activeSection} onChange={handleSectionChange} />
 
-          <div style={{ minWidth: 0 }}>
-            <SectionErrorBoundary key={activeSection}>
-              <>
-                {activeSection === "providers" && <ProvidersTab />}
-                {activeSection === "profiles" && <ProfilesTab />}
-                {activeSection === "features" && <FeaturesTab />}
-                {activeSection === "general" && <GeneralTab />}
-                {activeSection === "categories" && <CategoriesTab />}
-                {activeSection === "workflow-labels" && <WorkflowLabelsTab />}
-                {activeSection === "notifications" && <NotificationsTab />}
-                {activeSection === "terminal" && <TerminalTab />}
-                {activeSection === "telemetry" && <TelemetryTab />}
-              </>
-            </SectionErrorBoundary>
-          </div>
+        <div style={{ minWidth: 0 }}>
+          <SectionErrorBoundary key={activeSection}>
+            <>
+              {activeSection === "providers" && <ProvidersTab />}
+              {activeSection === "profiles" && <ProfilesTab />}
+              {activeSection === "features" && <FeaturesTab />}
+              {activeSection === "general" && <GeneralTab />}
+              {activeSection === "categories" && <CategoriesTab />}
+              {activeSection === "workflow-labels" && <WorkflowLabelsTab />}
+              {activeSection === "notifications" && <NotificationsTab />}
+              {activeSection === "terminal" && <TerminalTab />}
+              {activeSection === "telemetry" && <TelemetryTab />}
+            </>
+          </SectionErrorBoundary>
         </div>
       </div>
-    </Shell>
+    </DeckShell>
   );
 }
 
 // ─── Profiles tab ────────────────────────────────────────────────────────────
+
+const COLS_PROFILE = "14px minmax(0, 1fr) 96px minmax(0, 1fr) auto";
 
 function ProfilesTab(): ReactElement {
   const qc = useQueryClient();
@@ -334,221 +554,186 @@ function ProfilesTab(): ReactElement {
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
-        <span className="d3-h">Profiles</span>
-        <button
-          type="button"
-          className="d3-btn d3-btn--primary"
-          onClick={startNew}
-        >
-          + New Profile
-        </button>
-      </div>
+      <SectionHead
+        label="profiles"
+        note="a claude config dir bound to a set of projects"
+        actions={
+          <button type="button" className="dk-btn" onClick={startNew}>
+            + profile
+          </button>
+        }
+      />
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-          gap: 12,
-          marginBottom: 16,
-        }}
-      >
-        {profiles.map((p) => (
-          <div
-            key={p.id}
-            className="d3-card"
-            style={{ padding: 16, borderLeft: `3px solid ${p.color}` }}
-          >
-            {/* Profile identity row */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                marginBottom: 8,
-              }}
-            >
-              <span
-                style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: 4,
-                  background: p.color,
-                }}
-              />
-              <span
-                style={{ fontSize: 14, color: "var(--fg-0)", fontWeight: 600, flex: 1 }}
-              >
-                {p.name}
-              </span>
-              {/* Project count badge */}
-              <span
-                style={{
-                  fontSize: 11,
-                  padding: "1px 7px",
-                  borderRadius: 10,
-                  background: "var(--bg-3)",
-                  border: "1px solid var(--line-2)",
-                  color: "var(--fg-3)",
-                }}
-                title={`${p.project_count} project${p.project_count === 1 ? "" : "s"} in this group`}
-              >
-                {p.project_count} {p.project_count === 1 ? "project" : "projects"}
-              </span>
-            </div>
-            {/* Provider binding metadata (secondary, shown only when present) */}
-            {p.claude_config_dir && (
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--fg-4)",
-                  fontFamily: "var(--font-mono)",
-                  marginBottom: 6,
-                }}
-                title="Claude config directory bound to this profile for session attribution"
-              >
-                {p.claude_config_dir}
-              </div>
-            )}
-            {rowError?.id === p.id && (
-              <div style={{ fontSize: 11, color: "#ef4444", marginBottom: 6 }}>
-                {rowError.message}
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-              <button
-                type="button"
-                className="d3-btn d3-btn--ghost"
-                onClick={() => startEdit(p)}
-              >
-                Edit
-              </button>
-              {confirmDeleteId === p.id && (
-                <button
-                  type="button"
-                  className="d3-btn d3-btn--ghost"
-                  style={{ color: "var(--fg-3)" }}
-                  onClick={() => setConfirmDeleteId(null)}
-                >
-                  Cancel
-                </button>
-              )}
-              <button
-                type="button"
-                className="d3-btn d3-btn--ghost"
-                style={{
-                  color: "#ef4444",
-                  ...(confirmDeleteId === p.id
-                    ? { background: "rgba(239,68,68,0.12)", fontWeight: 600 }
-                    : {}),
-                }}
-                onClick={() => void remove(p)}
-              >
-                {confirmDeleteId === p.id ? "Confirm delete" : "Delete"}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+      {profiles.length === 0 ? (
+        <div className="dk-note sans">
+          No profiles yet. One profile is enough until two clients need separate
+          Claude config directories.
+        </div>
+      ) : (
+        <DeckGrid cols={COLS_PROFILE} label="Profiles">
+          <DeckHead cells={["profile", "r projects", "config dir", "r "]} />
+          {profiles.map((p) => (
+            <DeckLine
+              key={p.id}
+              // A profile with no config dir cannot attribute a session, so it
+              // is inert rather than bound.
+              state={p.claude_config_dir ? "done" : "idle"}
+              onOpen={() => startEdit(p)}
+              cells={[
+                {
+                  v: (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          display: "inline-block",
+                          width: 8,
+                          height: 8,
+                          marginRight: 6,
+                          borderRadius: 2,
+                          background: p.color,
+                          verticalAlign: "middle",
+                        }}
+                      />
+                      {p.name}
+                    </>
+                  ),
+                  cls: "sub",
+                  title: p.name,
+                },
+                { v: String(p.project_count), cls: "r" },
+                {
+                  v: rowError?.id === p.id ? (
+                    <span style={{ color: "var(--err)" }}>
+                      {rowError.message}
+                    </span>
+                  ) : (
+                    (p.claude_config_dir ?? "—")
+                  ),
+                  title: p.claude_config_dir ?? undefined,
+                },
+                {
+                  v: (
+                    <span
+                      className="dk-actions end"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <DeckMenu
+                        label={`Actions for ${p.name}`}
+                        items={[
+                          {
+                            label: "Edit profile",
+                            onSelect: () => {
+                              setConfirmDeleteId(null);
+                              startEdit(p);
+                            },
+                          },
+                          {
+                            label:
+                              confirmDeleteId === p.id
+                                ? "Confirm delete"
+                                : "Delete profile",
+                            danger: true,
+                            separated: true,
+                            onSelect: () => void remove(p),
+                          },
+                        ]}
+                      />
+                    </span>
+                  ),
+                  cls: "r",
+                },
+              ]}
+            />
+          ))}
+        </DeckGrid>
+      )}
 
       {editingId !== null && (
-        <div className="d3-card" style={{ padding: 20 }}>
-          <span className="d3-h" style={{ display: "block", marginBottom: 12 }}>
-            {editingId === "new" ? "New Profile" : `Edit "${form.name}"`}
-          </span>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 120px",
-              gap: 10,
-              marginBottom: 10,
-            }}
-          >
-            <div>
-              <label style={fieldLabel}>Name *</label>
-              <input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={fieldLabel}>Color</label>
+        <Panel>
+          <div className="dim" style={{ fontSize: "var(--fs-s)" }}>
+            {editingId === "new" ? "new profile" : `edit “${form.name}”`}
+          </div>
+          <FieldGrid>
+            <Field label="name">
+              <span className="dk-field">
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  aria-label="Profile name"
+                />
+              </span>
+            </Field>
+            <Field label="colour">
               <input
                 type="color"
                 value={form.color}
                 onChange={(e) => setForm({ ...form, color: e.target.value })}
-                style={{ ...inputStyle, padding: 4, height: 32 }}
+                aria-label="Profile colour"
+                style={{
+                  width: 48,
+                  height: 24,
+                  padding: 0,
+                  border: "1px solid var(--line-2)",
+                  borderRadius: 3,
+                  background: "none",
+                }}
               />
-            </div>
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <label style={fieldLabel}>
-              Claude config dir{" "}
-              <span style={{ color: "var(--fg-4)", fontStyle: "italic" }}>
-                (provider binding — for session attribution)
+            </Field>
+            <Field label="claude config dir" hint="for session attribution">
+              <span className="dk-field">
+                <input
+                  placeholder="/.claude-clientx/"
+                  value={form.claude_config_dir}
+                  onChange={(e) =>
+                    setForm({ ...form, claude_config_dir: e.target.value })
+                  }
+                  spellCheck={false}
+                  aria-label="Claude config dir"
+                />
               </span>
-            </label>
-            <input
-              placeholder="/.claude-clientx/"
-              value={form.claude_config_dir}
-              onChange={(e) =>
-                setForm({ ...form, claude_config_dir: e.target.value })
-              }
-              style={inputStyle}
-            />
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <label style={fieldLabel}>
-              Working directory hint{" "}
-              <span style={{ color: "var(--fg-4)", fontStyle: "italic" }}>
-                (optional)
+            </Field>
+            <Field label="working directory hint" hint="optional">
+              <span className="dk-field">
+                <input
+                  placeholder="~/Work/ClientX"
+                  value={form.cwd_hint}
+                  onChange={(e) =>
+                    setForm({ ...form, cwd_hint: e.target.value })
+                  }
+                  spellCheck={false}
+                  aria-label="Working directory hint"
+                />
               </span>
-            </label>
-            <input
-              placeholder="/Users/me/Work/ClientX"
-              value={form.cwd_hint}
-              onChange={(e) => setForm({ ...form, cwd_hint: e.target.value })}
-              style={inputStyle}
-            />
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <label style={fieldLabel}>Icon</label>
-            <input
-              value={form.icon}
-              onChange={(e) => setForm({ ...form, icon: e.target.value })}
-              style={inputStyle}
-            />
-          </div>
-          {error && (
-            <div style={{ fontSize: 12, color: "#ef4444", marginBottom: 10 }}>
-              {error}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8 }}>
+            </Field>
+            <Field label="icon">
+              <span className="dk-field">
+                <input
+                  value={form.icon}
+                  onChange={(e) => setForm({ ...form, icon: e.target.value })}
+                  aria-label="Profile icon"
+                />
+              </span>
+            </Field>
+          </FieldGrid>
+          {error && <ErrorNote message={error} />}
+          <span className="dk-actions">
             <button
               type="button"
-              className="d3-btn d3-btn--primary"
+              className="dk-btn pri"
               onClick={() => void save()}
             >
-              Save
+              save
             </button>
             <button
               type="button"
-              className="d3-btn d3-btn--ghost"
+              className="dk-btn"
               onClick={() => setEditingId(null)}
             >
-              Cancel
+              cancel
             </button>
-          </div>
-        </div>
+          </span>
+        </Panel>
       )}
     </div>
   );
@@ -567,7 +752,7 @@ function GeneralTab(): ReactElement {
   const [lastLookups, setLastLookups] = useState(lookups);
 
   // Sync local state when the remote data first resolves — uses the same
-  // "track last seen" pattern as TerminalSettingsTab to avoid a setState-in-effect lint error.
+  // "track last seen" pattern as TerminalTab to avoid a setState-in-effect lint error.
   if (lookups !== lastLookups) {
     setLastLookups(lookups);
     if (lookups) {
@@ -596,79 +781,51 @@ function GeneralTab(): ReactElement {
 
   return (
     <div>
-      <span className="d3-h" style={{ display: "block", marginBottom: 12 }}>
-        General
-      </span>
+      <SectionHead
+        label="general"
+        note="who the rail says you are"
+        actions={
+          <>
+            {identitySaved && <span className="dim">saved</span>}
+            <button
+              type="button"
+              className="dk-btn pri"
+              disabled={saveIdentity.isPending}
+              onClick={() => saveIdentity.mutate()}
+            >
+              {saveIdentity.isPending ? "saving…" : "save"}
+            </button>
+          </>
+        }
+      />
 
-      <div
-        style={{
-          border: "1px solid var(--line-2)",
-          borderRadius: 8,
-          padding: 20,
-          marginBottom: 24,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--fg-3)",
-            textTransform: "uppercase",
-            letterSpacing: "0.07em",
-            marginBottom: 16,
-          }}
-        >
-          User Identity
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-          <div>
-            <label style={fieldLabel} htmlFor="identity-display-name">
-              Display Name
-            </label>
+      <FieldGrid>
+        <Field label="display name" htmlFor="identity-display-name">
+          <span className="dk-field">
             <input
               id="identity-display-name"
-              style={inputStyle}
               type="text"
               value={displayName}
               placeholder="Operator"
               onChange={(e) => setDisplayName(e.target.value)}
             />
-          </div>
-          <div>
-            <label style={fieldLabel} htmlFor="identity-role">
-              Role
-            </label>
+          </span>
+        </Field>
+        <Field label="role" htmlFor="identity-role">
+          <span className="dk-field">
             <input
               id="identity-role"
-              style={inputStyle}
               type="text"
               value={role}
               placeholder="Owner"
               onChange={(e) => setRole(e.target.value)}
             />
-          </div>
-        </div>
+          </span>
+        </Field>
+      </FieldGrid>
+      {identityError && <ErrorNote message={identityError} />}
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button
-            type="button"
-            className="d3-btn d3-btn--primary"
-            style={{ fontSize: 12 }}
-            disabled={saveIdentity.isPending}
-            onClick={() => saveIdentity.mutate()}
-          >
-            {saveIdentity.isPending ? "Saving…" : "Save"}
-          </button>
-          {identitySaved && (
-            <span style={{ fontSize: 12, color: "var(--fg-3)" }}>Saved</span>
-          )}
-          {identityError && (
-            <span style={{ fontSize: 12, color: "#ef4444" }}>{identityError}</span>
-          )}
-        </div>
-      </div>
-
+      <hr className="dk-rule" />
       <DangerZone />
     </div>
   );
@@ -744,96 +901,66 @@ function DangerZone(): ReactElement {
   return (
     <div
       style={{
-        border: "1px solid rgba(239,68,68,0.3)",
-        borderRadius: 8,
-        padding: 20,
-        background: "rgba(239,68,68,0.04)",
+        padding: "var(--u3)",
+        border: "1px solid var(--err)",
+        borderRadius: 3,
       }}
     >
-      <div
+      <h2
         style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: "#ef4444",
+          margin: 0,
+          font: "inherit",
+          fontSize: 12,
+          fontWeight: 400,
+          letterSpacing: "1.3px",
           textTransform: "uppercase",
-          letterSpacing: "0.07em",
-          marginBottom: 12,
+          color: "var(--err)",
         }}
       >
-        Danger Zone
+        danger zone
+      </h2>
+      <div className="dk-note sans" style={{ paddingLeft: 0 }}>
+        <div style={{ color: "var(--fg-2)" }}>Reset Command Center</div>
+        Wipes all projects, tasks, sessions, settings and agents, then restarts
+        the first-run setup flow. This cannot be undone.
       </div>
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: 16,
-        }}
-      >
-        <div>
-          <div
-            style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-1)", marginBottom: 4 }}
-          >
-            Reset Command Center
-          </div>
-          <div style={{ fontSize: 12, color: "var(--fg-3)", maxWidth: 420 }}>
-            Wipes all projects, tasks, sessions, settings, and agents, then
-            restarts the first-run setup flow. This cannot be undone.
-          </div>
-          {error && (
-            <div style={{ fontSize: 12, color: "#ef4444", marginTop: 6 }}>
-              {error}
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-          {confirmed && (
+      {error && <ErrorNote message={error} />}
+      <span className="dk-actions">
+        {confirmed && (
+          <>
             <button
               type="button"
-              className="d3-btn d3-btn--ghost"
+              className="dk-btn"
               onClick={() => setConfirmed(false)}
               disabled={reset.isPending}
             >
-              Cancel
+              cancel
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void handleReset()}
-            disabled={reset.isPending}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 6,
-              border: confirmed
-                ? "1px solid #ef4444"
-                : "1px solid rgba(239,68,68,0.5)",
-              background: confirmed ? "#ef4444" : "transparent",
-              color: confirmed ? "#fff" : "#ef4444",
-              fontSize: 13,
-              fontWeight: confirmed ? 700 : 500,
-              cursor: reset.isPending ? "not-allowed" : "pointer",
-              opacity: reset.isPending ? 0.6 : 1,
-              transition: "background 0.15s, color 0.15s, border-color 0.15s",
-            }}
-          >
-            {reset.isPending
-              ? "Resetting…"
-              : confirmed
-                ? "Yes, wipe everything"
-                : "Reset Command Center"}
-          </button>
-        </div>
-      </div>
+            <span className="sep" />
+          </>
+        )}
+        <button
+          type="button"
+          className={confirmed ? "dk-btn danger pri" : "dk-btn danger"}
+          onClick={() => void handleReset()}
+          disabled={reset.isPending}
+        >
+          {reset.isPending
+            ? "resetting…"
+            : confirmed
+              ? "yes, wipe everything"
+              : "reset command center"}
+        </button>
+      </span>
     </div>
   );
 }
 
-// ─── List editor (categories + statuses) ────────────────────────────────────
+// ─── List editor (categories) ────────────────────────────────────────────────
 
 interface ListEditorProps {
   title: string;
+  note: string;
   settingKey: string;
   values: string[];
   colors?: Record<string, string>;
@@ -842,6 +969,7 @@ interface ListEditorProps {
 
 function ListEditor({
   title,
+  note,
   settingKey,
   values,
   colors,
@@ -895,28 +1023,46 @@ function ListEditor({
   }
 
   return (
-    <div className="d3-card" style={{ padding: 20, marginBottom: 12 }}>
-      <span className="d3-h" style={{ display: "block", marginBottom: 12 }}>
-        {title}
-      </span>
+    <div>
+      <SectionHead
+        label={title}
+        note={note}
+        actions={
+          <button
+            type="button"
+            className="dk-btn pri"
+            onClick={() => void save()}
+          >
+            save
+          </button>
+        }
+      />
+
       <div
-        style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "var(--u2)",
+          marginBottom: "var(--u4)",
+        }}
       >
+        {items.length === 0 && (
+          <span className="dim" style={{ fontSize: "var(--fs-s)" }}>
+            none yet
+          </span>
+        )}
         {items.map((v) => {
           const color = colorMap[v];
           return (
             <span
               key={v}
+              className="dk-tag"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 8,
-                padding: "4px 10px",
-                background: "var(--bg-3)",
-                border: `1px solid ${color ?? "var(--line-2)"}50`,
-                color: color ?? "var(--fg-1)",
-                borderRadius: 999,
-                fontSize: 12,
+                gap: 6,
+                height: 24,
+                color: color ?? undefined,
               }}
             >
               {colorsKey && (
@@ -927,8 +1073,8 @@ function ListEditor({
                     setColorMap({ ...colorMap, [v]: e.target.value })
                   }
                   style={{
-                    width: 18,
-                    height: 18,
+                    width: 14,
+                    height: 14,
                     padding: 0,
                     border: "none",
                     background: "transparent",
@@ -942,15 +1088,8 @@ function ListEditor({
                 type="button"
                 onClick={() => remove(v)}
                 aria-label={`Remove ${v}`}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--fg-3)",
-                  cursor: "pointer",
-                  padding: 0,
-                  fontSize: 14,
-                  lineHeight: 1,
-                }}
+                className="dk-btn bare"
+                style={{ height: 16, padding: "0 2px", color: "var(--fg-3)" }}
               >
                 ×
               </button>
@@ -958,36 +1097,27 @@ function ListEditor({
           );
         })}
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add();
-            }
-          }}
-          placeholder="Add new…"
-          style={{ ...inputStyle, maxWidth: 200 }}
-        />
-        <button type="button" className="d3-btn" onClick={add}>
-          Add
+
+      <span className="dk-actions">
+        <span className="dk-field" style={{ width: 200 }}>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+            placeholder="add new…"
+            aria-label={`Add to ${title}`}
+          />
+        </span>
+        <button type="button" className="dk-btn" onClick={add}>
+          add
         </button>
-        <span style={{ flex: 1 }} />
-        <button
-          type="button"
-          className="d3-btn d3-btn--primary"
-          onClick={() => void save()}
-        >
-          Save
-        </button>
-      </div>
-      {error && (
-        <div style={{ fontSize: 12, color: "#ef4444", marginTop: 8 }}>
-          {error}
-        </div>
-      )}
+      </span>
+      {error && <ErrorNote message={error} />}
     </div>
   );
 }
@@ -995,73 +1125,156 @@ function ListEditor({
 function CategoriesTab(): ReactElement {
   const { data: lookups } = useLookups();
   return (
-    <div>
-      <ListEditor
-        title="Document categories"
-        settingKey="document_categories"
-        values={lookups?.document_categories ?? NO_STRINGS}
-        colors={lookups?.document_category_colors ?? NO_COLORS}
-        colorsKey="document_category_colors"
-      />
-    </div>
+    <ListEditor
+      title="document categories"
+      note="what a document can be filed under"
+      settingKey="document_categories"
+      values={lookups?.document_categories ?? NO_STRINGS}
+      colors={lookups?.document_category_colors ?? NO_COLORS}
+      colorsKey="document_category_colors"
+    />
   );
 }
 
 // ─── Notifications tab ───────────────────────────────────────────────────────
 
 const NOTIF_TYPES = [
-  { key: "task_assigned", label: "Task Assigned" },
-  { key: "blocker_resolved", label: "Blocker Resolved" },
-  { key: "session_completed", label: "Session Completed" },
-  { key: "session_failed", label: "Session Failed" },
-  { key: "session_info", label: "Session Info" },
-  { key: "cost_threshold", label: "Cost Threshold" },
-  { key: "budget_threshold", label: "Budget Threshold" },
+  { key: "task_assigned", label: "task assigned" },
+  { key: "blocker_resolved", label: "blocker resolved" },
+  { key: "session_completed", label: "session completed" },
+  { key: "session_failed", label: "session failed" },
+  { key: "session_info", label: "session info" },
+  { key: "cost_threshold", label: "cost threshold" },
+  { key: "budget_threshold", label: "budget threshold" },
 ] as const;
 
 type NotifType = (typeof NOTIF_TYPES)[number]["key"];
 
-// ─── Terminal tab ─────────────────────────────────────────────────────────────
+const NOTIF_STATE: Record<string, DeckState> = {
+  session_failed: "fail",
+  cost_threshold: "wait",
+  budget_threshold: "wait",
+};
 
-function ToggleRow({
-  label,
-  description,
-  checked,
-  onChange,
-}: {
-  label: string;
-  description?: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}): ReactElement {
+const COLS_NOTIF = "14px minmax(0, 1fr) 80px 80px";
+
+function NotificationsTab(): ReactElement {
+  const qc = useQueryClient();
+
+  const { data: prefSetting } = useQuery<
+    { value_json: string } | null,
+    SidecarError
+  >({
+    queryKey: NOTIF_QUERY_KEY,
+    queryFn: () =>
+      fetchSidecar<{ value_json: string } | null>(
+        "/api/v1/settings/notification_prefs_json",
+      ).catch(() => null),
+  });
+
+  const prefs: NotifPrefs = parseNotifPrefs(prefSetting?.value_json);
+
+  // Mutation with optimistic update so the checkbox responds immediately and
+  // rolls back if the server request fails.
+  const toggleMutation = useMutation<
+    unknown,
+    SidecarError,
+    { next: NotifPrefs },
+    { previous: { value_json: string } | null | undefined }
+  >({
+    mutationFn: ({ next }) =>
+      // Pass the plain object — upsertSetting will JSON.stringify it once.
+      upsertSetting("notification_prefs_json", next),
+    onMutate: async ({ next }) => {
+      // Cancel any in-flight refetch so it doesn't overwrite the optimistic value.
+      await qc.cancelQueries({ queryKey: NOTIF_QUERY_KEY });
+      const previous = qc.getQueryData<{ value_json: string } | null>(
+        NOTIF_QUERY_KEY,
+      );
+      // Optimistically write the new value into the cache.
+      qc.setQueryData<{ value_json: string }>(NOTIF_QUERY_KEY, {
+        value_json: JSON.stringify(next),
+      });
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      // Rollback to the snapshot we captured in onMutate.
+      qc.setQueryData(NOTIF_QUERY_KEY, ctx?.previous);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: NOTIF_QUERY_KEY });
+    },
+  });
+
+  const toggle = useCallback(
+    (type: NotifType, channel: "toast" | "native") => {
+      const next: NotifPrefs = { ...DEFAULT_PREFS, ...prefs };
+      const existing = next[type] as
+        | { toast: boolean; native: boolean }
+        | undefined;
+      const current = existing ?? { toast: false, native: false };
+      next[type] = {
+        toast: current.toast,
+        native: current.native,
+        [channel]: !current[channel],
+      };
+      toggleMutation.mutate({ next });
+    },
+    [prefs, toggleMutation],
+  );
+
   return (
-    <label
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 12,
-        cursor: "pointer",
-        padding: "10px 0",
-        borderTop: "1px solid var(--line-2)",
-      }}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        style={{ marginTop: 2 }}
+    <div>
+      <SectionHead
+        label="notifications"
+        note="which events reach you, and how"
       />
-      <div>
-        <div style={{ fontSize: 13, color: "var(--fg-1)" }}>{label}</div>
-        {description && (
-          <div style={{ fontSize: 11, color: "var(--fg-4)", marginTop: 2 }}>
-            {description}
-          </div>
-        )}
-      </div>
-    </label>
+
+      <DeckGrid cols={COLS_NOTIF} label="Notification preferences">
+        <DeckHead cells={["event", "r toast", "r native"]} />
+        {NOTIF_TYPES.map(({ key, label }) => {
+          const p = (prefs[key] ?? DEFAULT_PREFS[key]) as {
+            toast: boolean;
+            native: boolean;
+          };
+          return (
+            <DeckLine
+              key={key}
+              state={NOTIF_STATE[key] ?? "idle"}
+              cells={[
+                { v: label, cls: "sub" },
+                {
+                  v: (
+                    <input
+                      type="checkbox"
+                      checked={p.toast}
+                      onChange={() => toggle(key, "toast")}
+                      aria-label={`${label} toast`}
+                    />
+                  ),
+                  cls: "r",
+                },
+                {
+                  v: (
+                    <input
+                      type="checkbox"
+                      checked={p.native}
+                      onChange={() => toggle(key, "native")}
+                      aria-label={`${label} native`}
+                    />
+                  ),
+                  cls: "r",
+                },
+              ]}
+            />
+          );
+        })}
+      </DeckGrid>
+    </div>
   );
 }
+
+// ─── Terminal tab ─────────────────────────────────────────────────────────────
 
 function TerminalTab(): ReactElement {
   const qc = useQueryClient();
@@ -1141,336 +1354,126 @@ function TerminalTab(): ReactElement {
 
   return (
     <div>
-      <span className="d3-h" style={{ display: "block", marginBottom: 12 }}>
-        Terminal
-      </span>
+      <SectionHead
+        label="terminal"
+        note="shell, font, scrollback"
+        actions={
+          <>
+            {saved_ && <span className="dim">saved</span>}
+            <button
+              type="button"
+              className="dk-btn pri"
+              onClick={() => void saveAll()}
+            >
+              save
+            </button>
+          </>
+        }
+      />
 
-      <div className="d3-card" style={{ padding: 20, marginBottom: 12 }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--fg-3)",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            display: "block",
-            marginBottom: 14,
-          }}
-        >
-          Font
-        </span>
+      <FieldGrid>
+        <Field label="font family">
+          <span className="dk-field">
+            <input
+              value={form.font_family}
+              onChange={(e) =>
+                setForm({ ...form, font_family: e.target.value })
+              }
+              spellCheck={false}
+              aria-label="Terminal font family"
+            />
+          </span>
+        </Field>
+        <Field label="font size" hint="9–24">
+          <span className="dk-field">
+            <input
+              type="number"
+              min={9}
+              max={24}
+              value={form.font_size}
+              aria-label="Terminal font size"
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  font_size: Math.max(
+                    9,
+                    Math.min(24, parseInt(e.target.value, 10) || 13),
+                  ),
+                })
+              }
+            />
+          </span>
+        </Field>
+        <Field label="scrollback lines">
+          <span className="dk-field">
+            <input
+              type="number"
+              min={1000}
+              max={100000}
+              step={1000}
+              value={form.scrollback}
+              aria-label="Terminal scrollback lines"
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  scrollback: Math.max(
+                    1000,
+                    Math.min(100_000, parseInt(e.target.value, 10) || 5000),
+                  ),
+                })
+              }
+            />
+          </span>
+        </Field>
+        <Field label="screenshot ring hotkey">
+          <span className="dk-field">
+            <input
+              value={form.screenshot_hotkey}
+              onChange={(e) =>
+                setForm({ ...form, screenshot_hotkey: e.target.value })
+              }
+              placeholder={SCREENSHOT_HOTKEY_DEFAULT}
+              spellCheck={false}
+              aria-label="Screenshot ring hotkey"
+            />
+          </span>
+        </Field>
+      </FieldGrid>
 
-        <div style={{ marginBottom: 12 }}>
-          <label style={fieldLabel}>Font family</label>
-          <input
-            value={form.font_family}
-            onChange={(e) => setForm({ ...form, font_family: e.target.value })}
-            style={inputStyle}
-            spellCheck={false}
-          />
-        </div>
-
-        <div style={{ marginBottom: 4 }}>
-          <label style={fieldLabel}>Font size (9–24)</label>
-          <input
-            type="number"
-            min={9}
-            max={24}
-            value={form.font_size}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                font_size: Math.max(
-                  9,
-                  Math.min(24, parseInt(e.target.value, 10) || 13),
-                ),
-              })
-            }
-            style={{ ...inputStyle, width: 80 }}
-          />
-        </div>
+      <div className="dk-note sans">
+        The global shortcut that opens the screenshot ring (e.g. Ctrl+Shift+2).
+        It takes effect after saving; if the combo is already taken by another
+        app the previous binding is kept.
       </div>
+      {hotkeyError && <ErrorNote message={hotkeyError} />}
 
-      <div className="d3-card" style={{ padding: 20, marginBottom: 12 }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--fg-3)",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            display: "block",
-            marginBottom: 14,
-          }}
-        >
-          Session
-        </span>
-
-        <div style={{ marginBottom: 4 }}>
-          <label style={fieldLabel}>Scrollback lines</label>
-          <input
-            type="number"
-            min={1000}
-            max={100000}
-            step={1000}
-            value={form.scrollback}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                scrollback: Math.max(
-                  1000,
-                  Math.min(100_000, parseInt(e.target.value, 10) || 5000),
-                ),
-              })
-            }
-            style={{ ...inputStyle, width: 120 }}
-          />
-        </div>
-
-      </div>
-
-      <div className="d3-card" style={{ padding: 20, marginBottom: 12 }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--fg-3)",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            display: "block",
-            marginBottom: 14,
-          }}
-        >
-          Screenshot
-        </span>
-
-        <div style={{ marginBottom: 4 }}>
-          <label style={fieldLabel}>Ring hotkey</label>
-          <input
-            value={form.screenshot_hotkey}
-            onChange={(e) =>
-              setForm({ ...form, screenshot_hotkey: e.target.value })
-            }
-            placeholder={SCREENSHOT_HOTKEY_DEFAULT}
-            style={{ ...inputStyle, width: 220, fontFamily: "monospace" }}
-            spellCheck={false}
-          />
-          <div style={{ fontSize: 11, color: "var(--fg-4)", marginTop: 4 }}>
-            Global shortcut that opens the screenshot ring (e.g. Ctrl+Shift+2).
-            Takes effect after saving — requires the app to be running in the
-            foreground when the new binding is first used. If the combo is taken
-            by another app the previous binding is kept.
-          </div>
-          {hotkeyError && (
-            <div style={{ fontSize: 11, color: "#ef4444", marginTop: 4 }}>
-              {hotkeyError}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div
-        className="d3-card"
-        style={{ padding: "4px 20px 16px", marginBottom: 16 }}
+      <label
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "var(--u2)",
+          padding: "var(--u3) 0",
+          borderTop: "1px solid var(--line)",
+          cursor: "pointer",
+        }}
       >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--fg-3)",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            display: "block",
-            paddingTop: 16,
-            marginBottom: 4,
-          }}
-        >
-          Behaviour
-        </span>
-        <ToggleRow
-          label="Copy on select"
-          description="Automatically copy selected text to the clipboard."
+        <input
+          type="checkbox"
           checked={form.copy_on_select}
-          onChange={(v) => setForm({ ...form, copy_on_select: v })}
+          onChange={(e) => setForm({ ...form, copy_on_select: e.target.checked })}
         />
-      </div>
-
-      {saveError && (
-        <div style={{ fontSize: 12, color: "#ef4444", marginBottom: 10 }}>
-          {saveError}
-        </div>
-      )}
-
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button
-          type="button"
-          className="d3-btn d3-btn--primary"
-          onClick={() => void saveAll()}
-        >
-          Save
-        </button>
-        {saved_ && (
-          <span style={{ fontSize: 12, color: "var(--fg-3)" }}>Saved.</span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function NotificationsTab(): ReactElement {
-  const qc = useQueryClient();
-
-  const { data: prefSetting } = useQuery<
-    { value_json: string } | null,
-    SidecarError
-  >({
-    queryKey: NOTIF_QUERY_KEY,
-    queryFn: () =>
-      fetchSidecar<{ value_json: string } | null>(
-        "/api/v1/settings/notification_prefs_json",
-      ).catch(() => null),
-  });
-
-  const prefs: NotifPrefs = parseNotifPrefs(prefSetting?.value_json);
-
-  // Mutation with optimistic update so the checkbox responds immediately and
-  // rolls back if the server request fails.
-  const toggleMutation = useMutation<
-    unknown,
-    SidecarError,
-    { next: NotifPrefs },
-    { previous: { value_json: string } | null | undefined }
-  >({
-    mutationFn: ({ next }) =>
-      // Pass the plain object — upsertSetting will JSON.stringify it once.
-      upsertSetting("notification_prefs_json", next),
-    onMutate: async ({ next }) => {
-      // Cancel any in-flight refetch so it doesn't overwrite the optimistic value.
-      await qc.cancelQueries({ queryKey: NOTIF_QUERY_KEY });
-      const previous = qc.getQueryData<{ value_json: string } | null>(
-        NOTIF_QUERY_KEY,
-      );
-      // Optimistically write the new value into the cache.
-      qc.setQueryData<{ value_json: string }>(NOTIF_QUERY_KEY, {
-        value_json: JSON.stringify(next),
-      });
-      return { previous };
-    },
-    onError: (_err, _vars, ctx) => {
-      // Rollback to the snapshot we captured in onMutate.
-      qc.setQueryData(NOTIF_QUERY_KEY, ctx?.previous);
-    },
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: NOTIF_QUERY_KEY });
-    },
-  });
-
-  const toggle = useCallback(
-    (type: NotifType, channel: "toast" | "native") => {
-      const next: NotifPrefs = { ...DEFAULT_PREFS, ...prefs };
-      const existing = next[type] as
-        | { toast: boolean; native: boolean }
-        | undefined;
-      const current = existing ?? { toast: false, native: false };
-      next[type] = {
-        toast: current.toast,
-        native: current.native,
-        [channel]: !current[channel],
-      };
-      toggleMutation.mutate({ next });
-    },
-    [prefs, toggleMutation],
-  );
-
-  return (
-    <div style={{ padding: "20px 0" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--fg-1)",
-            marginBottom: 4,
-          }}
-        >
-          Notification Preferences
-        </div>
-        <div style={{ fontSize: 12, color: "var(--fg-3)" }}>
-          Configure which events show toasts or native macOS notifications.
-        </div>
-      </div>
-      <table
-        style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}
-      >
-        <thead>
-          <tr
-            style={{
-              color: "var(--fg-3)",
-              fontSize: 11,
-              textTransform: "uppercase",
-            }}
+        <span>
+          copy on select
+          <span
+            className="dim"
+            style={{ display: "block", fontSize: "var(--fs-xs)" }}
           >
-            <th
-              style={{ textAlign: "left", padding: "6px 0", fontWeight: 500 }}
-            >
-              Event
-            </th>
-            <th
-              style={{
-                textAlign: "center",
-                padding: "6px 12px",
-                fontWeight: 500,
-              }}
-            >
-              Toast
-            </th>
-            <th
-              style={{
-                textAlign: "center",
-                padding: "6px 12px",
-                fontWeight: 500,
-              }}
-            >
-              Native
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {NOTIF_TYPES.map(({ key, label }) => {
-            const p = (prefs[key] ?? DEFAULT_PREFS[key]) as {
-              toast: boolean;
-              native: boolean;
-            };
-            return (
-              <tr
-                key={key}
-                style={{
-                  borderTop: "1px solid var(--border-1)",
-                  color: "var(--fg-1)",
-                }}
-              >
-                <td style={{ padding: "10px 0" }}>{label}</td>
-                <td style={{ textAlign: "center", padding: "10px 12px" }}>
-                  <input
-                    type="checkbox"
-                    checked={p.toast}
-                    onChange={() => toggle(key, "toast")}
-                    aria-label={`${label} toast`}
-                  />
-                </td>
-                <td style={{ textAlign: "center", padding: "10px 12px" }}>
-                  <input
-                    type="checkbox"
-                    checked={p.native}
-                    onChange={() => toggle(key, "native")}
-                    aria-label={`${label} native`}
-                  />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            Automatically copy selected text to the clipboard.
+          </span>
+        </span>
+      </label>
+
+      {saveError && <ErrorNote message={saveError} />}
     </div>
   );
 }
