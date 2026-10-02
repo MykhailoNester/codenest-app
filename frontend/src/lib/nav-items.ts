@@ -15,8 +15,6 @@
 export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
   attention: true,
   work: true,
-  parallel: true,
-  preview: true,
   budgets: true,
   schedules: true,
   // ON by default (#171). The Hooks page is the only surface that can tell a
@@ -24,15 +22,6 @@ export const FEATURE_DEFAULTS: Readonly<Record<string, boolean>> = {
   // install from before #172 grades "ok" on verify while silently throwing
   // those answers away, and a page shipped off cannot say so.
   hooks: true,
-  // ON by default (#178). Mirrors `_FEATURES_DEFAULT`.
-  latency: true,
-  snippets: false,
-  gallery: false,
-  feed: false,
-  mcp: false,
-  integrations: false,
-  plugins: false,
-  sync: false,
 } as const;
 
 /**
@@ -57,7 +46,7 @@ export const FEATURE_CACHE_EVENT = "codenest:enabled-features";
 // FEATURES — global hard gate.
 // Maps a feature slug (matches KNOWN_FEATURES in settings_service.py) to the
 // set of nav slugs it controls.  Nav slugs NOT listed here belong to no gated
-// feature and are NEVER disableable (settings, mission, projects, team, docs).
+// feature and are NEVER disableable (settings, mission, projects, team).
 //
 // `mission` is on that never-disableable list for the same reason `dashboard`
 // (the slug it replaces) was: it owns `/`, so gating it would let the Features
@@ -83,24 +72,19 @@ export const FEATURE_CACHE_EVENT = "codenest:enabled-features";
 // re-add it here — a slug with no page behind it is a toggle that does
 // nothing.
 //
+// #274 retired ten more the same way: `parallel`, `preview`, `feed`,
+// `latency`, `sync`, `snippets`, `gallery`, `mcp`, `integrations` and
+// `plugins`. Their pages are deleted, so each is a retired slug on the sidecar
+// side and absent here. Do not re-add them.
+//
 // TODO: when the workflow_items and tasks tables are merged into one,
 // remove `inbox` from the `work` slug set and drop it from KNOWN_NAV_SLUGS.
 export const FEATURES: Readonly<Record<string, readonly string[]>> = {
   attention: ["attention"],
   work: ["tasks", "inbox"],
   schedules: ["schedules"],
-  parallel: ["parallel"],
-  preview: ["preview"],
-  feed: ["feed"],
   budgets: ["budgets"],
   hooks: ["hooks"],
-  latency: ["latency"],
-  sync: ["sync"],
-  snippets: ["library"],
-  gallery: ["marketplace"],
-  mcp: ["mcp"],
-  integrations: ["integrations"],
-  plugins: ["plugins"],
 } as const;
 
 /**
@@ -112,18 +96,8 @@ export const KNOWN_FEATURES_ORDERED: readonly string[] = [
   "attention",
   "work",
   "schedules",
-  "parallel",
-  "preview",
-  "feed",
   "budgets",
   "hooks",
-  "latency",
-  "sync",
-  "snippets",
-  "gallery",
-  "mcp",
-  "integrations",
-  "plugins",
 ] as const;
 
 /**
@@ -143,12 +117,13 @@ export const TERMINAL_ROUTE = "/terminal";
 // open/closed overrides by group id and falls back to `defaultOpen` for any id
 // it does not recognise, so a user's stored `{"workspace": false}` is simply
 // ignored from here on.
+// `knowledge` and `tools` are gone with #274: every item in them (Knowledge,
+// Snippets, Gallery, Feed, Preview) was dropped, and a group that can never
+// hold a row is config the rail only has to skip.
 export const NAV_GROUPS = [
   { id: "attention", label: "Attention", defaultOpen: true },
   { id: "record", label: "Record", defaultOpen: true },
   { id: "agents", label: "Agents", defaultOpen: false },
-  { id: "knowledge", label: "Knowledge", defaultOpen: false },
-  { id: "tools", label: "Tools", defaultOpen: false },
   { id: "system", label: "System", defaultOpen: false },
 ] as const;
 
@@ -224,8 +199,6 @@ export const NAV_ITEMS = [
     path: "/team",
     group: "agents",
   },
-  // parallel intentionally omitted from NAV_ITEMS.
-  // The route, page, and service are intact for future repurposing.
   {
     slug: "schedules",
     label: "Schedules",
@@ -253,59 +226,7 @@ export const NAV_ITEMS = [
     path: TERMINAL_ROUTE,
     group: "agents",
   },
-  // Knowledge — repositories of stuff
-  {
-    slug: "docs",
-    label: "Knowledge",
-    icon: "docs",
-    path: "/docs",
-    group: "knowledge",
-  },
-  {
-    slug: "library",
-    label: "Snippets",
-    icon: "library",
-    path: "/library",
-    group: "knowledge",
-  },
-  {
-    slug: "marketplace",
-    label: "Gallery",
-    icon: "marketplace",
-    path: "/marketplace",
-    group: "knowledge",
-  },
-  {
-    slug: "feed",
-    label: "Feed",
-    icon: "feed",
-    path: "/feed",
-    group: "knowledge",
-  },
-  // Tools
-  {
-    slug: "preview",
-    label: "Preview",
-    icon: "preview",
-    path: "/preview",
-    group: "tools",
-  },
   // System — configuration & observability
-  { slug: "mcp", label: "MCP", icon: "mcp", path: "/mcp", group: "system" },
-  {
-    slug: "integrations",
-    label: "Integrations",
-    icon: "integration",
-    path: "/integrations",
-    group: "system",
-  },
-  {
-    slug: "plugins",
-    label: "Plugins",
-    icon: "plugin",
-    path: "/plugins",
-    group: "system",
-  },
   {
     // #171. Icon `zap` rather than a newly invented `hook` key: `Icon` renders
     // `null` for a name it does not know, so a made-up key would silently draw
@@ -316,16 +237,6 @@ export const NAV_ITEMS = [
     path: "/hooks",
     group: "system",
   },
-  {
-    // #178. Icon `sprint` rather than a newly invented key: `Icon` renders
-    // `null` for a name it does not know, and `sprint` is unused elsewhere.
-    slug: "latency",
-    label: "Latency",
-    icon: "sprint",
-    path: "/latency",
-    group: "system",
-  },
-  { slug: "sync", label: "Sync", icon: "sync", path: "/sync", group: "system" },
   {
     slug: "budgets",
     label: "Budgets",

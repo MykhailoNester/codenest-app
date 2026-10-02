@@ -152,15 +152,6 @@ for (const noop of [
   "emit_stop_agent_pane_to_terminals",
   "open_command_center_session",
   "open_project_session",
-  "open_screenshot_ring",
-  "close_screenshot_ring",
-  "capture_screenshot",
-  "ring_capture",
-  "preview_open",
-  "preview_close",
-  "preview_navigate",
-  "preview_show",
-  "preview_set_bounds",
 ]) {
   COMMANDS[noop] = () => null;
 }
@@ -176,9 +167,6 @@ function mockInvoke(cmd: string, args: Record<string, unknown> = {}): Promise<un
   if (cmd === "plugin:event|unlisten") {
     listeners.get(String(args.event))?.delete(Number(args.eventId));
     return Promise.resolve(null);
-  }
-  if (cmd.startsWith("plugin:global-shortcut|")) {
-    return Promise.resolve(cmd.endsWith("isRegistered") ? false : null);
   }
   if (cmd.startsWith("plugin:dialog|")) return Promise.resolve(null);
   if (cmd.startsWith("plugin:")) return Promise.resolve(null);

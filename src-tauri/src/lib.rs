@@ -10,18 +10,12 @@ mod tray;
 mod window;
 mod workspace;
 
-use commands::browser::{
-    preview_close, preview_navigate, preview_open, preview_set_bounds, preview_show,
-};
 use commands::docs::{
     open_external_url, open_in_editor, open_path, read_file_text, reveal_in_finder,
 };
 use commands::fs_nav::{fs_build_file_index, fs_list_dir};
 use commands::git::{get_git_pane_status, get_recent_commits, git_status_for_roots};
 use commands::hooks::run_hook_probe;
-use commands::screenshot::{
-    capture_screenshot, close_screenshot_ring, open_screenshot_ring, ring_capture,
-};
 use fswatch::{fs_watch_set_roots, fs_watch_status};
 use window::clamp_window_to_monitor;
 
@@ -374,8 +368,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_drag::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
@@ -559,12 +551,6 @@ pub fn run() {
                 // the frontend; closing it must NOT take down the sidecar or
                 // the PTY sessions running across both windows.
                 if window.label() == "main" {
-                    // Close the preview child webview before the window
-                    // animates away so it doesn't float above the close
-                    // animation.
-                    if let Some(preview) = window.app_handle().get_webview("preview") {
-                        let _ = preview.close();
-                    }
                     // Stop any scheduled-run `claude` jobs still executing BEFORE
                     // the sidecar goes down, so they don't keep running orphaned
                     // (and can still report their terminal status to the live
@@ -608,11 +594,6 @@ pub fn run() {
             emit_native_notification,
             request_notification_permission,
             list_live_panes,
-            preview_open,
-            preview_set_bounds,
-            preview_navigate,
-            preview_show,
-            preview_close,
             workspace::get_workspace_path,
             workspace::get_org_agents_path,
             workspace::get_app_data_path,
@@ -634,10 +615,6 @@ pub fn run() {
             fs_watch_set_roots,
             fs_watch_status,
             paths_exist,
-            capture_screenshot,
-            open_screenshot_ring,
-            close_screenshot_ring,
-            ring_capture,
             get_schedule_run_pty_id,
             run_hook_probe,
         ])

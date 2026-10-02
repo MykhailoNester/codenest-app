@@ -8,8 +8,27 @@ import { FEATURE_DEFAULTS, KNOWN_FEATURES_ORDERED, FEATURES } from "../nav-items
 // it gated is folded into Needs You and the bell in the chrome was never
 // gated by it, so a toggle for it would switch nothing on. The sidecar half is
 // `tests/sidecar/test_composer_feature_toggle.py`.
+//
+// #274 retired ten more: the pages `parallel`, `preview`, `feed`, `latency`,
+// `sync`, `snippets`, `gallery`, `mcp`, `integrations` and `plugins` gated are
+// deleted, so each is accepted on write (an existing install still PUTs its
+// stored map) and never echoed back.
 describe("nav-items — retired feature slugs", () => {
-  const retired = ["composer", "explorer", "notifications"] as const;
+  const retired = [
+    "composer",
+    "explorer",
+    "notifications",
+    "parallel",
+    "preview",
+    "feed",
+    "latency",
+    "sync",
+    "snippets",
+    "gallery",
+    "mcp",
+    "integrations",
+    "plugins",
+  ] as const;
 
   it("does not carry them in FEATURE_DEFAULTS", () => {
     for (const slug of retired) {
