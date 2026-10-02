@@ -48,7 +48,6 @@ import { AttentionPage } from "./pages/attention";
 import { DeckPreviewPage } from "./pages/deck-preview";
 import { TasksPage } from "./pages/tasks";
 import { TaskDetailPage } from "./pages/task-detail";
-import { InProgressPage } from "./pages/in-progress";
 // InboxPage is kept in the codebase for a future workflow_items/tasks table merge.
 // The /inbox route now redirects to /tasks; InboxPage is no longer mounted.
 // TODO: remove InboxPage and its import once workflow_items is merged into tasks.
@@ -466,7 +465,12 @@ function AppInner(): ReactElement {
             </FeatureRoute>
           }
         />
-        <Route path="/in-progress" element={<InProgressPage />} />
+        {/* #272 — the In Progress page is a filter on Work plus a group on the
+            deck home. The path stays as a redirect, like /inbox → /tasks. */}
+        <Route
+          path="/in-progress"
+          element={<Navigate to="/tasks?status=in-progress" replace />}
+        />
         {/* /inbox redirects to /tasks. The `inbox` slug and InboxPage are kept for
               redirect compat — existing bookmarks and rows that list `inbox` will
               gracefully land on the Work board.

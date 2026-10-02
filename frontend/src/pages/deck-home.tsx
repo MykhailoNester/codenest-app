@@ -58,6 +58,7 @@ import {
   type ActivityEntry,
   type AgentSession,
   type AttentionItem,
+  type Task,
 } from "../lib/api";
 import {
   sessionFromDelta,
@@ -302,6 +303,28 @@ function activityCells(e: ActivityEntry) {
 
 const CHANGED_HEAD = ["", "what", "who", "where", "r when", "r "];
 
+/**
+ * What is being worked on right now (#272). `pages/in-progress.tsx` was a whole
+ * surface for this one list; the dashboard payload already carries it, so it is
+ * a group here and a filter on Work — `/tasks?status=in-progress`, which that
+ * page's project and assignee filters are already part of.
+ *
+ * The started date is the one column Work's task line does not carry, which is
+ * why it rides here. The task detail page still shows it too.
+ */
+const PROGRESS_HEAD = ["", "what", "where", "who", "r started", "r priority"];
+
+function progressCells(t: Task) {
+  return [
+    { v: `#${t.id}`, cls: "id" },
+    { v: t.title, cls: "sub", title: t.title },
+    t.project_name ?? "unassigned",
+    t.assignee_name ?? "—",
+    { v: t.started_date ?? DASH, cls: "r" },
+    { v: t.priority, cls: "r" },
+  ];
+}
+
 export function DeckHomePage(): ReactElement {
   const navigate = useNavigate();
   const lastLooked = useLastLooked();
@@ -334,6 +357,7 @@ export function DeckHomePage(): ReactElement {
   const live = sessions.filter((s) => s.status !== "ended");
   const running = live.filter((s) => s.status === "active");
 
+  const inProgress = dash?.in_progress_tasks ?? [];
   const activity = (dash?.recent_activity ?? []).slice(0, CHANGED_LIMIT);
   // A first visit has no mark, so nothing is "new" — every row goes below the
   // line and the divider is not drawn. Claiming ten changes happened while you
@@ -438,6 +462,39 @@ export function DeckHomePage(): ReactElement {
                 state={SESSION_STATE[s.status] ?? "idle"}
                 cells={sessionCells(s)}
                 onOpen={openSessions}
+              />
+            ))}
+          </DeckGrid>
+        )}
+      </DeckGroup>
+
+      <DeckGroup
+        label="in progress"
+        count={dash === undefined ? DASH : inProgress.length}
+        state="run"
+        actions={
+          <button
+            type="button"
+            className="dk-btn bare"
+            onClick={() => void navigate("/tasks?status=in-progress")}
+          >
+            open in work
+          </button>
+        }
+      >
+        {dash === undefined ? (
+          <div className="dk-note">Loading&hellip;</div>
+        ) : inProgress.length === 0 ? (
+          <div className="dk-note sans">Nothing is being worked on.</div>
+        ) : (
+          <DeckGrid cols={DECK_COLS.tasks} label="In progress">
+            <DeckHead cells={PROGRESS_HEAD} />
+            {inProgress.map((t) => (
+              <DeckLine
+                key={t.id}
+                state="run"
+                cells={progressCells(t)}
+                onOpen={() => void navigate(`/tasks/${t.id}`)}
               />
             ))}
           </DeckGrid>

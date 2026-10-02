@@ -50,7 +50,7 @@ const KNOWN_ICONS = new Set([
 
 const EXTRA_PATHS = [
   "/terminal?view=runs",
-  "/in-progress",
+  "/tasks?status=in-progress",
   "/editor",
   "/parallel",
   "/settings/workspace",
