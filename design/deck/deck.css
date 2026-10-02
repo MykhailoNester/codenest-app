@@ -187,7 +187,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 
 /* An action cluster. Buttons with no gap read as one word: the Activity and
    Comments tabs rendered as "ActivityComments" before this existed. */
-.dk-actions { display: inline-flex; align-items: center; gap: var(--u2); flex-wrap: wrap; }
+.dk-actions { display: inline-flex; min-width: 0; align-items: center; gap: var(--u2); flex-wrap: wrap; }
 .dk-actions .sep { width: 1px; height: 14px; background: var(--line-2); margin: 0 var(--u); flex: none; }
 .dk-actions.end { justify-content: flex-end; }
 
@@ -210,7 +210,13 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 /* A bare <select> inside a row or a filter — the one control a line carries,
    for moving a task without leaving the list. Distinct from `.dk-sel`, which
    wraps a select in composer chrome; these collided on merge. */
-.dk-rowsel { height: 22px; padding: 0 var(--u); border: 1px solid var(--line-2); border-radius: 3px;
+/* `max-width` is load-bearing: a native select sizes itself to its widest
+   option, and these pickers are filled with user text — a blocker list on the
+   task detail grew one 1182px wide and gave the whole page a horizontal
+   scrollbar. `.dk-actions` gets `min-width: 0` for the same reason: a flex
+   item refuses to shrink below its content without it. */
+.dk-rowsel { height: 22px; max-width: 100%; padding: 0 var(--u);
+  border: 1px solid var(--line-2); border-radius: 3px;
   background: var(--bg-1); color: var(--fg-2); font: inherit; font-size: var(--fs-s); }
 .dk-rowsel:hover { border-color: var(--fg-4); color: var(--fg); }
 
