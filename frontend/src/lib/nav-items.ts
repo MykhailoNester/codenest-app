@@ -58,8 +58,7 @@ export const FEATURE_CACHE_EVENT = "codenest:enabled-features";
 // FEATURES — global hard gate.
 // Maps a feature slug (matches KNOWN_FEATURES in settings_service.py) to the
 // set of nav slugs it controls.  Nav slugs NOT listed here belong to no gated
-// feature and are NEVER disableable (command, settings, mission, projects,
-// team, docs).
+// feature and are NEVER disableable (settings, mission, projects, team, docs).
 //
 // `mission` is on that never-disableable list for the same reason `dashboard`
 // (the slug it replaces) was: it owns `/`, so gating it would let the Features
@@ -214,17 +213,11 @@ export const NAV_ITEMS = [
   // page behind it is worse than no entry.
 
   // Agents — the places you act
-  {
-    // Command keeps its place in the rail. The design's After sketch omits it,
-    // but removing a working page from the nav is not the "reordering, which
-    // costs nothing" that section describes — so it moves into the group that
-    // matches what it is (the agent command surface) rather than disappearing.
-    slug: "command",
-    label: "Command",
-    icon: "command",
-    path: "/command",
-    group: "agents",
-  },
+  // `command` is gone (#269). The Command Center was a second session surface —
+  // it listed the runs and then navigated to Sessions to act on one — so its
+  // list, filters, Focus/Stop, activity feed, reconcile and constellation moved
+  // onto the Sessions page's `runs` view. `/command` survives in the router as
+  // a redirect only, for links already baked into notifications and search.
   {
     slug: "team",
     label: "Agents",

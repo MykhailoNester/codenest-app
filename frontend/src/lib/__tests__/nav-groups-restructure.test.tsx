@@ -75,8 +75,10 @@ describe("nav restructure (#165) — registry shape", () => {
     // The restructure is a reordering. Losing a page from the rail would be a
     // silent feature removal, so the count is pinned. 19 → 20 with #162's
     // `attention` row, which is the one addition the restructure anticipated;
-    // 20 → 21 with #171's `hooks` row; 21 → 22 with #178's `latency` row.
-    expect(NAV_ITEMS).toHaveLength(22);
+    // 20 → 21 with #171's `hooks` row; 21 → 22 with #178's `latency` row;
+    // 22 → 21 with #269, which folds Command into the Sessions row rather than
+    // removing the surface — `/command` still resolves, as a redirect.
+    expect(NAV_ITEMS).toHaveLength(21);
   });
 
   it("mission owns / and replaces the dashboard slug", () => {

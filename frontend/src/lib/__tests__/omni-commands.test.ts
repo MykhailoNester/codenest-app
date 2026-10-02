@@ -49,6 +49,7 @@ const KNOWN_ICONS = new Set([
 ]);
 
 const EXTRA_PATHS = [
+  "/terminal?view=runs",
   "/in-progress",
   "/editor",
   "/parallel",
@@ -57,7 +58,8 @@ const EXTRA_PATHS = [
 
 describe("OMNI_COMMANDS shape", () => {
   // 26 → 27 with #162's `attention` slug; 27 → 28 with #171's `hooks` slug;
-  // 28 → 29 with #178's `latency` slug.
+  // 28 → 29 with #178's `latency` slug. #269 removed the `command` nav row and
+  // added `extra:/terminal?view=runs` in its place, so the count is unchanged.
   // The registry derives its nav-entries from NAV_ITEMS, so this number is the
   // guard that a new nav row was a decision rather than an accident.
   it("has exactly 29 entries", () => {
@@ -126,10 +128,18 @@ describe("buildCommandRows — bare `/` surfaces the named actions", () => {
     ]);
   });
 
-  it("contains nav:command and nav:tasks", () => {
-    const ids = buildCommandRows("", FEATURE_DEFAULTS).map((r) => r.id);
-    expect(ids).toContain("nav:command");
-    expect(ids).toContain("nav:tasks");
+  it("contains the sessions rows and nav:tasks", () => {
+    // Was `nav:command`. #269 folded the Command Center into Sessions, so the
+    // rows that reach its list are `nav:terminal` and the direct
+    // `extra:/terminal?view=runs`. Dropping Command from the rail moves
+    // Sessions to 11th, so the un-typed top ten no longer reaches it: the
+    // limit is raised for that half of the assertion rather than the
+    // assertion being dropped. `nav:tasks` still has to be in the top ten.
+    const top = buildCommandRows("", FEATURE_DEFAULTS).map((r) => r.id);
+    expect(top).toContain("nav:tasks");
+    const all = buildCommandRows("", FEATURE_DEFAULTS, 100).map((r) => r.id);
+    expect(all).toContain("nav:terminal");
+    expect(all).toContain("extra:/terminal?view=runs");
   });
 
   it("does not contain nav:library (snippets: false by default)", () => {
@@ -177,7 +187,7 @@ describe("buildCommandRows — gating", () => {
   });
 
   // Property pinned: a disabled feature can never yield a command that
-  // bounces off FeatureRoute to /command.
+  // bounces off FeatureRoute to the deck home.
 });
 
 describe("buildCommandRows — navigate-path integrity", () => {

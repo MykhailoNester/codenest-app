@@ -312,7 +312,12 @@ export function DeckHomePage(): ReactElement {
   const { sessions, ready: sessionsReady } = useLiveSessions();
 
   const openQueue = useCallback(() => void navigate("/attention"), [navigate]);
-  const openSessions = useCallback(() => void navigate("/command"), [navigate]);
+  // The runs view of the Sessions surface — the Command Center's list, on the
+  // page that owns sessions (#269).
+  const openSessions = useCallback(
+    () => void navigate("/terminal?view=runs"),
+    [navigate],
+  );
 
   const counts = queue?.counts;
   const items = queue?.items ?? [];

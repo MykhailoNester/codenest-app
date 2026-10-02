@@ -54,7 +54,8 @@ are visible by default; individual features can be toggled under
 
 **Workspace**
 
-- **Command** — the Command Center: launch and supervise agent runs.
+- **Sessions** — two halves of one surface: **panes**, where a session runs, and
+  **runs**, where every run is listed, filtered, focused, stopped and inspected.
 - **Overview** — a dashboard of current activity and status.
 - **Projects** — the repositories and workspaces your agents work in.
 - **Work Board** — a kanban board of tasks and workflow items.
@@ -95,14 +96,15 @@ are provisional and may change:
 
 ## Screenshots
 
-**Command** — the Command Center: a live constellation of your projects and the
-agents attached to them, session counters, and a running activity feed.
+**Sessions → runs** — every agent run in one list, with its provider, project,
+model, current tool, elapsed time and cost, plus a running activity feed. Focus
+jumps straight to the pane the run is in; it is the same page.
 
 <p align="center">
-  <img src="docs/media/command-center.png" alt="Codenest Command Center — live constellation, session counters, running agents, and live activity feed" width="860">
+  <img src="docs/media/command-center.png" alt="Codenest run supervision — session counters, running agents, and live activity feed" width="860">
 </p>
 
-Expand the constellation to full screen to pull agents and projects apart, pin
+Open the constellation full screen to pull agents and projects apart, pin
 nodes where you want them, and scrub across the last hour, day, or week.
 
 <p align="center">

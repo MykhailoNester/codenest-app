@@ -41,7 +41,6 @@ import { CatalogFeedHost } from "./components/catalog-feed-host";
 import { CommandPalette } from "./components/command-palette";
 import { StartupSplash } from "./components/startup-splash";
 import { ToastHost } from "./components/toast-host";
-import { CommandCenterPage } from "./pages/command-center";
 import { DashboardPage } from "./pages/dashboard";
 import { DeckHomePage } from "./pages/deck-home";
 import { AttentionPage } from "./pages/attention";
@@ -107,7 +106,7 @@ function deckInitialEntry(): string {
 
 /**
  * Wraps a route's element.  When the feature that gates `navSlug` is
- * disabled, redirects to `/command`.
+ * disabled, redirects to `/` (the Deck home).
  *
  * Uses `useEnabledFeatures()` which is always complete (live > cache >
  * FEATURE_DEFAULTS), so the gate is deterministic from the very first
@@ -129,7 +128,7 @@ function FeatureRoute({
   for (const [feature, slugs] of Object.entries(FEATURES)) {
     if ((slugs as readonly string[]).includes(navSlug)) {
       if (resolvedFeatures[feature] === false) {
-        return <Navigate to="/command" replace />;
+        return <Navigate to="/" replace />;
       }
     }
   }
@@ -409,7 +408,13 @@ function AppInner(): ReactElement {
     <OnboardingGate>
       <Routes>
         <Route path="/onboarding" element={<OnboardingPage />} />
-        <Route path="/command" element={<CommandCenterPage />} />
+        {/* #269 — the Command Center folded into Sessions. The path stays as a
+            redirect: it is baked into notification routes, search results and
+            the onboarding hand-off, the same way /inbox redirects to /tasks. */}
+        <Route
+          path="/command"
+          element={<Navigate to="/terminal?view=runs" replace />}
+        />
         {/* #282 — the Deck home screen. Mission Control keeps a route of its
             own until the migration is signed off, so the two can be compared in
             one window the way /deck let the shell be. */}
@@ -541,7 +546,7 @@ function AppInner(): ReactElement {
         <Route path={TERMINAL_ROUTE} element={<TerminalPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/workspace" element={<WorkspaceSettingsPage />} />
-        <Route path="*" element={<Navigate to="/command" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <CommandPalette open={paletteOpen} onClose={closePalette} />
       <ToastHost />

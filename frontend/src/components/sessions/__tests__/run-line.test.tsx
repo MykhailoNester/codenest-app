@@ -1,4 +1,9 @@
-// Coverage for the AGENTS panel's row actions.
+// Coverage for the runs list's row actions (#269 — was the Command Center's
+// AGENTS panel, now the Sessions surface's `runs` view).
+//
+// The labels are lowercase now because the row is a Deck line; the matchers
+// below are case-insensitive for that reason alone. What Focus and Stop *do*
+// is asserted exactly as before.
 //
 // A run row does not record which *kind* of pane produced it, and the two kinds
 // are killed by different commands: a provider pane is a PTY (`close_terminal`),
@@ -9,7 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { AgentRunRow } from "../agent-run-row";
+import { RunLine } from "../run-line";
 import type { AgentRun } from "../../../lib/api";
 import { useTerminalStore, type Tab } from "../../../stores/terminal-store";
 
@@ -93,18 +98,18 @@ function noop(): void {
   /* row callback stub */
 }
 
-describe("AgentRunRow actions", () => {
+describe("the runs list row actions", () => {
   it("shows Focus and Stop for a running pane it owns", () => {
-    render(<AgentRunRow run={makeRun()} onFocus={noop} />);
+    render(<RunLine run={makeRun()} onFocus={noop} />);
 
-    expect(screen.getByText("Focus")).toBeTruthy();
-    expect(screen.getByText("Stop")).toBeTruthy();
+    expect(screen.getByText(/^focus$/i)).toBeTruthy();
+    expect(screen.getByText(/^stop$/i)).toBeTruthy();
   });
 
   it("Stop kills both pane kinds, since the row cannot tell them apart", () => {
-    render(<AgentRunRow run={makeRun()} onFocus={noop} />);
+    render(<RunLine run={makeRun()} onFocus={noop} />);
 
-    fireEvent.click(screen.getByText("Stop"));
+    fireEvent.click(screen.getByText(/^stop$/i));
 
     // Both are idempotent for an id they do not know, and the two id namespaces
     // never overlap — so issuing both is what makes one button correct for a
@@ -115,18 +120,18 @@ describe("AgentRunRow actions", () => {
 
   it("Stop on a popout run reaches the detached window, not this store", () => {
     render(
-      <AgentRunRow run={makeRun({ target: "popout" })} onFocus={noop} />,
+      <RunLine run={makeRun({ target: "popout" })} onFocus={noop} />,
     );
 
-    fireEvent.click(screen.getByText("Stop"));
+    fireEvent.click(screen.getByText(/^stop$/i));
 
     expect(emitStopAgentPaneToTerminalsMock).toHaveBeenCalledWith("leaf-1");
   });
 
   it("Stop on an embedded run does not emit to the detached window", () => {
-    render(<AgentRunRow run={makeRun()} onFocus={noop} />);
+    render(<RunLine run={makeRun()} onFocus={noop} />);
 
-    fireEvent.click(screen.getByText("Stop"));
+    fireEvent.click(screen.getByText(/^stop$/i));
 
     expect(emitStopAgentPaneToTerminalsMock).not.toHaveBeenCalled();
   });
@@ -134,31 +139,31 @@ describe("AgentRunRow actions", () => {
   it("Focus hands the whole run up so the parent can branch on target", () => {
     const onFocus = vi.fn();
     const run = makeRun({ target: "popout" });
-    render(<AgentRunRow run={run} onFocus={onFocus} />);
+    render(<RunLine run={run} onFocus={onFocus} />);
 
-    fireEvent.click(screen.getByText("Focus"));
+    fireEvent.click(screen.getByText(/^focus$/i));
 
     expect(onFocus).toHaveBeenCalledWith(run);
   });
 
   it("offers no actions for an ended run", () => {
-    render(<AgentRunRow run={makeRun({ status: "ended" })} onFocus={noop} />);
+    render(<RunLine run={makeRun({ status: "ended" })} onFocus={noop} />);
 
-    expect(screen.queryByText("Focus")).toBeNull();
-    expect(screen.queryByText("Stop")).toBeNull();
+    expect(screen.queryByText(/^focus$/i)).toBeNull();
+    expect(screen.queryByText(/^stop$/i)).toBeNull();
   });
 
   it("offers no actions for an observe-only row", () => {
     // Hook-driven: Claude Code ran outside the dashboard, so there is no pane
     // to focus and no child this app may kill.
     render(
-      <AgentRunRow
+      <RunLine
         run={makeRun({ row_kind: "observe", pane_id: null })}
         onFocus={noop}
       />,
     );
 
-    expect(screen.queryByText("Focus")).toBeNull();
-    expect(screen.queryByText("Stop")).toBeNull();
+    expect(screen.queryByText(/^focus$/i)).toBeNull();
+    expect(screen.queryByText(/^stop$/i)).toBeNull();
   });
 });

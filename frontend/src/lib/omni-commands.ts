@@ -102,6 +102,18 @@ const EXTRAS: readonly OmniCommand[] = [
     target: { kind: "navigate", path: "/in-progress" },
   },
   {
+    // #269 — the Command Center's list is the Sessions surface's `runs` view.
+    // The rail reaches it through Sessions; the palette keeps a direct row
+    // because "command" is what people have been typing for it.
+    id: "extra:/terminal?view=runs",
+    title: "Agent Runs",
+    hint: "/terminal?view=runs",
+    icon: "command",
+    keywords: ["runs", "agents", "command", "center", "sessions"],
+    navSlug: null,
+    target: { kind: "navigate", path: "/terminal?view=runs" },
+  },
+  {
     id: "extra:/editor",
     title: "Markdown Editor",
     hint: "/editor",

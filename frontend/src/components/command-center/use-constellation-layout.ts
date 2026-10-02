@@ -17,6 +17,13 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type { AgentSession, ProfileOut } from "../../lib/api";
 import { profileColor } from "../../lib/profile-utils";
 
+/**
+ * The time window a constellation is drawn for. Lived in `constellation.tsx`
+ * with the embedded card; that card went with the Command Center (#269) and
+ * the type belongs with the layout that honours it.
+ */
+export type ConstellationWindow = "live" | "1h" | "24h" | "7d";
+
 // ── World constants (same as prototype) ──────────────────────────────────────
 const RING_R = 235;
 const ALPHA_DECAY = 0.022;
@@ -422,7 +429,7 @@ function isVisible(nd: ConstellationNode): boolean {
 
 function applyVisibility(
   layout: ConstellationLayout,
-  windowMode: "live" | "1h" | "24h" | "7d",
+  windowMode: ConstellationWindow,
   now: number = Date.now(),
 ): void {
   const cutoffMap: Record<string, number> = {
@@ -484,7 +491,7 @@ export interface UseConstellationLayoutResult {
 export function useConstellationLayout(
   sessions: AgentSession[],
   profiles: ProfileOut[],
-  windowMode: "live" | "1h" | "24h" | "7d",
+  windowMode: ConstellationWindow,
 ): UseConstellationLayoutResult {
   const layoutRef = useRef<ConstellationLayout>(seedLayout(sessions, profiles));
 
