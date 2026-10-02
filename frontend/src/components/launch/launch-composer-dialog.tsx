@@ -55,6 +55,13 @@ export interface LaunchComposerDialogProps {
   source?: LaunchSource | null;
   /** The fetched seed; null when a source was given but the fetch failed. */
   seed?: LaunchSeed | null;
+  /**
+   * Project to preselect when there is no seed to take one from (#265 — an
+   * attention item that names a project but no ticket). Ignored once a seed
+   * is present: the seed resolved the project from the ticket itself, which is
+   * strictly better information.
+   */
+  initialProjectId?: number | null;
 }
 
 /** The first agent pane in a composed plan, or `null` for an all-shell
@@ -75,6 +82,7 @@ export function LaunchComposerDialog({
   onClose,
   source = null,
   seed = null,
+  initialProjectId = null,
 }: LaunchComposerDialogProps): ReactElement | null {
   const navigate = useNavigate();
   const { data: projects = [] } = useProjects();
@@ -291,7 +299,7 @@ export function LaunchComposerDialog({
       }
       sections={seed?.sections ?? []}
       initialPrompt={seed?.prompt ?? ""}
-      initialProjectId={seed?.project?.id ?? null}
+      initialProjectId={seed?.project?.id ?? initialProjectId}
       initialTarget={initialTarget}
       initialProfileId={initialProfileId}
       initialLayout={seed ? seedPanesFromGrid(seed) : null}
