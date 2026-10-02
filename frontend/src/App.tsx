@@ -403,6 +403,13 @@ function AppInner(): ReactElement {
             bookmark and an older search result still resolve; `:sessionId` has
             to be re-read inside the element to carry it over. */}
         <Route path="/sessions/:sessionId" element={<SessionRedirect />} />
+        {/* #274 — the Knowledge page is gone, but `/api/v1/documents` is not:
+            the bundled Orion org-agent still registers deliverables through it,
+            so `search_service` keeps returning `doc` hits and those route to
+            `/docs?id=`. Nothing can display one any more, so the path lands on
+            the Deck home rather than silently falling through `*`. Re-point it
+            the day a document viewer comes back. */}
+        <Route path="/docs" element={<Navigate to="/" replace />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/team/:name" element={<AgentDetailPage />} />
         <Route
