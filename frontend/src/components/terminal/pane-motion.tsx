@@ -1,6 +1,7 @@
 /**
- * The session-state strip's two motion cues, driven by the Web Animations API
- * rather than by `@keyframes`.
+ * The agent pane's motion cues — the session strip's spinner and thinking dot,
+ * and the transcript's streaming dot — driven by the Web Animations API rather
+ * than by `@keyframes`.
  *
  * Keyframes are the one thing neither an inline style nor a Deck class can
  * express — Deck has no animation primitive at all — so the alternative was to
@@ -17,11 +18,17 @@
 
 import { useCallback, type CSSProperties, type ReactElement } from "react";
 
-const THINK_DOT_STYLE: CSSProperties = {
-  width: 5,
-  height: 5,
-  borderRadius: "50%",
-  background: "var(--warn)",
+const DOT_STYLE: CSSProperties = { width: 5, height: 5, borderRadius: "50%" };
+
+const THINK_DOT_STYLE: CSSProperties = { ...DOT_STYLE, background: "var(--warn)" };
+
+/** The transcript's own live dot. An `<em>` because that is the tag the
+ *  streaming line has always used; `fontStyle: normal` keeps the UA's italic
+ *  off a 5px square. */
+const STREAM_DOT_STYLE: CSSProperties = {
+  ...DOT_STYLE,
+  background: "var(--run)",
+  fontStyle: "normal",
 };
 
 const SPIN_STYLE: CSSProperties = { display: "inline-block", color: "var(--run)" };
@@ -44,6 +51,15 @@ const PULSE_OPTIONS: KeyframeAnimationOptions = {
   easing: "ease-in-out",
   iterations: Infinity,
 };
+
+/** Same shape as the thinking pulse, a touch quicker — the transcript's dot
+ *  tracks live text rather than an inferred state. */
+const STREAM_OPTIONS: KeyframeAnimationOptions = {
+  duration: 1100,
+  easing: "ease-in-out",
+  iterations: Infinity,
+};
+const STREAM_FRAMES: Keyframe[] = PULSE_FRAMES;
 
 const SPIN_FRAMES: Keyframe[] = [
   { transform: "rotate(0deg)" },
@@ -80,6 +96,12 @@ function useLoopAnimation(
 export function ThinkingDot(): ReactElement {
   const ref = useLoopAnimation(PULSE_FRAMES, PULSE_OPTIONS);
   return <span ref={ref} style={THINK_DOT_STYLE} data-hud-pulse />;
+}
+
+/** The pulsing dot beside the transcript's streaming text. */
+export function StreamingDot(): ReactElement {
+  const ref = useLoopAnimation(STREAM_FRAMES, STREAM_OPTIONS);
+  return <em ref={ref} style={STREAM_DOT_STYLE} data-stream-pulse />;
 }
 
 /** The turning gear beside a running tool. */

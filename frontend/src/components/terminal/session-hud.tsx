@@ -29,7 +29,7 @@ import {
   VALUE_STYLE,
   VALUE_WARN_STYLE,
 } from "./session-hud-chrome";
-import { ThinkingDot, ToolSpinner } from "./session-hud-motion";
+import { ThinkingDot, ToolSpinner } from "./pane-motion";
 
 // ─── Per-pane session-state strip ──────────────────────────────────────────
 //

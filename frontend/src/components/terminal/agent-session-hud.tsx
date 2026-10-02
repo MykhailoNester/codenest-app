@@ -68,7 +68,7 @@ import {
   VALUE_STYLE,
   VALUE_WARN_STYLE,
 } from "./session-hud-chrome";
-import { ThinkingDot } from "./session-hud-motion";
+import { ThinkingDot } from "./pane-motion";
 
 interface AgentSessionHudProps {
   state: ConversationState;

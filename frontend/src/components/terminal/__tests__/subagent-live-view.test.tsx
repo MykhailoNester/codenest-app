@@ -328,3 +328,78 @@ describe("WorkflowView's own stream", () => {
     expect(screen.queryByTestId("workflow-stream")).toBeNull();
   });
 });
+
+// Transcript rendering has one hard geometric requirement: a long unbroken line
+// — a path, a JSON payload, a stack trace — must wrap or scroll *inside* its
+// frame and never widen the pane, which would drag the whole conversation
+// sideways. The Deck conversion (#283) moved these rules out of CSS modules,
+// which vitest stubs, so they can be asserted for the first time.
+describe("long lines stay inside their frame", () => {
+  const LONG_PATH = `/${"very-long-path-segment/".repeat(40)}module.ts`;
+
+  it("the returned result breaks rather than widening the panel", () => {
+    let state = applyFrame(
+      emptyConversation(),
+      agentToolUseFrame("toolu_agent", "Trace the import", "reviewer"),
+      1_000,
+    );
+    state = applyFrame(state, toolResultFrame("toolu_agent", LONG_PATH), 2_000);
+    const block = state.turns[0]?.blocks[0] as ConvToolBlock;
+
+    render(
+      <AgentViewPanel kind="subagent" block={block} sessionExited={false} onOpenSubagent={noop} />,
+    );
+
+    const pre = document.querySelector("pre")!;
+    expect(pre.textContent).toContain("module.ts");
+    expect(pre.style.wordBreak).toBe("break-word");
+  });
+
+  it("an expanded tool call's output breaks rather than widening the pane", () => {
+    let state = applyFrame(
+      emptyConversation(),
+      agentToolUseFrame("toolu_agent", "Trace the import", "reviewer"),
+      1_000,
+    );
+    state = applyFrame(
+      state,
+      parentedToolUseFrame("toolu_agent", "toolu_1", "Read", { file_path: "a.ts" }),
+      1_100,
+    );
+    state = applyFrame(
+      state,
+      frame("tool_result", {
+        type: "user",
+        parent_tool_use_id: "toolu_agent",
+        message: {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_1", content: LONG_PATH, is_error: false },
+          ],
+        },
+      }),
+      1_200,
+    );
+    const block = state.turns[0]?.blocks[0] as ConvToolBlock;
+
+    render(
+      <AgentViewPanel kind="subagent" block={block} sessionExited={false} onOpenSubagent={noop} />,
+    );
+
+    // A single call may still be wrapped in a collapsed run, so open every
+    // collapsed control until the call's own output is on screen.
+    for (;;) {
+      const collapsed = screen.queryAllByRole("button", { expanded: false });
+      if (collapsed.length === 0) break;
+      fireEvent.click(collapsed[0]!);
+    }
+    const row = screen.getAllByRole("button", { expanded: true }).at(-1)!;
+
+    // The output block is the row's own next sibling.
+    const out = row.parentElement!.lastElementChild as HTMLElement;
+    expect(out).not.toBe(row);
+    expect(out.textContent).toContain("module.ts");
+    expect(out.style.wordBreak).toBe("break-word");
+    expect(out.style.whiteSpace).toBe("pre-wrap");
+  });
+});
