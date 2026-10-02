@@ -1,29 +1,22 @@
-/* Session-state HUD strip — 1:1 with the prototype's `.hud` block
-   (warp-class-input-composer-prototype.html, CSS ~197-224, markup ~621-636).
+/* The session-state strip, shared by `<SessionHud/>` (shell panes, sidecar
+   facts) and `<AgentSessionHud/>` (agent panes, wire facts) so the two are
+   visually one thing. On Deck now: the cells are mono at `--fs-s`, the
+   separators are `--line`, the ctx and todo gauges are Deck's own `.dk-meter`
+   (markup, not CSS — see both TSX files), and every colour is a Deck token.
 
-   Two deliberate deltas from the prototype source:
-   1. The `.src` provenance badges and the
-      `body[data-prov="1"] .hud { padding-bottom: 19px }` rule that only makes
-      room for them are dropped — they are a documentation device for the
-      mockup, not product chrome (see the plan's Scope/Out).
-   2. The prototype's inline `style="color:var(--fg-3)"` on the tool-elapsed
-      span becomes the `.muted` class below — visually identical, no inline
-      style in JSX.
-
-   `--hud-pink` is declared locally because `#f9a8d4` is hardcoded in the
-   prototype and is not one of `styles/tokens.css`'s tokens; same value, one
-   place. */
+   The prototype's `--hud-pink` is gone with the bridge: Deck's palette has
+   four semantics and no fifth, so the token figures take `--fg-2` and the
+   meaning is carried by the `ctx`/`todo` labels beside them. */
 
 .strip {
-  --hud-pink: #f9a8d4;
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--line-1);
-  padding: 6px 6px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  padding: var(--u) var(--u2);
+  font-family: var(--mono);
+  font-size: var(--fs-s);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -34,18 +27,18 @@
 
 /* "No live agent session bound to this pane" — matches the prototype's
    [data-mode="shell"] .hud rule, extended (D11) to a pane whose process has
-   exited. */
+   exited. Deck draws no filters, so this is opacity alone; the colour
+   semantics stay readable rather than turning grey. */
 .dimmed {
-  opacity: 0.38;
-  filter: grayscale(0.7);
+  opacity: 0.45;
 }
 
 .cell {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 7px;
-  border-right: 1px solid var(--line-1);
+  gap: var(--u);
+  padding: 0 var(--u2);
+  border-right: 1px solid var(--line);
   white-space: nowrap;
   flex: none;
 }
@@ -55,19 +48,19 @@
 }
 
 .key {
-  color: var(--fg-4);
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  letter-spacing: 1.1px;
   text-transform: uppercase;
 }
 
 .value {
-  color: var(--fg-1);
+  color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
 
 .acc {
-  color: var(--accent);
+  color: var(--run);
 }
 .ok {
   color: var(--ok);
@@ -76,49 +69,19 @@
   color: var(--warn);
 }
 .info {
-  color: var(--info);
+  color: var(--run);
 }
-.pink {
-  color: var(--hud-pink);
+.num {
+  color: var(--fg-2);
 }
 .muted {
   color: var(--fg-3);
 }
 
-.cbar {
-  width: 60px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--bg-4);
-  overflow: hidden;
-  flex: none;
-}
-
-.cbarFill {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--ok), var(--accent));
-}
-
-.tdbar {
-  width: 40px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--bg-4);
-  overflow: hidden;
-  flex: none;
-}
-
-.tdbarFill {
-  display: block;
-  height: 100%;
-  background: var(--hud-pink);
-}
-
 .think {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--u);
   color: var(--warn);
 }
 
@@ -133,7 +96,7 @@
 .spin {
   display: inline-block;
   animation: spin 1.9s linear infinite;
-  color: var(--info);
+  color: var(--run);
 }
 
 @keyframes spin {
@@ -152,128 +115,11 @@
   }
 }
 
-/* Shared idiom for any clickable *live* cell — first used by the sub-agent
-   cell below, and reused verbatim (with a different colour class) by the
-   companion multi-phase orchestration cell, which has since landed. */
-
-.cellBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: none;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-}
-
-.cellBtn:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Colour-free — inherits whatever colour class the cell applies, so the same
-   pulse works for a violet sub-agent glyph and (later) a differently-coloured
-   orchestration glyph. */
-.pulse {
-  display: inline-block;
-  animation: ppulse 1.25s ease-in-out infinite;
-}
-
-.violet {
-  color: var(--violet);
-}
-
-/* Keeps a pathologically long subagent_type from stretching the strip; the
-   full value stays available in the button's title. */
-.cellLabel {
-  max-width: 22ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The expanded detail panel — a sibling of .strip, not a child, so it never
-   scrolls with the strip's own horizontal overflow. */
-.detail {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--line-1);
-  padding: 5px 13px 7px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--fg-2);
-}
-
-.detailRow {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  flex-wrap: wrap;
-}
-
-.detailName {
-  color: var(--violet);
-  font-weight: 700;
-}
-
-.detailText {
-  color: var(--fg-3);
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-/* Orchestration detail panel — additive only, nothing above is edited. The
-   cell itself introduces no new classes at all (D7): it reuses .cell,
-   .cellBtn, .pulse, .acc, .cellLabel, .value, .muted verbatim. */
-
-.detailHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 7px;
-  flex-wrap: wrap;
-}
-
-.detailPhase {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-left: 2px;
-}
-
-.detailPhaseTitle {
-  color: var(--fg-2);
-  font-weight: 600;
-}
-
-.detailAgent {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding-left: 10px;
-}
-
-/* Keeps a pathologically long agent label from stretching the panel — same
-   guard .cellLabel applies to the strip above. */
-.detailAgentLabel {
-  color: var(--fg-1);
-  max-width: 28ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Geometry only — the red border/colour comes from `d3-btn d3-btn--sm` plus
-   the same two inline properties agent-run-row.tsx's Stop button sets. */
-.detailStop {
-  font: inherit;
-  padding: 2px 8px;
-  cursor: pointer;
+@media (prefers-reduced-motion: reduce) {
+  .spin,
+  .thinkDot {
+    animation: none;
+  }
 }
 
 /* The strip as the dock's metrics line — its *last* child since #38, so the

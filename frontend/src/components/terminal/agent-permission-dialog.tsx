@@ -95,60 +95,54 @@ export function AgentPermissionDialog({
       : "This tool call requires approval.");
 
   return (
-    <div className={styles.perm} data-permission-dialog>
-      <h5 className={styles.permTitle}>
-        ⚠ Permission — {name}
-        {pendingBehind > 0 ? (
-          <span className={styles.permCount}>
-            {" "}
-            (1 of {pendingBehind + 1})
-          </span>
-        ) : null}
+    <div className={`dk-modal ${styles.perm}`} data-permission-dialog>
+      <h5 className={`dk-modal__h ${styles.title}`}>
+        ⚠ permission
+        <span className={styles.count}>
+          {name}
+          {pendingBehind > 0 ? ` (1 of ${pendingBehind + 1})` : ""}
+        </span>
       </h5>
-      {summary !== null ? (
-        <pre className={styles.permTarget} title={summary}>
-          {summary}
-        </pre>
-      ) : null}
-      <p className={styles.permBody}>{body}</p>
-      <div className={styles.permBtns}>
-        <button
-          ref={allowRef}
-          type="button"
-          className={`${styles.permBtn} ${styles.btnPri}`}
-          onClick={onAllow}
-        >
-          Allow <span className={styles.kbd}>⏎</span>
-        </button>
-        <button
-          type="button"
-          className={styles.permBtn}
-          onClick={onAllowSession}
-          title={`Auto-allows further "${request.sessionKey}" for the rest of this session`}
-        >
-          Allow for this session <span className={styles.kbd}>A</span>
-        </button>
-        <button
-          type="button"
-          className={`${styles.permBtn} ${styles.btnDanger}`}
-          onClick={onDeny}
-        >
-          Deny <span className={styles.kbd}>esc</span>
-        </button>
+      <div className="dk-modal__b">
+        {summary !== null ? (
+          <pre className={styles.target} title={summary}>
+            {summary}
+          </pre>
+        ) : null}
+        <p className={styles.body}>{body}</p>
+        {/*
+          A compound Bash command (`a && b && c`) is safety-checked per
+          subcommand, so the CLI asks once per part — sequentially, each ask
+          arriving only after the previous is answered. Without this line the
+          second dialog is indistinguishable from the first and the honest
+          behaviour reads as "Allow needed two clicks".
+        */}
+        {request.decisionReasonType === "subcommandResults" ? (
+          <p className={styles.note}>
+            Part of a compound command — each part is approved separately, so
+            expect a further prompt.
+          </p>
+        ) : null}
       </div>
-      {/*
-        A compound Bash command (`a && b && c`) is safety-checked per
-        subcommand, so the CLI asks once per part — sequentially, each ask
-        arriving only after the previous is answered. Without this line the
-        second dialog is indistinguishable from the first and the honest
-        behaviour reads as "Allow needed two clicks".
-      */}
-      {request.decisionReasonType === "subcommandResults" ? (
-        <p className={styles.permNote}>
-          Part of a compound command — each part is approved separately, so
-          expect a further prompt.
-        </p>
-      ) : null}
+      <div className="dk-modal__f">
+        <span className="dk-actions">
+          <button ref={allowRef} type="button" className="dk-btn pri" onClick={onAllow}>
+            Allow <span className={styles.kbd}>⏎</span>
+          </button>
+          <button
+            type="button"
+            className="dk-btn"
+            onClick={onAllowSession}
+            title={`Auto-allows further "${request.sessionKey}" for the rest of this session`}
+          >
+            Allow for this session <span className={styles.kbd}>A</span>
+          </button>
+          <span className="sep" />
+          <button type="button" className="dk-btn danger" onClick={onDeny}>
+            Deny <span className={styles.kbd}>esc</span>
+          </button>
+        </span>
+      </div>
     </div>
   );
 }

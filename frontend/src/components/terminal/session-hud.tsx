@@ -97,8 +97,8 @@ export function SessionHud({
     cells.push(
       <div key="ctx" className={styles.cell} data-cell="ctx">
         <span className={styles.key}>ctx</span>
-        <span className={styles.cbar}>
-          <span className={styles.cbarFill} style={{ width: `${pct}%` }} />
+        <span className="dk-meter">
+          <i style={{ width: `${pct}%` }} />
         </span>
         <span className={`${styles.value} ${styles.ok}`}>
           {formatContextPercent(hud.context_tokens, hud.context_window)}
@@ -107,7 +107,7 @@ export function SessionHud({
     );
     cells.push(
       <div key="tokens" className={styles.cell} data-cell="tokens">
-        <span className={`${styles.value} ${styles.pink}`}>
+        <span className={`${styles.value} ${styles.num}`}>
           {formatTokens(hud.context_tokens)}/{formatTokens(hud.context_window)}
         </span>
       </div>,
@@ -202,10 +202,10 @@ export function SessionHud({
     cells.push(
       <div key="todo" className={styles.cell} data-cell="todo">
         <span className={styles.key}>todo</span>
-        <span className={styles.tdbar}>
-          <span className={styles.tdbarFill} style={{ width: `${pct}%` }} />
+        <span className="dk-meter">
+          <i style={{ width: `${pct}%` }} />
         </span>
-        <span className={`${styles.value} ${styles.pink}`}>
+        <span className={`${styles.value} ${styles.num}`}>
           {done}/{total}
         </span>
       </div>,

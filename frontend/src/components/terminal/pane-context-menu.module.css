@@ -1,59 +1,32 @@
-.menu {
+/* The right-click menu is Deck's `.dk-menu` — same box, same rows, same rule
+   between groups. It is NOT `<DeckMenu>`: that primitive owns a trigger
+   button and positions itself under it, whereas this menu has no trigger at
+   all and must appear at the pointer, through a `document.body` portal. The
+   markup it renders is the same, so the two look identical.
+
+   Doubled class names, because `.dk-menu`'s own `position: absolute` and its
+   `top`/`right` have to be overridden and the two stylesheets' injection
+   order is not guaranteed. */
+
+/* Carries Deck's tokens through the `document.body` portal without drawing a
+   box: `display: contents` removes the wrapper from layout while custom
+   properties and inherited values still pass to its children. */
+.scope {
+  display: contents;
+}
+
+.menu.menu {
   position: fixed;
+  top: auto;
+  right: auto;
   z-index: 9000;
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-2);
-  box-shadow: var(--shadow-3);
-  padding: 4px 0;
-  min-width: 170px;
-  font-size: 12.5px;
-  font-family: var(--font-sans);
-  color: var(--fg-1);
   user-select: none;
 }
 
-.item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  cursor: pointer;
-  border-radius: 0;
-  background: transparent;
-  border: none;
-  color: inherit;
-  font: inherit;
-  width: 100%;
-  text-align: left;
-  white-space: nowrap;
-  transition: background 60ms;
-}
-
-.item:hover {
-  background: var(--bg-4);
-  color: var(--fg-0);
-}
-
-.item:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.item:disabled:hover {
-  background: transparent;
-  color: inherit;
-}
-
-.separator {
-  height: 1px;
-  background: var(--line-1);
-  margin: 4px 0;
-}
-
+/* The row is `.dk-menu button`; this adds only the trailing keystroke. */
 .shortcut {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  margin-left: var(--u3);
+  float: right;
   color: var(--fg-4);
+  font-size: var(--fs-xs);
 }

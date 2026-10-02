@@ -1,103 +1,83 @@
-/* Direct port of prototype:271-283 onto the real tokens — the warn-toned
-   dialog that is the clearest thing a native surface does better than a
-   redraw-heavy TUI (research §11). Class names match the plan's table
-   (step 16): .perm h5 p .btns button.pri/.dan .kbd -> perm permTitle
-   permBody permBtns btnPri btnDanger kbd. */
+/* The permission ask, on Deck's dialog primitive (`.dk-modal*`). It is
+   deliberately NOT inside `.dk-scrim`: the ask belongs to one pane, several
+   panes can hold one at once, and `isFocusedPane` decides which of them
+   answers a keystroke. A viewport-fixed scrim would let a background pane's
+   ask cover the whole window, so the modal box renders inline in the
+   transcript and only its chrome comes from Deck.
 
-.perm {
-  margin: 8px 0;
-  padding: 10px 12px;
-  background: var(--warn-soft);
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  border-radius: var(--r-3);
+   Everything below is geometry or tone Deck has no opinion about. The
+   doubled class names are deliberate: this file and `deck.css` are separate
+   stylesheets whose injection order is not guaranteed, so an override of a
+   `.dk-*` rule needs a specificity that does not depend on it. */
+
+.perm.perm {
+  width: 100%;
+  max-height: none;
+  margin: var(--u2) 0;
+  border-color: var(--warn);
 }
 
-.permTitle {
-  margin: 0 0 3px;
-  font-size: 11px;
+/* `.dk-modal__h` is written for a `div`; this is an `h5`, so the heading's
+   own UA margin and weight have to go. */
+.title.title {
+  margin: 0;
+  font-weight: 400;
   color: var(--warn);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-weight: 700;
+  border-bottom-color: var(--warn);
 }
 
-/* The queue position, inside the title. Not uppercased with the rest of it:
-   "(1 of 3)" is a count, not a label. */
-.permCount {
+/* The tool name and the queue position, inside the title bar but not part of
+   the label: `Bash` is data and `(1 of 3)` is a count, so neither takes the
+   bar's uppercase. */
+.count {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-transform: none;
   letter-spacing: 0;
-  font-weight: 600;
-  opacity: 0.85;
+  color: var(--fg-2);
 }
 
 /* What is actually being approved — the command, path, or URL from the
    request's `input`. Scrolls rather than wrapping unboundedly so a long
    command can never push the buttons out of the pane. */
-.permTarget {
-  margin: 0 0 6px;
-  padding: 5px 7px;
+.target {
+  margin: 0 0 var(--u2);
+  padding: var(--u) 6px;
   max-height: 84px;
   overflow: auto;
-  background: var(--bg-0, rgba(0, 0, 0, 0.25));
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-2);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--fg-1);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  color: var(--fg);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.permBody {
-  margin: 0 0 8px;
-  font-size: 11.5px;
+.body {
+  margin: 0;
+  font-size: var(--fs-s);
   color: var(--fg-2);
-  font-family: var(--font-mono);
   word-break: break-word;
 }
 
-.permNote {
-  margin: 7px 0 0;
-  font-size: 10.5px;
-  color: var(--fg-3, var(--fg-2));
-  font-family: var(--font-sans);
-  opacity: 0.85;
+.note {
+  margin: var(--u2) 0 0;
+  font-family: var(--sans);
+  font-size: var(--fs-s);
+  color: var(--fg-3);
 }
 
-.permBtns {
-  display: flex;
-  gap: 7px;
-}
-
-.permBtn {
-  font-family: var(--font-sans);
-  font-size: 11.5px;
-  padding: 4px 12px;
-  border-radius: var(--r-2);
-  border: 1px solid var(--line-2);
-  background: var(--bg-2);
-  color: var(--fg-2);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.btnPri {
-  background: var(--ok);
-  border-color: transparent;
-  color: #04140a;
-  font-weight: 600;
-}
-
-.btnDanger {
-  color: var(--err);
-  border-color: rgba(239, 68, 68, 0.3);
-}
-
+/* The keycap hint sits inside its button rather than beside it, so the
+   footer stays one `.dk-actions` cluster. It inherits the button's colour
+   rather than naming one: `.dk-btn.pri` inverts to the ground and a fixed
+   colour would vanish into the fill. */
 .kbd {
-  font-size: 9px;
-  margin-left: 5px;
-  opacity: 0.7;
-  font-family: var(--font-mono);
+  margin-left: var(--u);
+  font-size: var(--fs-xs);
+  opacity: 0.65;
 }
