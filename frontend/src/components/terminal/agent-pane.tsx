@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { DragEvent, ReactElement } from "react";
+import type { CSSProperties, DragEvent, ReactElement } from "react";
 import {
   agentStart,
   agentStop,
@@ -56,7 +56,68 @@ import {
 } from "../../lib/agent-views";
 import { AgentActivityDock } from "./agent-activity-dock";
 import { Icon } from "../icon";
-import styles from "./agent-pane.module.css";
+
+/* ── Local constants ─────────────────────────────────────────────────────
+   What is left of the agent pane's own styling after the Deck conversion
+   (#293): the pane frame, header, footers and focus ring are `.dk-pane*`.
+   Deck has no three-zone pane body and no drag-target label, so the three
+   shapes below are declared here rather than in `components/deck/*` or
+   `design/deck/*`, which #283 does not touch — the precedent is the composer's
+   `EDITOR_*` constants. */
+
+/**
+ * Body: three zones. The scroll viewport (A) fills whatever height the pinned
+ * activity dock (B) and the composer (C) do not use — both are `flex: 0 …`, so
+ * only A ever absorbs the pane's height, and B/C hold their position while the
+ * user switches which agent A is showing.
+ */
+const BODY_STYLE: CSSProperties = {
+  flex: "1 1 auto",
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+};
+
+/**
+ * The pane's one scroll viewport (Zone A). Every body view — the transcript, a
+ * sub-agent panel, a workflow panel — renders inside this element, which owns
+ * filling the flex line and scrolling on behalf of all of them. A view that
+ * declared no `flex` used to collapse the line and drag the composer up under
+ * itself; owning it here means no view can opt out. It is also the element
+ * `<AgentPane/>` itself measures and scrolls for stick-to-bottom and per-view
+ * scroll memory (Effects A-D below) — the rendered node never changes across a
+ * view switch, which is what lets one set of effects serve the transcript and
+ * every drill-in view. The activity dock (Zone B) is this element's *sibling*,
+ * not its child — inside it, the dock would scroll away with the transcript
+ * instead of staying pinned.
+ */
+const VIEWPORT_STYLE: CSSProperties = {
+  flex: "1 1 auto",
+  minHeight: 0,
+  overflowY: "auto",
+};
+
+/**
+ * A workspace-navigator (or Finder) drag held over the pane. The pane's own
+ * border is already marked by `.dk-pane.drop`; this is the label that says what
+ * releasing here will do. `.dk-note` is the nearest Deck surface and is the
+ * wrong one — a block of prose in the flow, where this is a floating pill with
+ * the dashed `--mark` border that pairs with the pane's drop state.
+ */
+const PANE_DROP_HINT_STYLE: CSSProperties = {
+  position: "absolute",
+  left: "50%",
+  bottom: 12,
+  transform: "translateX(-50%)",
+  zIndex: 5,
+  padding: "4px 10px",
+  border: "1px dashed var(--mark)",
+  borderRadius: 3,
+  background: "var(--bg)",
+  color: "var(--mark)",
+  fontSize: "var(--fs-xs)",
+  pointerEvents: "none",
+};
 
 /** The stick-to-bottom threshold Effect A's scroll listener applies — how
  *  close to the bottom counts as "still pinned". Carries the same figure the
@@ -348,7 +409,7 @@ export function AgentPane({
    */
   const restartRef = useRef(false);
   /**
-   * The pane's single scroll viewport (`.viewport`, agent-pane.module.css),
+   * The pane's single scroll viewport (`VIEWPORT_STYLE` above),
    * shared by all three body views below. The pane measures and scrolls this
    * element itself (Effects A-D below) — the transcript and every drill-in
    * view are plain content with no overflow of their own.
@@ -896,9 +957,9 @@ export function AgentPane({
         </div>
       ) : null}
 
-      <div className={styles.body}>
+      <div style={BODY_STYLE}>
         <div
-          className={styles.viewport}
+          style={VIEWPORT_STYLE}
           ref={viewportRef}
           data-testid="agent-pane-viewport"
         >
@@ -1013,7 +1074,7 @@ export function AgentPane({
         />
 
         {dropActive ? (
-          <div className={styles.paneDropHint}>drop to insert file path</div>
+          <div style={PANE_DROP_HINT_STYLE}>drop to insert file path</div>
         ) : null}
       </div>
     </div>
