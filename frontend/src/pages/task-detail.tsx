@@ -546,15 +546,9 @@ export function TaskDetailPage(): ReactElement {
       }
     >
       <>
-        <div className="dk-bar">
-          <Link className="dk-btn bare" to="/tasks">
-            ← work board
-          </Link>
-          <span className="dk-bar__ref">#{taskId}</span>
-          <span className="dk-tag" data-s={taskState(task.status)}>
-            {statusLabel.toLowerCase()}
-          </span>
-        </div>
+        <Link className="dk-btn bare" to="/tasks" style={{ marginBottom: "var(--u3)" }}>
+          ← work board
+        </Link>
 
         <div className="dk-detail">
           <div className="dk-detail__doc">

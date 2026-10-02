@@ -779,10 +779,11 @@ describe("TaskDetailPage", () => {
         ],
       }),
     });
-    const { container } = renderPage();
-    const badge = container.querySelector(".dk-bar .dk-tag") as HTMLElement;
-    expect(badge).not.toBeNull();
-    expect(badge.textContent?.trim()).toMatch(/^to do$/i);
-    expect(badge.getAttribute("data-s")).toBe("todo");
+    // #298 removed the duplicate identity bar — the shell crumb carries the
+    // status label now, and the chrome is stubbed here. The properties select
+    // is the rendered control that actually reflects it.
+    renderPage();
+    const sel = screen.getByLabelText(/status/i) as HTMLSelectElement;
+    expect(sel.value).toBe("todo");
   });
 });
