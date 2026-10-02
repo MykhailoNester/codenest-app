@@ -135,11 +135,64 @@ describe("Plan headroom", () => {
   });
 
   it("declares no backdrop-filter", () => {
-    const declarations = source("components/dashboard/plan-headroom.module.css")
+    // Re-pointed from `plan-headroom.module.css` to the component by #283:
+    // the stylesheet is gone, and the only place left in this panel that
+    // could declare the property is an inline style in the source below. The
+    // rule is unchanged — `d3-creative.css` records that property driving the
+    // WebKit Graphics process to ~5 cores — only the file it is read from is.
+    const declarations = source("components/dashboard/plan-headroom.tsx")
       .split("\n")
       .map((line) => line.trim())
       // A comment explaining the ban is not the ban being broken.
-      .filter((line) => /^(-webkit-)?backdrop-filter:/.test(line));
+      .filter((line) => /(-webkit-)?[bB]ackdrop[-F]ilter\s*[:=]/.test(line));
     expect(declarations, declarations.join("\n")).toHaveLength(0);
+  });
+
+  it("claims no severity: every row is the inert glyph", () => {
+    // Deck's ramp is a severity ramp and this panel has no severities to
+    // report — nothing here is known to be a limit, so a `warn` or `err`
+    // state on a row would be the panel asserting something the data does
+    // not support. The old stylesheet said this in a comment over `.fill`;
+    // this is the same rule, enforced.
+    const { container } = render(<PlanHeadroom />);
+    const glyphs = Array.from(container.querySelectorAll(".dk-s"));
+    expect(glyphs.length).toBe(2);
+    for (const g of glyphs) {
+      expect(g.getAttribute("data-s")).toBe("idle");
+    }
+  });
+
+  it("draws no bar for a series whose bounds have not separated", () => {
+    // `max === min` has no position to show, and either extreme would read as
+    // a statement about headroom.
+    mockUsePlan.mockReturnValue({
+      isLoading: false,
+      data: planPayload({
+        series: [
+          {
+            key: "fh",
+            label: "rolling short window",
+            latest: 5,
+            observed_min: 5,
+            observed_max: 5,
+          },
+        ],
+      }),
+    });
+    const { container } = render(<PlanHeadroom />);
+    expect(screen.getByText("observed 5–5")).toBeTruthy();
+    expect(container.querySelector(".dk-meter")).toBeNull();
+  });
+
+  it("explains a sidecar failure as distinct from a missing file", () => {
+    mockUsePlan.mockReturnValue({
+      isLoading: false,
+      isError: true,
+      data: undefined,
+    });
+    render(<PlanHeadroom />);
+    expect(
+      screen.getByText("Could not reach the sidecar for plan-usage history."),
+    ).toBeTruthy();
   });
 });

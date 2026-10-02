@@ -1,7 +1,8 @@
 /**
- * PlanHeadroom — the plan-usage panel (epic #153, #164 data / #166 mount).
- * Mounted by Budgets (`components/budgets/usage-limits.tsx`) since #345 deleted
- * the landing page that used to carry it.
+ * PlanHeadroom — the plan-usage panel (epic #153, #164 data / #166 mount),
+ * drawn on Deck (#283). Mounted by Budgets
+ * (`components/budgets/usage-limits.tsx`) since #345 deleted the landing page
+ * that used to carry it.
  *
  * Every number on this panel is a raw counter out of Claude desktop's
  * `plan-usage-history.json`, and the panel's job is to show them without
@@ -23,10 +24,25 @@
  * held one value) gets no bar at all rather than an empty or a full one: with
  * `max === min` there is no position to show, and either extreme would read as
  * a statement about headroom that the data does not support.
+ *
+ * On Deck
+ * -------
+ * The panel was a rounded translucent box with a bullet-prefixed section label
+ * — one of the four large Command Center panels — and its stylesheet carried a
+ * standing ban on `backdrop-filter` (`d3-creative.css` recorded that property
+ * driving the WebKit Graphics process to ~5 cores). Both the box and the ban
+ * go with the stylesheet: there is nowhere left in this component to declare
+ * the property, and Deck has no blurred surface to declare it on.
+ *
+ * Every row carries the `idle` glyph (`·`, "inert") and no other. That is
+ * deliberate and is the same claim the old stylesheet made in words: Deck's
+ * ramp is a severity ramp, and "high compared with the last few days" is not a
+ * severity — nothing here is known to be a limit, so no row may say it is.
  */
 
 import type { ReactElement } from "react";
 import { usePlanUsage } from "../../lib/api";
+import { DeckGrid, DeckHead, DeckLine } from "../deck/deck-grid";
 import {
   PLAN_USAGE_CAVEAT,
   formatLatest,
@@ -38,7 +54,16 @@ import {
   planUsageSeries,
   type PlanUsageSeries,
 } from "../../lib/plan-usage";
-import styles from "./plan-headroom.module.css";
+
+/**
+ * This panel's column template.
+ *
+ * Not in `DECK_COLS`: that module is a deck primitive and is out of scope for
+ * this ticket, so the shape lives with the only list that has it — the same
+ * call `components/notification-bell.tsx` makes for `BELL_COLS`. No named
+ * template fits a list whose trailing column is a range rather than a time.
+ */
+const HEADROOM_COLS = "14px minmax(0, 1fr) 58px 56px 118px";
 
 /**
  * Roughly three sampling intervals. The file is rewritten about every 15
@@ -48,29 +73,49 @@ import styles from "./plan-headroom.module.css";
  */
 const GAP_WORTH_MENTIONING_SECONDS = 45 * 60;
 
-function SeriesRow({ series }: { series: PlanUsageSeries }): ReactElement {
+function seriesRow(series: PlanUsageSeries): ReactElement {
   const position = observedPosition(series);
   return (
-    <div className={styles.row}>
-      <div className={styles.rowHead}>
-        <span className={styles.rowLabel}>
-          <span className={styles.rowKey}>{series.key}</span>
-          {series.label}
-        </span>
-        <span className={styles.rowValue}>{formatLatest(series)}</span>
-      </div>
-      {position !== null && (
-        <div className={styles.track}>
-          <div
-            className={styles.fill}
-            style={{ width: `${(position * 100).toFixed(1)}%` }}
-          />
-        </div>
-      )}
-      <span className={styles.observed}>
-        observed {formatObservedRange(series)}
-      </span>
-    </div>
+    <DeckLine
+      key={series.key}
+      state="idle"
+      cells={[
+        {
+          v: (
+            <>
+              {/* The key as it appears in the file, not a friendlier name we
+                  invented — the panel's whole claim is that it is showing you
+                  raw counters. */}
+              <span className="id">{series.key}</span> {series.label}
+            </>
+          ),
+          title: `${series.key} ${series.label}`,
+        },
+        {
+          // `.dk-meter` is Deck's one bar, and it is 3px of neutral fill with
+          // no label — which is exactly the restraint this panel needs. Its
+          // `warn`/`err` variants are deliberately not used: see the header.
+          v:
+            position === null ? null : (
+              <span className="dk-meter">
+                <i style={{ width: `${(position * 100).toFixed(1)}%` }} />
+              </span>
+            ),
+        },
+        { v: formatLatest(series), cls: "r sub" },
+        { v: `observed ${formatObservedRange(series)}`, cls: "r" },
+      ]}
+    />
+  );
+}
+
+/** The heading, repeated by all three states so they cannot drift apart. */
+function Head({ sampled }: { sampled?: string }): ReactElement {
+  return (
+    <h2 className="dk-group__h">
+      <span>plan headroom</span>
+      {sampled != null && <span className="note">{sampled}</span>}
+    </h2>
   );
 }
 
@@ -82,13 +127,9 @@ export function PlanHeadroom(): ReactElement {
   // the first fetch is still in flight would accuse a healthy install.
   if (isLoading) {
     return (
-      <div className={styles.panel}>
-        <div className={styles.head}>
-          <span className={styles.sectionLabel}>Plan headroom</span>
-        </div>
-        <span className={styles.notice}>
-          Reading plan-usage history&hellip;
-        </span>
+      <div className="dk-group">
+        <Head />
+        <div className="dk-note">Reading plan-usage history&hellip;</div>
       </div>
     );
   }
@@ -101,13 +142,11 @@ export function PlanHeadroom(): ReactElement {
   // so is the difference between a fixable message and a spinner.
   if (isError || !data) {
     return (
-      <div className={styles.panel}>
-        <div className={styles.head}>
-          <span className={styles.sectionLabel}>Plan headroom</span>
-        </div>
-        <span className={styles.notice}>
+      <div className="dk-group">
+        <Head />
+        <div className="dk-note">
           Could not reach the sidecar for plan-usage history.
-        </span>
+        </div>
       </div>
     );
   }
@@ -117,31 +156,29 @@ export function PlanHeadroom(): ReactElement {
   const gap = data.max_gap_seconds;
 
   return (
-    <div className={styles.panel}>
-      <div className={styles.head}>
-        <span className={styles.sectionLabel}>Plan headroom</span>
-        {data.last_sample_at !== null && (
-          <span className={styles.sampled}>
-            sampled {formatSampleAge(data.last_sample_at)}
-          </span>
-        )}
-      </div>
+    <div className="dk-group">
+      <Head
+        sampled={
+          data.last_sample_at !== null
+            ? `sampled ${formatSampleAge(data.last_sample_at)}`
+            : undefined
+        }
+      />
 
-      {notice && <span className={styles.notice}>{notice}</span>}
+      {notice && <div className="dk-note">{notice}</div>}
 
       {series.length > 0 && (
         <>
-          <div className={styles.rows}>
-            {series.map((s) => (
-              <SeriesRow key={s.key} series={s} />
-            ))}
-          </div>
+          <DeckGrid cols={HEADROOM_COLS} label="Plan headroom">
+            <DeckHead cells={["counter", "", "r latest", "r range"]} />
+            {series.map(seriesRow)}
+          </DeckGrid>
           {gap !== null && gap >= GAP_WORTH_MENTIONING_SECONDS && (
-            <span className={styles.gap}>
-              longest gap between readings {formatMaxGap(gap)}
-            </span>
+            <div className="dk-meta">
+              longest gap between readings <em>{formatMaxGap(gap)}</em>
+            </div>
           )}
-          <p className={styles.caveat}>{PLAN_USAGE_CAVEAT}</p>
+          <p className="dk-note sans">{PLAN_USAGE_CAVEAT}</p>
         </>
       )}
     </div>
