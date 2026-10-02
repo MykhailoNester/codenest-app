@@ -34,15 +34,20 @@ export function DeckMenu({
     };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") {
+        // An open menu consumes the Escape. Without this a menu inside a
+        // modal closes both at once — the dialog's own Escape handler is on
+        // `document` too, and capture phase is the only place to get in
+        // front of it.
+        e.stopPropagation();
         setOpen(false);
         btn.current?.focus();
       }
     };
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
     };
   }, [open]);
 
@@ -58,6 +63,14 @@ export function DeckMenu({
         onClick={(e) => {
           e.stopPropagation();
           setOpen((v) => !v);
+        }}
+        onKeyDown={(e) => {
+          // `DeckLine` activates its row on Enter/Space. Without this, opening
+          // this menu from the keyboard also fires the row's `onOpen` — you
+          // get the menu and a navigation at once. Only the two activation
+          // keys are stopped; arrow keys still reach `DeckGrid`'s roving
+          // tabindex handler.
+          if (e.key === "Enter" || e.key === " ") e.stopPropagation();
         }}
       >
         {trigger}
