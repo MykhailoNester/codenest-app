@@ -76,11 +76,14 @@ describe("nav restructure (#165) — registry shape", () => {
     // silent feature removal, so the count is pinned. 19 → 20 with #162's
     // `attention` row, which is the one addition the restructure anticipated;
     // 20 → 21 with #171's `hooks` row; 21 → 22 with #178's `latency` row;
-    // 22 → 21 with #270, which removes `notifications` — the one removal this
-    // count is allowed, because the page is folded into Needs You rather than
-    // deleted and the bell keeps its history on every screen.
-    expect(NAV_ITEMS).toHaveLength(21);
+    // 22 → 20. Two removals, neither of which deletes a capability:
+    //   #270 folds `notifications` into Needs You, and the bell in the chrome
+    //        keeps its history on every screen.
+    //   #269 folds `command` into the Sessions row; `/command` still resolves,
+    //        as a redirect to `/terminal?view=runs`.
+    expect(NAV_ITEMS).toHaveLength(20);
     expect(NAV_ITEMS.map((i) => i.slug)).not.toContain("notifications");
+    expect(NAV_ITEMS.map((i) => i.slug)).not.toContain("command");
   });
 
   it("mission owns / and replaces the dashboard slug", () => {

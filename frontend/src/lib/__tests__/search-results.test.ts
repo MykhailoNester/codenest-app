@@ -21,9 +21,12 @@ describe("routeForResult", () => {
     expect(routeForResult(result("task", 42))).toBe("/tasks/42");
   });
 
+  // #273 moved the context map onto the Projects surface as a project's
+  // detail, so the hit lands there directly rather than through the
+  // `/projects/:projectId/context` redirect.
   it("project -> the #181 Context Map", () => {
     expect(routeForResult(result("project", 7))).toBe(projectContextRoute(7));
-    expect(routeForResult(result("project", 7))).toBe("/projects/7/context");
+    expect(routeForResult(result("project", 7))).toBe("/projects?context=7");
   });
 
   it("doc -> /docs?id=:id", () => {
@@ -34,19 +37,23 @@ describe("routeForResult", () => {
     expect(routeForResult(result("inbox", 9))).toBe("/inbox?id=9");
   });
 
+  // #271 moved the Session Inspector onto the Sessions surface as the session
+  // detail's `inspect` tab, so these land there in one navigation rather than
+  // through the `/sessions/:sessionId` redirect. The encoding assertion is the
+  // same one, on the same id.
   it("event with session_id -> the #180 Session Inspector", () => {
     expect(routeForResult(result("event", 1, { session_id: "abc123" }))).toBe(
-      "/sessions/abc123",
+      "/terminal?view=runs&session=abc123&tab=inspect",
     );
   });
 
-  it("event without session_id -> /command", () => {
-    expect(routeForResult(result("event", 1))).toBe("/command");
+  it("event without session_id -> the runs list", () => {
+    expect(routeForResult(result("event", 1))).toBe("/terminal?view=runs");
   });
 
   it("session -> the Inspector, its text id encoded", () => {
     expect(routeForResult(result("session", "abc 123&x=1"))).toBe(
-      "/sessions/abc%20123%26x%3D1",
+      "/terminal?view=runs&session=abc%20123%26x%3D1&tab=inspect",
     );
   });
 
@@ -60,12 +67,11 @@ describe("routeForResult", () => {
   it("every produced route matches a pattern the router actually declares", () => {
     const routePatterns = [
       /^\/tasks\/\d+$/,
-      /^\/projects\/\d+\/context$/,
+      /^\/projects\?context=\d+$/,
       /^\/docs\?id=\d+$/,
       /^\/inbox\?id=\d+$/,
-      /^\/sessions\/.+$/,
+      /^\/terminal\?view=runs(&session=.+&tab=inspect)?$/,
       /^\/attention$/,
-      /^\/command$/,
     ];
     const results: SearchResult[] = [
       result("task", 1),

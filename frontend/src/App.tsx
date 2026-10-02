@@ -13,6 +13,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useParams,
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
@@ -41,27 +42,23 @@ import { CatalogFeedHost } from "./components/catalog-feed-host";
 import { CommandPalette } from "./components/command-palette";
 import { StartupSplash } from "./components/startup-splash";
 import { ToastHost } from "./components/toast-host";
-import { CommandCenterPage } from "./pages/command-center";
 import { DashboardPage } from "./pages/dashboard";
 import { DeckHomePage } from "./pages/deck-home";
 import { AttentionPage } from "./pages/attention";
 import { DeckPreviewPage } from "./pages/deck-preview";
 import { TasksPage } from "./pages/tasks";
 import { TaskDetailPage } from "./pages/task-detail";
-import { InProgressPage } from "./pages/in-progress";
 // InboxPage is kept in the codebase for a future workflow_items/tasks table merge.
 // The /inbox route now redirects to /tasks; InboxPage is no longer mounted.
 // TODO: remove InboxPage and its import once workflow_items is merged into tasks.
 import { TeamPage } from "./pages/team";
 import { AgentDetailPage } from "./pages/agent-detail";
-import { SessionInspectorPage } from "./pages/session-inspector";
 import { DocsPage } from "./pages/docs";
 import { TerminalPage } from "./pages/terminal";
 import { TerminalWindowRoot } from "./pages/terminal-window-root";
 import { ScreenshotRingPage } from "./pages/screenshot-ring";
 import { SettingsPage } from "./pages/settings";
 import { ProjectsPage } from "./pages/projects";
-import { ProjectContextPage } from "./pages/project-context";
 import { MarkdownEditorPage } from "./pages/markdown-editor";
 import { MarketplacePage } from "./pages/marketplace";
 import { ParallelRunsPage } from "./pages/parallel-runs";
@@ -101,12 +98,38 @@ function deckInitialEntry(): string {
   return p + window.location.search;
 }
 
+/**
+ * `/sessions/:sessionId` → the session's `inspect` tab on the Sessions surface
+ * (#271). A plain `<Navigate>` cannot do this: the target needs the path param,
+ * which only resolves inside the route's element.
+ */
+function SessionRedirect(): ReactElement {
+  const { sessionId = "" } = useParams<{ sessionId: string }>();
+  return (
+    <Navigate
+      to={`/terminal?view=runs&session=${encodeURIComponent(sessionId)}&tab=inspect`}
+      replace
+    />
+  );
+}
+
+/** `/projects/:projectId/context` → the project's detail on Projects (#273). */
+function ProjectContextRedirect(): ReactElement {
+  const { projectId = "" } = useParams<{ projectId: string }>();
+  return (
+    <Navigate
+      to={`/projects?context=${encodeURIComponent(projectId)}`}
+      replace
+    />
+  );
+}
+
 // FeatureRoute — hard-gate guard (Phase 1)
 // ---------------------------------------------------------------------------
 
 /**
  * Wraps a route's element.  When the feature that gates `navSlug` is
- * disabled, redirects to `/command`.
+ * disabled, redirects to `/` (the Deck home).
  *
  * Uses `useEnabledFeatures()` which is always complete (live > cache >
  * FEATURE_DEFAULTS), so the gate is deterministic from the very first
@@ -128,7 +151,7 @@ function FeatureRoute({
   for (const [feature, slugs] of Object.entries(FEATURES)) {
     if ((slugs as readonly string[]).includes(navSlug)) {
       if (resolvedFeatures[feature] === false) {
-        return <Navigate to="/command" replace />;
+        return <Navigate to="/" replace />;
       }
     }
   }
@@ -408,16 +431,24 @@ function AppInner(): ReactElement {
     <OnboardingGate>
       <Routes>
         <Route path="/onboarding" element={<OnboardingPage />} />
-        <Route path="/command" element={<CommandCenterPage />} />
+        {/* #269 — the Command Center folded into Sessions. The path stays as a
+            redirect: it is baked into notification routes, search results and
+            the onboarding hand-off, the same way /inbox redirects to /tasks. */}
+        <Route
+          path="/command"
+          element={<Navigate to="/terminal?view=runs" replace />}
+        />
         {/* #282 — the Deck home screen. Mission Control keeps a route of its
             own until the migration is signed off, so the two can be compared in
             one window the way /deck let the shell be. */}
         <Route path="/" element={<DeckHomePage />} />
         <Route path="/mission-control" element={<DashboardPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
+        {/* #273 — the context map is a project's detail on the Projects
+            surface. The old path stays as a redirect, carrying its param. */}
         <Route
           path="/projects/:projectId/context"
-          element={<ProjectContextPage />}
+          element={<ProjectContextRedirect />}
         />
         {/* #280 — the Deck shell, reviewable beside the old one. Removed by #281/#282. */}
         <Route path="/deck" element={<DeckPreviewPage />} />
@@ -445,7 +476,12 @@ function AppInner(): ReactElement {
             </FeatureRoute>
           }
         />
-        <Route path="/in-progress" element={<InProgressPage />} />
+        {/* #272 — the In Progress page is a filter on Work plus a group on the
+            deck home. The path stays as a redirect, like /inbox → /tasks. */}
+        <Route
+          path="/in-progress"
+          element={<Navigate to="/tasks?status=in-progress" replace />}
+        />
         {/* /inbox redirects to /tasks. The `inbox` slug and InboxPage are kept for
               redirect compat — existing bookmarks and rows that list `inbox` will
               gracefully land on the Work board.
@@ -457,10 +493,11 @@ function AppInner(): ReactElement {
             in the chrome keeps the history, so a bookmark lands on the queue
             rather than on a 404 that redirects to Command. */}
         <Route path="/notifications" element={<Navigate to="/attention" replace />} />
-        <Route
-          path="/sessions/:sessionId"
-          element={<SessionInspectorPage />}
-        />
+        {/* #271 — the Session Inspector is the `inspect` tab on the Sessions
+            surface's session detail. The old path stays as a redirect so a
+            bookmark and an older search result still resolve; `:sessionId` has
+            to be re-read inside the element to carry it over. */}
+        <Route path="/sessions/:sessionId" element={<SessionRedirect />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/team/:name" element={<AgentDetailPage />} />
         <Route path="/docs" element={<DocsPage />} />
@@ -537,7 +574,7 @@ function AppInner(): ReactElement {
         <Route path={TERMINAL_ROUTE} element={<TerminalPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/workspace" element={<WorkspaceSettingsPage />} />
-        <Route path="*" element={<Navigate to="/command" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <CommandPalette open={paletteOpen} onClose={closePalette} />
       <ToastHost />

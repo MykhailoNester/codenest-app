@@ -1,6 +1,8 @@
-import { Suspense, useEffect } from "react";
+import { Suspense, useCallback, useEffect } from "react";
 import type { ReactElement } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DeckShell } from "../components/deck/deck-shell";
+import { RunsView } from "../components/sessions/runs-view";
 import { TabBar } from "../components/terminal/tab-bar";
 import { SplitContainer } from "../components/terminal/split-container";
 import { WorkspaceNavigator } from "../components/explorer/workspace-navigator";
@@ -114,10 +116,110 @@ export function TerminalsLayout({
   );
 }
 
+/**
+ * The Sessions surface (#269). Two halves of the same thing, behind
+ * `.dk-tabs`: **panes** is where a session runs, **runs** is the supervision
+ * list the Command Center used to be — it listed the runs on one page and then
+ * had to navigate here to act on one.
+ *
+ * The view lives in the query string (`?view=runs`, `?session=<id>`) so the
+ * notification bell, search results and the deck home all keep a deep link
+ * into a specific session.
+ *
+ * The panes stay mounted while the runs list is up, hidden with `visibility`
+ * rather than `display`: an xterm that measures itself at zero gets its grid
+ * wrong, and Focus has to land on a pane that is already the right size.
+ */
 export function TerminalPage(): ReactElement {
+  const [params, setParams] = useSearchParams();
+  const sessionId = params.get("session");
+  const view = params.get("view") === "runs" || sessionId ? "runs" : "panes";
+
+  const showPanes = useCallback(() => {
+    const next = new URLSearchParams(params);
+    next.delete("view");
+    next.delete("session");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
+
+  const showRuns = useCallback(() => {
+    const next = new URLSearchParams(params);
+    next.set("view", "runs");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
+
+  const selectSession = useCallback(
+    (id: string | null) => {
+      const next = new URLSearchParams(params);
+      next.set("view", "runs");
+      if (id) next.set("session", id);
+      else next.delete("session");
+      setParams(next, { replace: true });
+    },
+    [params, setParams],
+  );
+
   return (
     <DeckShell title="sessions" scrollable={false}>
-      <TerminalsLayout showNavigator />
+      <div className="dk-tabs" role="tablist" aria-label="Sessions view">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "panes"}
+          className={`dk-tab${view === "panes" ? " on" : ""}`}
+          onClick={showPanes}
+        >
+          panes
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "runs"}
+          className={`dk-tab${view === "runs" ? " on" : ""}`}
+          onClick={showRuns}
+        >
+          runs
+        </button>
+      </div>
+
+      <div
+        style={{
+          position: "relative",
+          display: "flex",
+          flex: "1 1 auto",
+          minHeight: 0,
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            visibility: view === "panes" ? "visible" : "hidden",
+            pointerEvents: view === "panes" ? undefined : "none",
+          }}
+        >
+          <TerminalsLayout showNavigator />
+        </div>
+        {view === "runs" && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              overflowY: "auto",
+              background: "var(--bg)",
+              padding: "var(--u6) var(--gut) var(--u8)",
+            }}
+          >
+            <RunsView
+              selectedId={sessionId}
+              onSelect={selectSession}
+              onShowPanes={showPanes}
+            />
+          </div>
+        )}
+      </div>
     </DeckShell>
   );
 }

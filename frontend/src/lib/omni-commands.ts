@@ -93,13 +93,28 @@ const NAV_DERIVED: readonly OmniCommand[] = NAV_ITEMS.map((item) => ({
 // Extras: routes worth commanding that have no sidebar nav item.
 const EXTRAS: readonly OmniCommand[] = [
   {
-    id: "extra:/in-progress",
+    // #272 — the In Progress page folded into Work. The row stays because
+    // "in progress" is what people type; it now opens Work filtered, which is
+    // the same list with the project and assignee filters already attached.
+    id: "extra:/tasks?status=in-progress",
     title: "In Progress",
-    hint: "/in-progress",
+    hint: "/tasks?status=in-progress",
     icon: "tasks",
     keywords: ["in-progress", "progress", "tasks"],
+    navSlug: "tasks",
+    target: { kind: "navigate", path: "/tasks?status=in-progress" },
+  },
+  {
+    // #269 — the Command Center's list is the Sessions surface's `runs` view.
+    // The rail reaches it through Sessions; the palette keeps a direct row
+    // because "command" is what people have been typing for it.
+    id: "extra:/terminal?view=runs",
+    title: "Agent Runs",
+    hint: "/terminal?view=runs",
+    icon: "command",
+    keywords: ["runs", "agents", "command", "center", "sessions"],
     navSlug: null,
-    target: { kind: "navigate", path: "/in-progress" },
+    target: { kind: "navigate", path: "/terminal?view=runs" },
   },
   {
     id: "extra:/editor",

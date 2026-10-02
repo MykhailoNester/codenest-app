@@ -1,20 +1,19 @@
+// #271 folded `pages/session-inspector.tsx` onto the Sessions surface's session
+// detail. The report, its copy and its honesty rules are unchanged, so these
+// assertions are unchanged too — only the component under test and the render
+// harness moved (no route, no `Shell`).
+
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { SessionInspectorPage } from "../session-inspector";
-import type { SessionInspectorReport } from "../../lib/api";
+import { SessionInspect } from "../session-inspect";
+import type { SessionInspectorReport } from "../../../lib/api";
 
 const { mockUseSessionInspector } = vi.hoisted(() => ({
   mockUseSessionInspector: vi.fn(),
 }));
 
-vi.mock("../../lib/api", () => ({
+vi.mock("../../../lib/api", () => ({
   useSessionInspector: () => mockUseSessionInspector(),
-}));
-
-vi.mock("../../components/layout/shell", () => ({
-  Shell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 afterEach(() => {
@@ -85,13 +84,7 @@ function report(over: Partial<SessionInspectorReport> = {}) {
 }
 
 function renderPage() {
-  return render(
-    <MemoryRouter initialEntries={["/sessions/s1"]}>
-      <Routes>
-        <Route path="/sessions/:sessionId" element={<SessionInspectorPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  return render(<SessionInspect sessionId="s1" />);
 }
 
 describe("the session inspector", () => {

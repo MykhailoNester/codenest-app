@@ -1,24 +1,15 @@
 /**
- * Shared display helpers for command-center components.
+ * Shared display helper. `agentStatusClass` lived here too, mapping a status
+ * onto a `d3-status` class for SessionCard and AgentRunRow; #269 replaced both
+ * with Deck lines, whose state glyph carries that, so it went with them.
  */
 
 import type { EventLike } from "./event-detail-modal";
 
 /**
- * Returns the Direction-3 CSS class string for an agent/session status value.
- * Used by both SessionCard and AgentRunRow so the mapping stays in one place.
- */
-export function agentStatusClass(
-  status: "active" | "idle" | "ended" | string,
-): string {
-  if (status === "active") return "d3-status d3-status--active";
-  if (status === "idle") return "d3-status d3-status--idle";
-  return "d3-status d3-status--ended";
-}
-
-/**
  * Returns a human-readable label for an agent event_type.
- * Canonical source: covers all event types seen in live-activity and replay-panel.
+ * Canonical source: covers all event types seen in the activity feed and in
+ * replay-panel.
  */
 export function eventLabel(ev: EventLike): string {
   if (ev.event_type === "UserPromptSubmit") return "Prompt";

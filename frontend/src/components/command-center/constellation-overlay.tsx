@@ -24,8 +24,8 @@ import type {
   ProjectNode,
 } from "./use-constellation-layout";
 import { fitView } from "./use-constellation-layout";
+import type { ConstellationWindow } from "./use-constellation-layout";
 import { ConstellationCanvas } from "./constellation-canvas";
-import type { ConstellationWindow } from "./constellation";
 import { Icon } from "../icon";
 import type { AgentSession, ProfileOut } from "../../lib/api";
 

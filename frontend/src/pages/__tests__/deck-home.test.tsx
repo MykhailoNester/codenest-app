@@ -157,6 +157,42 @@ describe("the honesty rule: a dash, never a zero", () => {
   });
 });
 
+describe("in progress (#272 — folded off pages/in-progress.tsx)", () => {
+  it("lists what is being worked on, with the started date that page carried", () => {
+    mockUseDashboard.mockReturnValue({
+      data: {
+        recent_activity: [],
+        in_progress_tasks: [
+          {
+            id: 12,
+            title: "Ship the migration",
+            project_name: "codenest",
+            assignee_name: "Maks",
+            priority: "high",
+            started_date: "2026-09-30",
+          },
+        ],
+      },
+    });
+    renderPage();
+
+    const grid = screen.getByRole("grid", { name: "In progress" });
+    expect(grid.textContent).toContain("Ship the migration");
+    expect(grid.textContent).toContain("codenest");
+    // The one column Work's task line does not carry, which is why the fold
+    // put this group here rather than only on the board.
+    expect(grid.textContent).toContain("2026-09-30");
+  });
+
+  it("says nothing is being worked on rather than drawing an empty grid", () => {
+    mockUseDashboard.mockReturnValue({
+      data: { recent_activity: [], in_progress_tasks: [] },
+    });
+    renderPage();
+    expect(screen.getByText("Nothing is being worked on.")).toBeTruthy();
+  });
+});
+
 describe("since you last looked", () => {
   it("puts changes newer than the mark above the rule and older ones below", () => {
     storage.set(LAST_LOOKED_KEY, String(Date.now() - 60 * 60_000));
