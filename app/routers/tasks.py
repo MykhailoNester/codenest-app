@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
-from app.services import activity_service, agent_runs_service
+from app.services import activity_service, agent_runs_service, task_cost_service
 from app.services.task_service import (
     add_blocker,
     add_task_label,
@@ -86,6 +86,14 @@ async def api_task_runs(
 ) -> JSONResponse:
     db = await get_db()
     return JSONResponse(await list_task_runs(db, task_id, limit))
+
+
+@router.get("/api/v1/tasks/{task_id}/cost")
+async def api_task_cost(
+    task_id: int, limit: int = task_cost_service.DEFAULT_SESSION_LIMIT
+) -> JSONResponse:
+    db = await get_db()
+    return JSONResponse(await task_cost_service.task_cost(db, task_id, limit))
 
 
 @router.post("/api/v1/tasks")

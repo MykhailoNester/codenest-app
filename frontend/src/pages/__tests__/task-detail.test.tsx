@@ -16,6 +16,7 @@ import type {
   LookupsOut,
   Project,
   Task,
+  TaskCost,
   Taxonomy,
   TeamMember,
 } from "../../lib/api";
@@ -29,6 +30,7 @@ const {
   mockUseTaxonomy,
   mockUseTaskActivity,
   mockUseTaskRuns,
+  mockUseTaskCost,
   mockUseTaskSubtasks,
   mockUseTaskComments,
   mockUseSessionReplay,
@@ -51,6 +53,7 @@ const {
   mockUseTaxonomy: vi.fn(),
   mockUseTaskActivity: vi.fn(),
   mockUseTaskRuns: vi.fn(),
+  mockUseTaskCost: vi.fn(),
   mockUseTaskSubtasks: vi.fn(),
   mockUseTaskComments: vi.fn(),
   mockUseSessionReplay: vi.fn(),
@@ -75,6 +78,7 @@ vi.mock("../../lib/api", () => ({
   useTaxonomy: (...args: unknown[]) => mockUseTaxonomy(...args),
   useTaskActivity: (...args: unknown[]) => mockUseTaskActivity(...args),
   useTaskRuns: (...args: unknown[]) => mockUseTaskRuns(...args),
+  useTaskCost: (...args: unknown[]) => mockUseTaskCost(...args),
   useTaskSubtasks: (...args: unknown[]) => mockUseTaskSubtasks(...args),
   useTaskComments: (...args: unknown[]) => mockUseTaskComments(...args),
   useSessionReplay: (...args: unknown[]) => mockUseSessionReplay(...args),
@@ -233,6 +237,7 @@ function setupMocks(
     labelTaxonomy?: Taxonomy[];
     activity?: ActivityEntry[];
     runs?: AgentRun[];
+    cost?: TaskCost;
   } = {},
 ): Task {
   const task = opts.task ?? makeTask();
@@ -258,6 +263,22 @@ function setupMocks(
   });
   mockUseTaskRuns.mockReturnValue({
     data: opts.runs ?? [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  });
+  mockUseTaskCost.mockReturnValue({
+    data: opts.cost ?? {
+      task_id: 1,
+      cost_usd: null,
+      tokens_in: null,
+      tokens_out: null,
+      session_count: 0,
+      by_launch: 0,
+      by_branch: 0,
+      reason: "no session has been attributed to this task",
+      sessions: [],
+    },
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
@@ -618,6 +639,34 @@ describe("TaskDetailPage", () => {
     const feed = doc?.querySelector(".dk-list");
     expect(feed).not.toBeNull();
     expect(feed?.querySelectorAll(".dk-line").length).toBe(2);
+  });
+
+  it("the cost card is mounted, unmeasured by default", () => {
+    setupMocks();
+    renderPage();
+    // The em dash itself is not unique on the page (timestamps use one too),
+    // so this asserts the sentence that names what would fill it in.
+    expect(screen.getByText("spend")).toBeTruthy();
+    expect(screen.getByText(/No session is attributed to this task/)).toBeTruthy();
+    expect(screen.queryByText("$0.00")).toBeNull();
+  });
+
+  it("the cost card shows the rollup when sessions are attributed", () => {
+    setupMocks({
+      cost: {
+        task_id: 1,
+        cost_usd: 3.5,
+        tokens_in: 2_000,
+        tokens_out: 400,
+        session_count: 1,
+        by_launch: 1,
+        by_branch: 0,
+        reason: null,
+        sessions: [],
+      },
+    });
+    renderPage();
+    expect(screen.getByText("$3.50")).toBeTruthy();
   });
 
   it("the runs card is mounted in the document column", () => {
