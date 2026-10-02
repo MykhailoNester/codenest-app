@@ -1,17 +1,23 @@
 /**
- * Schedules page.
+ * Schedules — the cron-to-session spine, on Deck.
  *
- * Layout:
- *   SchedulesPage (Shell wrapper, list + "New" button in topbar actions)
- *     ScheduleList    — status-first job list (§6.1)
- *       ScheduleRow   — one row per job
- *     ScheduleDetail  — right-panel with run history + adaptive output pane
- *       RunHistoryTable
- *       AdaptiveRunPane — picks renderer from what the run produced
- *     ScheduleFormModal — friendly builder (§2.1) + job config (§2.2)
- *       CronBuilder — preset picker + live cron preview
- *       JobConfigFields
- *       AdvancedFields (collapsible)
+ * A schedule is the only thing in the app that turns a chosen time into a
+ * running agent session, so the page is built around that one sentence: the
+ * list says when each one next fires and how the last one went, the detail
+ * says what it launches and what the launch produced.
+ *
+ *   SchedulesPage        — DeckShell, stats, active/paused groups, detail
+ *     ScheduleRow        — one DeckLine per schedule
+ *     ScheduleDetail     — properties, run history, adaptive output pane
+ *       RunHistory       — one DeckLine per run
+ *       AdaptiveRunPane  — picks the renderer from what the run produced
+ *     ScheduleFormModal  — cadence builder + launch spec + advanced
+ *     RetentionModal     — transcript retention
+ *
+ * Empty is the normal first state — nothing is configured on a fresh install —
+ * so the empty state is written rather than left over: it says what a schedule
+ * does, names the one thing that must exist first (a provider), and offers
+ * three seeded starters next to the primary.
  */
 
 import {
@@ -61,7 +67,15 @@ import {
   type ScheduleRunStartedPayload,
   type ScheduleRunFinishedPayload,
 } from "../lib/ipc";
-import { Shell } from "../components/layout/shell";
+import { DeckShell } from "../components/deck/deck-shell";
+import {
+  DeckGrid,
+  DeckGroup,
+  DeckHead,
+  DeckLine,
+  type DeckState,
+} from "../components/deck/deck-grid";
+import { DeckMenu, type DeckMenuItem } from "../components/deck/deck-menu";
 import { useDebounce } from "../hooks/use-debounce";
 import {
   relativeTime as fmtRelTime,
@@ -70,72 +84,81 @@ import {
 } from "../lib/format-helpers";
 import styles from "./schedules.module.css";
 
-// ─── Status badge helpers ─────────────────────────────────────────────────────
-
-interface StatusMeta {
-  glyph: string;
-  label: string;
-  cls: string;
+/** CSS-module values are `string | undefined` under noUncheckedIndexedAccess. */
+function sx(...parts: (string | undefined | false)[]): string {
+  return parts.filter(Boolean).join(" ");
 }
 
-// CSS module values are typed as `string | undefined`; we assert non-null
-// once here rather than scattering `!` across the object literal.
-function cls(c: string | undefined): string {
-  return c ?? "";
-}
+// ─── Run status → Deck state ──────────────────────────────────────────────────
 
-const STATUS_META_UNKNOWN: StatusMeta = {
-  glyph: "?",
-  label: "unknown",
-  cls: cls(styles.statusGrey),
+/**
+ * The glyph column is the only carrier of state that survives colour being off,
+ * so every run status has to land on one of the eight. `missed` is a stall (the
+ * window passed and nothing ran), `timed_out` is a failure, and the statuses
+ * that produced nothing at all (cancelled, skipped) are inert rather than green.
+ */
+const RUN_STATE: Record<string, DeckState> = {
+  succeeded: "done",
+  failed: "fail",
+  timed_out: "fail",
+  running: "run",
+  queued: "todo",
+  scheduled: "todo",
+  missed: "stall",
+  cancelled: "idle",
+  skipped: "idle",
 };
 
-const RUN_STATUS_META: Partial<Record<string, StatusMeta>> = {
-  succeeded: { glyph: "✓", label: "succeeded", cls: cls(styles.statusGreen) },
-  failed: { glyph: "✗", label: "failed", cls: cls(styles.statusRed) },
-  running: { glyph: "◐", label: "running", cls: cls(styles.statusBlue) },
-  queued: { glyph: "◷", label: "queued", cls: cls(styles.statusGrey) },
-  scheduled: { glyph: "◷", label: "scheduled", cls: cls(styles.statusGrey) },
-  missed: { glyph: "⚠", label: "missed", cls: cls(styles.statusAmber) },
-  timed_out: { glyph: "⏱", label: "timed out", cls: cls(styles.statusOrange) },
-  cancelled: { glyph: "⊘", label: "cancelled", cls: cls(styles.statusGrey) },
-  skipped: { glyph: "⤼", label: "skipped", cls: cls(styles.statusAmber) },
+const RUN_WORD: Record<string, string> = {
+  succeeded: "succeeded",
+  failed: "failed",
+  timed_out: "timed out",
+  running: "running",
+  queued: "queued",
+  scheduled: "scheduled",
+  missed: "missed",
+  cancelled: "cancelled",
+  skipped: "skipped",
 };
 
-function getStatusMeta(status: string): StatusMeta {
-  return RUN_STATUS_META[status] ?? { ...STATUS_META_UNKNOWN, label: status };
+function runState(status: string): DeckState {
+  return RUN_STATE[status] ?? "idle";
 }
 
-function RunStatusBadge({ status }: { status: string }): ReactElement {
-  const meta = getStatusMeta(status);
+function runWord(status: string): string {
+  return RUN_WORD[status] ?? status;
+}
+
+/**
+ * A schedule's own state. Disabled is inert whatever its history says — it is
+ * not going to fire — and an enabled schedule that has never run is queued,
+ * not unknown.
+ */
+function scheduleState(s: Schedule, lastRun: ScheduleRun | null): DeckState {
+  if (!s.enabled) return "idle";
+  if (lastRun) return runState(lastRun.status);
+  return "todo";
+}
+
+/** Last 8 runs, newest first, as the same glyphs the rows use. */
+function HealthStrip({ runs }: { runs: ScheduleRun[] }): ReactElement {
   return (
-    <span className={`${styles.statusBadge} ${meta.cls}`} title={meta.label}>
-      <span aria-hidden="true">{meta.glyph}</span> {meta.label}
+    <span className="dk-actions" style={{ gap: 3 }}>
+      {runs.slice(0, 8).map((r) => (
+        <span
+          key={r.id}
+          className="dk-s"
+          data-s={runState(r.status)}
+          role="img"
+          aria-label={`${runWord(r.status)} ${fmtRelTime(r.fired_at)}`}
+          title={`${runWord(r.status)} — ${fmtRelTime(r.fired_at)}`}
+        />
+      ))}
     </span>
   );
 }
 
-/** Derive health from run history: last 8 glyphs as colored dots. */
-function HealthStrip({ runs }: { runs: ScheduleRun[] }): ReactElement {
-  const recent = runs.slice(0, 8);
-  return (
-    <div className={styles.healthStrip} title="Last 8 runs">
-      {recent.map((r) => {
-        const meta = getStatusMeta(r.status);
-        return (
-          <span
-            key={r.id}
-            className={`${styles.healthDot} ${meta.cls}`}
-            title={`${r.status} — ${fmtRelTime(r.fired_at)}`}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
 // ─── Time formatting ──────────────────────────────────────────────────────────
-// fmtRelTime and fmtDurationMs are imported from lib/format-helpers.
 
 function fmtAbsTime(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -148,9 +171,9 @@ function fmtAbsTime(iso: string | null | undefined): string {
 }
 
 // A run is "in flight" only while queued or running; every other status is
-// terminal. Live, second-by-second relative timers ("Started 3s ago …") are
-// reserved for in-flight runs so a finished run's "Started" cell freezes at a
-// static start time instead of counting up forever.
+// terminal. Live, second-by-second relative timers are reserved for in-flight
+// runs so a finished run's "started" cell freezes at a static start time
+// instead of counting up forever.
 function isRunInFlight(status: string): boolean {
   return status === "running" || status === "queued";
 }
@@ -158,7 +181,7 @@ function isRunInFlight(status: string): boolean {
 // ─── Shared relative-time ticker ────────────────────────────────────────────
 //
 // A single module-level 1 s interval drives every live relative time on the
-// page (Started / Next run / Last run), instead of each component spinning its
+// page (started / next run / last run), instead of each component spinning its
 // own timer. It is paused whenever the window/tab is hidden so an idle, hidden
 // Schedules page costs zero CPU.
 
@@ -205,46 +228,49 @@ function useNow(): void {
   }, []);
 }
 
-/** Human label for an interval schedule's cadence (e.g. "Every 2 hours"). */
+/** Human label for an interval schedule's cadence (e.g. "every 2 hours"). */
 function describeInterval(seconds: number | null | undefined): string {
-  if (!seconds || seconds <= 0) return "Interval";
+  if (!seconds || seconds <= 0) return "interval";
   if (seconds % 3600 === 0) {
     const h = seconds / 3600;
-    return `Every ${h} hour${h === 1 ? "" : "s"}`;
+    return `every ${h} hour${h === 1 ? "" : "s"}`;
   }
   if (seconds % 60 === 0) {
     const m = seconds / 60;
-    return `Every ${m} minute${m === 1 ? "" : "s"}`;
+    return `every ${m} minute${m === 1 ? "" : "s"}`;
   }
-  return `Every ${seconds}s`;
+  return `every ${seconds}s`;
 }
 
 /**
- * Cadence label for a schedule of any kind. ``cronLabel`` is the cron-preview
+ * Cadence label for a schedule of any kind. `cronLabel` is the cron-preview
  * description (resolved async for cron schedules); interval/event kinds are
  * described synchronously from their own fields.
  */
 function cadenceLabel(s: Schedule, cronLabel?: string | null): string {
   if (s.kind === "interval") return describeInterval(s.interval_seconds);
-  if (s.kind === "event") return s.event_name ? `On "${s.event_name}"` : "Event";
+  if (s.kind === "event") return s.event_name ? `on "${s.event_name}"` : "event";
   return cronLabel || s.cron_expr || "—";
 }
 
-// ─── Result kind badge ────────────────────────────────────────────────────────
+// ─── Result kind ──────────────────────────────────────────────────────────────
 
 const RESULT_KIND_LABELS: Record<ResultKind, string> = {
-  transcript: "Transcript",
-  artifact: "Artifact",
-  summary: "Summary",
-  notification: "Notification",
+  transcript: "transcript",
+  artifact: "artifact",
+  summary: "summary",
+  notification: "notification",
 };
 
-function ResultKindBadge({ kind }: { kind: ResultKind }): ReactElement {
-  return (
-    <span className={`${styles.typeBadge} ${styles[`typeBadge_${kind}`]}`}>
-      {RESULT_KIND_LABELS[kind] ?? kind}
-    </span>
-  );
+function resultKindLabel(kind: ResultKind): string {
+  return RESULT_KIND_LABELS[kind] ?? kind;
+}
+
+/** Tool access, said in words rather than in the API's camelCase. */
+function permissionLabel(mode: string): string {
+  if (mode === "bypassPermissions") return "full access";
+  if (mode === "dontAsk") return "allowed tools only";
+  return mode;
 }
 
 // ─── Live xterm attach for running scheduled runs ────────────────────────────
@@ -252,7 +278,6 @@ function ResultKindBadge({ kind }: { kind: ResultKind }): ReactElement {
 /**
  * Thin xterm.js wrapper that subscribes to `terminal_output:{ptyId}` events.
  *
- * Lifecycle:
  * 1. On mount: replays the already-received transcript (pre-run) then tails live.
  * 2. On `ptyId` change (new run selected): clears and re-subscribes.
  * 3. Closing the view does NOT kill the run — the scheduler owns the PTY.
@@ -279,9 +304,10 @@ function LiveRunTerminal({ ptyId, preloadContent }: LiveRunTerminalProps): React
       disableStdin: true, // read-only — detach does not kill the run
       theme: {
         background: "transparent",
-        foreground: getComputedStyle(document.documentElement)
-          .getPropertyValue("--fg-1")
-          .trim() || "#e2e8f0",
+        foreground:
+          getComputedStyle(document.documentElement)
+            .getPropertyValue("--fg-2")
+            .trim() || "#a8abaf",
       },
       fontSize: 12,
       fontFamily: "Menlo, 'Courier New', monospace",
@@ -330,7 +356,7 @@ function LiveRunTerminal({ ptyId, preloadContent }: LiveRunTerminalProps): React
   return (
     <div
       ref={containerRef}
-      className={styles.liveTermContainer}
+      className={styles.liveTerm}
       aria-label="Live run output"
     />
   );
@@ -338,9 +364,29 @@ function LiveRunTerminal({ ptyId, preloadContent }: LiveRunTerminalProps): React
 
 // ─── Adaptive per-run output pane ────────────────────────────────────────────
 
-interface AdaptiveRunPaneProps {
-  run: ScheduleRun;
-  resultKind: ResultKind;
+/** The output pane frame: Deck's terminal shell, used for every renderer. */
+function OutPane({
+  label,
+  head,
+  children,
+}: {
+  label: string;
+  head?: ReactNode;
+  children: ReactNode;
+}): ReactElement {
+  return (
+    <div className={styles.out}>
+      <div className="dk-term__h">
+        <span>{label}</span>
+        {head}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function OutBody({ children }: { children: ReactNode }): ReactElement {
+  return <div className={sx("dk-term__b", styles.outBody)}>{children}</div>;
 }
 
 type TranscriptQuery = ReturnType<typeof useScheduleRunTranscript>;
@@ -348,72 +394,61 @@ type TranscriptQuery = ReturnType<typeof useScheduleRunTranscript>;
 /** Truncated session-id chip shown in output-pane headers. */
 function SessionChip({ sessionId }: { sessionId: string | null }): ReactElement | null {
   if (!sessionId) return null;
-  return (
-    <span className={styles.outputLink}>session {sessionId.slice(0, 8)}…</span>
-  );
+  return <span className="dk-tag">session {sessionId.slice(0, 8)}…</span>;
 }
 
-/** PASS/FAIL card derived from a finished run's exit code. Shared by the
- *  failed-run branch and the summary/notification result kinds. */
+/** PASS/FAIL derived from a finished run's exit code. Shared by the failed-run
+ *  branch and the summary/notification result kinds. */
 function SummaryCard({ run }: { run: ScheduleRun }): ReactElement {
   const passed = run.exit_code === 0;
   return (
-    <div className={styles.outputPane}>
-      <div className={styles.outputHeader}>
-        <span className={styles.outputLabel}>Result</span>
-      </div>
-      <div
-        className={`${styles.summaryCard} ${passed ? styles.summaryPass : styles.summaryFail}`}
-      >
-        <div className={styles.summaryTop}>
-          <span className={styles.summaryGlyph}>{passed ? "✓" : "✗"}</span>
-          <span className={styles.summaryStatus}>{passed ? "PASS" : "FAIL"}</span>
-          {run.exit_code != null && (
-            <span className={styles.summaryMeta}>exit {run.exit_code}</span>
-          )}
-          <span className={styles.summaryMeta}>
-            {fmtDurationMs(run.duration_ms)}
-          </span>
+    <OutPane
+      label="result"
+      head={
+        <span className="dk-tag" data-s={passed ? "done" : "fail"}>
+          {passed ? "pass" : "fail"}
+        </span>
+      }
+    >
+      <OutBody>
+        <span className="dk-actions" style={{ marginBottom: "var(--u2)" }}>
+          {run.exit_code != null && <span className="dim">exit {run.exit_code}</span>}
+          <span className="dim">{fmtDurationMs(run.duration_ms)}</span>
           {run.tokens_in != null && (
-            <span className={styles.summaryMeta}>
+            <span className="dim">
               {formatCount(run.tokens_in + (run.tokens_out ?? 0))} tokens
             </span>
           )}
-          {run.cost_usd != null && (
-            <span className={styles.summaryMeta}>${run.cost_usd.toFixed(4)}</span>
-          )}
-        </div>
-        {run.summary_text && (
-          <p className={styles.summaryText}>{run.summary_text}</p>
-        )}
-      </div>
-    </div>
+          {run.cost_usd != null && <span className="dim">${run.cost_usd.toFixed(4)}</span>}
+        </span>
+        {run.summary_text ? `\n${run.summary_text}` : ""}
+      </OutBody>
+    </OutPane>
   );
 }
 
-/** Neutral card for terminal runs that produced no result (cancelled / missed /
- *  skipped / reaped) — distinct from a real PASS/FAIL outcome. */
+/** Terminal runs that produced no result (cancelled / missed / skipped /
+ *  reaped) — distinct from a real PASS/FAIL outcome. */
 function NoResultCard({ run }: { run: ScheduleRun }): ReactElement {
   return (
-    <div className={styles.outputPane}>
-      <div className={styles.outputHeader}>
-        <span className={styles.outputLabel}>Result</span>
-      </div>
-      <div className={styles.summaryCard}>
-        <div className={styles.summaryTop}>
-          <span className={styles.summaryStatus}>{run.status}</span>
-          <span className={styles.summaryMeta}>no result produced</span>
-        </div>
-        {(run.detail || run.summary_text) && (
-          <p className={styles.summaryText}>{run.detail ?? run.summary_text}</p>
-        )}
-      </div>
-    </div>
+    <OutPane
+      label="result"
+      head={
+        <span className="dk-tag" data-s={runState(run.status)}>
+          {runWord(run.status)}
+        </span>
+      }
+    >
+      <OutBody>
+        <span className="dim">no result produced</span>
+        {run.detail || run.summary_text ? `\n${run.detail ?? run.summary_text}` : ""}
+      </OutBody>
+    </OutPane>
   );
 }
 
-/** Transcript output pane: header + loading/content/empty states. `notice`
- *  renders an optional banner above the transcript (artifact-fallback case). */
+/** Transcript pane: header + loading/content/empty states. `notice` renders an
+ *  optional line above the transcript (artifact-fallback case). */
 function TranscriptPane({
   q,
   sessionId,
@@ -424,36 +459,53 @@ function TranscriptPane({
   notice?: string;
 }): ReactElement {
   return (
-    <div className={styles.outputPane}>
-      <div className={styles.outputHeader}>
-        <span className={styles.outputLabel}>Transcript</span>
-        <SessionChip sessionId={sessionId} />
-      </div>
-      {notice && <div className={styles.transcriptEmpty}>{notice}</div>}
-      {q.isPending ? (
-        <div className={styles.transcriptLoading}>Loading transcript…</div>
-      ) : q.data?.content ? (
-        <pre className={styles.transcriptPre}>{q.data.content}</pre>
-      ) : (
-        <div className={styles.transcriptEmpty}>No transcript recorded.</div>
-      )}
-    </div>
+    <OutPane label="transcript" head={<SessionChip sessionId={sessionId} />}>
+      <OutBody>
+        {notice && <div className="dim">{notice}</div>}
+        {q.isPending ? (
+          <span className="dim">Loading transcript…</span>
+        ) : q.data?.content ? (
+          q.data.content
+        ) : (
+          <span className="dim">No transcript recorded.</span>
+        )}
+      </OutBody>
+    </OutPane>
   );
 }
 
-function AdaptiveRunPane({ run, resultKind }: AdaptiveRunPaneProps): ReactElement {
-  // Live attach state: only populated for running runs.
-  // We store the result of the IPC call so we can distinguish "not yet checked"
-  // from "checked and no active PTY".  Keyed by run.id so switching runs resets.
+/** Loads and renders a markdown/text artifact file via the transcript endpoint. */
+function ArtifactBody({ runId, path }: { runId: number; path: string }): ReactElement {
+  const q = useScheduleRunTranscript(runId);
+  if (q.isPending) return <OutBody><span className="dim">Loading artifact…</span></OutBody>;
+  if (!q.data?.content) {
+    return (
+      <OutBody>
+        <span className="dim">File not readable or empty: {path}</span>
+      </OutBody>
+    );
+  }
+  return <OutBody>{q.data.content}</OutBody>;
+}
+
+function AdaptiveRunPane({
+  run,
+  resultKind,
+}: {
+  run: ScheduleRun;
+  resultKind: ResultKind;
+}): ReactElement {
+  // Live attach state: only populated for running runs. The result of the IPC
+  // call is stored so "not yet checked" is distinguishable from "checked and no
+  // active PTY". Keyed by run.id so switching runs resets.
   const [liveState, setLiveState] = useState<{
     runId: number;
     ptyId: string | null;
     checked: boolean;
   }>({ runId: -1, ptyId: null, checked: false });
 
-  const isRunning = run.status === "running" || run.status === "queued";
-  const hasFailed =
-    !isRunning && run.exit_code != null && run.exit_code !== 0;
+  const isRunning = isRunInFlight(run.status);
+  const hasFailed = !isRunning && run.exit_code != null && run.exit_code !== 0;
 
   // Fetch the transcript only when a transcript view will actually render: a
   // succeeded transcript-kind run, or a succeeded artifact-kind run that
@@ -470,57 +522,48 @@ function AdaptiveRunPane({ run, resultKind }: AdaptiveRunPaneProps): ReactElemen
   );
 
   // For running runs: ask the shell which pty_id is active.
-  // setState is inside a promise callback, not synchronously in the effect body.
   useEffect(() => {
     if (!isRunning) return;
-    // Already have current data.
     if (liveState.runId === run.id && liveState.checked) return;
     let cancelled = false;
     void getScheduleRunPtyId(run.id).then((info) => {
       if (cancelled) return;
       setLiveState({ runId: run.id, ptyId: info.pty_id ?? null, checked: true });
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.id, isRunning]);
 
   const ptyId = isRunning && liveState.runId === run.id ? liveState.ptyId : null;
   const attachChecked = isRunning && liveState.runId === run.id ? liveState.checked : false;
 
-  // Renderer selection (contract §C5):
-  // 1. Running/queued → live output pane.
-  // 2. Non-zero exit (failed/timed_out) → FAIL summary card — always visible
-  //    regardless of declared result type (surfaces auth errors etc.).
-  // 3. Succeeded → switch on resultKind:
-  //    - artifact: ArtifactPane if path present, else transcript fallback.
-  //    - summary | notification: PASS/FAIL card.
-  //    - transcript (default): transcript <pre>.
-
   // 1. Live attach for running runs.
   if (isRunning) {
     return (
-      <div className={styles.outputPane}>
-        <div className={styles.outputHeader}>
-          <span className={styles.outputLabel}>Live output</span>
-          <span className={styles.runningDot} aria-label="running" />
-          <SessionChip sessionId={run.session_id} />
-          <span className={styles.outputHint}>
-            (viewing only — closing does not stop the run)
-          </span>
-        </div>
+      <OutPane
+        label="live output"
+        head={
+          <>
+            <span className="dk-s" data-s="run" role="img" aria-label="running" />
+            <SessionChip sessionId={run.session_id} />
+            <span className="dim">viewing only — closing does not stop the run</span>
+          </>
+        }
+      >
         {!attachChecked ? (
-          <div className={styles.transcriptLoading}>Attaching…</div>
+          <OutBody>
+            <span className="dim">Attaching…</span>
+          </OutBody>
         ) : ptyId != null ? (
-          <LiveRunTerminal
-            ptyId={ptyId}
-            preloadContent={transcriptQ.data?.content ?? null}
-          />
+          <LiveRunTerminal ptyId={ptyId} preloadContent={transcriptQ.data?.content ?? null} />
         ) : (
-          <div className={styles.transcriptRunning}>
-            Run is starting, output will appear shortly…
-          </div>
+          <OutBody>
+            <span className="dim">Run is starting, output will appear shortly…</span>
+          </OutBody>
         )}
-      </div>
+      </OutPane>
     );
   }
 
@@ -540,20 +583,22 @@ function AdaptiveRunPane({ run, resultKind }: AdaptiveRunPaneProps): ReactElemen
   if (resultKind === "artifact") {
     if (run.artifact_path) {
       return (
-        <div className={styles.outputPane}>
-          <div className={styles.outputHeader}>
-            <span className={styles.outputLabel}>Artifact</span>
+        <OutPane
+          label="artifact"
+          head={
             <a
-              className={styles.outputLink}
+              className="dk-btn bare"
               href={`file://${run.artifact_path}`}
               target="_blank"
               rel="noreferrer"
+              title={run.artifact_path}
             >
               {run.artifact_path}
             </a>
-          </div>
-          <ArtifactPane runId={run.id} path={run.artifact_path} />
-        </div>
+          }
+        >
+          <ArtifactBody runId={run.id} path={run.artifact_path} />
+        </OutPane>
       );
     }
     return (
@@ -573,102 +618,56 @@ function AdaptiveRunPane({ run, resultKind }: AdaptiveRunPaneProps): ReactElemen
   return <TranscriptPane q={transcriptQ} sessionId={run.session_id} />;
 }
 
-/** Loads and renders a markdown/text artifact file via the transcript endpoint. */
-function ArtifactPane({
-  runId,
-  path,
-}: {
-  runId: number;
-  path: string;
-}): ReactElement {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  const isMarkdown = ext === "md" || ext === "markdown" || ext === "txt";
-  const q = useScheduleRunTranscript(runId);
+// ─── Run history ──────────────────────────────────────────────────────────────
 
-  if (q.isPending) {
-    return <div className={styles.transcriptLoading}>Loading artifact…</div>;
-  }
-  if (!q.data?.content) {
-    return (
-      <div className={styles.transcriptEmpty}>
-        File not readable or empty: {path}
-      </div>
-    );
-  }
-  if (isMarkdown) {
-    // Render markdown as white-space preserved pre (full markdown render is Phase 3)
-    return <pre className={`${styles.transcriptPre} ${styles.artifactPre}`}>{q.data.content}</pre>;
-  }
-  return <pre className={styles.transcriptPre}>{q.data.content}</pre>;
-}
+const COLS_RUN = "14px 100px 92px minmax(0, 1fr) 88px 84px";
 
-// ─── Run history table ────────────────────────────────────────────────────────
-
-interface RunHistoryTableProps {
-  runs: ScheduleRun[];
-  selectedRunId: number | null;
-  onSelectRun: (id: number) => void;
-}
-
-function RunHistoryTable({
+function RunHistory({
   runs,
   selectedRunId,
   onSelectRun,
-}: RunHistoryTableProps): ReactElement {
-  useNow(); // keep "Started" relative times ticking live
+}: {
+  runs: ScheduleRun[];
+  selectedRunId: number | null;
+  onSelectRun: (id: number) => void;
+}): ReactElement {
+  useNow(); // keep in-flight "started" times ticking live
   if (runs.length === 0) {
-    return <div className={styles.emptyRuns}>No runs yet.</div>;
+    return <div className="dk-note">No runs yet.</div>;
   }
   return (
-    <table className={styles.runsTable}>
-      <thead>
-        <tr>
-          <th>Status</th>
-          <th>Trigger</th>
-          <th>Started</th>
-          <th>Duration</th>
-          <th>Cost</th>
-        </tr>
-      </thead>
-      <tbody>
-        {runs.map((r) => (
-          <tr
-            key={r.id}
-            className={`${styles.runRow} ${selectedRunId === r.id ? styles.runRowSelected : ""}`}
-            onClick={() => onSelectRun(r.id)}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") onSelectRun(r.id);
-            }}
-          >
-            <td>
-              <RunStatusBadge status={r.status} />
-            </td>
-            <td className={styles.runTrigger}>{r.trigger ?? r.trigger_kind}</td>
-            <td
-              className={styles.runTime}
-              title={fmtAbsTime(r.started_at ?? r.fired_at)}
-            >
-              {isRunInFlight(r.status)
+    <DeckGrid cols={COLS_RUN} label="Run history">
+      <DeckHead cells={["status", "trigger", "started", "r duration", "r cost"]} />
+      {runs.map((r) => (
+        <DeckLine
+          key={r.id}
+          state={runState(r.status)}
+          selected={selectedRunId === r.id}
+          onOpen={() => onSelectRun(r.id)}
+          cells={[
+            { v: runWord(r.status), cls: "sub" },
+            r.trigger ?? r.trigger_kind,
+            {
+              v: isRunInFlight(r.status)
                 ? fmtRelTime(r.started_at ?? r.fired_at)
-                : fmtAbsTime(r.started_at ?? r.fired_at)}
-            </td>
-            <td className={styles.runDuration}>{fmtDurationMs(r.duration_ms)}</td>
-            <td className={styles.runCost}>
-              {r.cost_usd != null ? `$${r.cost_usd.toFixed(4)}` : "—"}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+                : fmtAbsTime(r.started_at ?? r.fired_at),
+              title: fmtAbsTime(r.started_at ?? r.fired_at),
+            },
+            { v: fmtDurationMs(r.duration_ms), cls: "r" },
+            { v: r.cost_usd != null ? `$${r.cost_usd.toFixed(4)}` : "—", cls: "r" },
+          ]}
+        />
+      ))}
+    </DeckGrid>
   );
 }
 
-// ─── Schedule detail panel ────────────────────────────────────────────────────
+// ─── Schedule detail ──────────────────────────────────────────────────────────
 
 interface ScheduleDetailProps {
   schedule: Schedule;
   humanSchedule: string;
+  projectName: string | null;
   onEdit: () => void;
   onClose: () => void;
 }
@@ -676,19 +675,21 @@ interface ScheduleDetailProps {
 function ScheduleDetail({
   schedule,
   humanSchedule,
+  projectName,
   onEdit,
   onClose,
 }: ScheduleDetailProps): ReactElement {
-  useNow(); // keep the detail "next run" relative time ticking live
+  useNow(); // keep the "next run" relative time ticking live
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const runsQ = useScheduleRuns(schedule.id);
   const update = useUpdateSchedule();
+  const remove = useDeleteSchedule();
   const fire = useFireScheduleManual();
 
   const runs = runsQ.data?.runs ?? [];
 
-  // Derive the effective selected run id: use explicit selection or fall back
-  // to the most recent run (avoids setState-in-effect lint error).
+  // Derive the effective selected run id: explicit selection, else the most
+  // recent run (avoids setState-in-effect).
   const effectiveRunId = selectedRunId ?? runs[0]?.id ?? null;
   const selectedRunQ = useScheduleRun(effectiveRunId ?? undefined);
 
@@ -709,137 +710,161 @@ function ScheduleDetail({
     });
   }
 
+  function handleDelete(): void {
+    if (!confirm(`Delete schedule "${schedule.name}"?`)) return;
+    remove.mutate(schedule.id, {
+      onSuccess: () => onClose(),
+      onError: (e) => toast.error(`Delete failed: ${e.message}`),
+    });
+  }
+
   const selectedRun =
     selectedRunQ.data ?? runs.find((r) => r.id === effectiveRunId) ?? null;
 
+  const kv: Array<[string, ReactNode]> = [
+    ["agent", schedule.agent_name || <span className="dim">none</span>],
+    ["project", projectName ?? <span className="dim">workspace</span>],
+    ["model", schedule.model || <span className="dim">provider default</span>],
+    ["run mode", schedule.run_mode],
+    ["result", resultKindLabel(schedule.result_kind)],
+    [
+      "tool access",
+      schedule.permission_mode === "bypassPermissions" ? (
+        <span style={{ color: "var(--warn)" }}>{permissionLabel(schedule.permission_mode)}</span>
+      ) : (
+        permissionLabel(schedule.permission_mode)
+      ),
+    ],
+    ["tools", schedule.allowed_tools || <span className="dim">all</span>],
+    [
+      "budget",
+      schedule.max_budget_usd != null ? (
+        `$${schedule.max_budget_usd.toFixed(2)}`
+      ) : (
+        <span className="dim">no limit</span>
+      ),
+    ],
+    [
+      "runtime",
+      schedule.max_runtime_sec != null ? (
+        `${schedule.max_runtime_sec}s`
+      ) : (
+        <span className="dim">no limit</span>
+      ),
+    ],
+    ["notify", schedule.notify_policy],
+  ];
+
+  if (schedule.result_kind === "artifact") {
+    kv.push([
+      "output",
+      schedule.artifact_dir ?? <span className="dim">workspace default</span>,
+    ]);
+  }
+
   return (
-    <div className={styles.detail}>
-      {/* Header */}
-      <div className={styles.detailHeader}>
-        <div className={styles.detailHeaderLeft}>
-          <div className={styles.detailName}>{schedule.name}</div>
-          <div className={styles.detailMeta}>
-            <span
-              className={`${styles.enabledPill} ${schedule.enabled ? styles.enabledOn : styles.enabledOff}`}
-            >
-              {schedule.enabled ? "enabled" : "disabled"}
-            </span>
-            <ResultKindBadge kind={schedule.result_kind} />
-            <span
-              className={styles.detailMetaText}
-              title={`Tool access: ${schedule.permission_mode}`}
-              style={
-                schedule.permission_mode === "bypassPermissions"
-                  ? { color: "var(--warn)" }
-                  : undefined
-              }
-            >
-              {schedule.permission_mode === "bypassPermissions"
-                ? "⚠ full access"
-                : schedule.permission_mode === "dontAsk"
-                  ? "allowed tools only"
-                  : schedule.permission_mode}
-            </span>
-            <span className={styles.detailMetaText} title={schedule.cron_expr ?? ""}>
-              {humanSchedule}
-            </span>
-            {schedule.next_fire_at && (
-              <span className={styles.detailMetaText} title={fmtAbsTime(schedule.next_fire_at)}>
-                next {fmtRelTime(schedule.next_fire_at)}
-              </span>
-            )}
-          </div>
-          <div className={styles.detailMeta}>
-            {schedule.agent_name && (
-              <span className={styles.detailMetaText}>
-                agent: <strong>{schedule.agent_name}</strong>
-              </span>
-            )}
-            {schedule.model && (
-              <span className={styles.detailMetaText}>
-                model: <strong>{schedule.model}</strong>
-              </span>
-            )}
-            {schedule.result_kind === "artifact" && (
-              <span className={styles.detailMetaText} title="Artifact output directory">
-                output: <strong>{schedule.artifact_dir ?? "workspace default"}</strong>
-              </span>
-            )}
-          </div>
-        </div>
-        <div className={styles.detailActions}>
+    <>
+      <div className="dk-bar">
+        <span className="dk-bar__ref">#{schedule.id}</span>
+        <span style={{ color: "var(--fg)" }}>{schedule.name}</span>
+        <span className="dk-tag" data-s={schedule.enabled ? "run" : undefined}>
+          {schedule.enabled ? "enabled" : "disabled"}
+        </span>
+        <span className="dk-tag">{resultKindLabel(schedule.result_kind)}</span>
+        <span className="dim" title={schedule.cron_expr ?? ""}>
+          {humanSchedule}
+        </span>
+        {schedule.enabled && schedule.next_fire_at && (
+          <span className="dim" title={fmtAbsTime(schedule.next_fire_at)}>
+            next {fmtRelTime(schedule.next_fire_at)}
+          </span>
+        )}
+        <span className="sp" />
+        <span className="dk-actions">
           <button
             type="button"
-            className={styles.btnGhost}
+            className="dk-btn"
             onClick={handleFire}
             disabled={fire.isPending}
             title="Run now (manual fire)"
           >
-            {fire.isPending ? "Firing…" : "▶ Run now"}
+            {fire.isPending ? "firing…" : "run now"}
           </button>
+          <button type="button" className="dk-btn" onClick={onEdit}>
+            edit
+          </button>
+          <DeckMenu
+            label={`Actions for ${schedule.name}`}
+            items={[
+              {
+                label: schedule.enabled ? "Disable schedule" : "Enable schedule",
+                disabled: update.isPending,
+                onSelect: handleToggle,
+              },
+              {
+                label: "Delete schedule",
+                danger: true,
+                separated: true,
+                disabled: remove.isPending,
+                onSelect: handleDelete,
+              },
+            ]}
+          />
           <button
             type="button"
-            className={styles.btnGhost}
-            onClick={handleToggle}
-            disabled={update.isPending}
-          >
-            {schedule.enabled ? "Disable" : "Enable"}
-          </button>
-          <button type="button" className={styles.btnGhost} onClick={onEdit}>
-            Edit
-          </button>
-          <button
-            type="button"
-            className={styles.btnClose}
+            className="dk-btn bare icon"
             onClick={onClose}
-            title="Close"
+            aria-label="Close detail"
           >
             ×
           </button>
-        </div>
+        </span>
       </div>
 
-      {/* Prompt preview */}
-      {schedule.prompt && (
-        <details className={styles.promptDetails}>
-          <summary className={styles.promptSummary}>Prompt</summary>
-          <pre className={styles.promptPre}>{schedule.prompt}</pre>
-        </details>
-      )}
-
-      {/* Health strip */}
-      {runs.length > 0 && (
-        <div className={styles.detailSection}>
-          <div className={styles.sectionLabel}>Health</div>
-          <HealthStrip runs={runs} />
-        </div>
-      )}
-
-      {/* Run history + adaptive pane side-by-side */}
-      <div className={styles.detailBody}>
-        <div className={styles.runsColumn}>
-          <div className={styles.sectionLabel}>Run history</div>
-          {runsQ.isPending ? (
-            <div className={styles.emptyRuns}>Loading…</div>
-          ) : (
-            <RunHistoryTable
-              runs={runs}
-              selectedRunId={effectiveRunId}
-              onSelectRun={setSelectedRunId}
-            />
+      <div className="dk-detail">
+        <div>
+          {schedule.prompt && (
+            <DeckGroup label="prompt" collapsible defaultOpen={false}>
+              <div className={styles.out}>
+                <OutBody>{schedule.prompt}</OutBody>
+              </div>
+            </DeckGroup>
           )}
-        </div>
-        <div className={styles.outputColumn}>
+
+          <DeckGroup
+            label="runs"
+            count={runs.length}
+            note={runs.length > 0 ? <HealthStrip runs={runs} /> : undefined}
+          >
+            {runsQ.isPending ? (
+              <div className="dk-note">Loading…</div>
+            ) : (
+              <RunHistory
+                runs={runs}
+                selectedRunId={effectiveRunId}
+                onSelectRun={setSelectedRunId}
+              />
+            )}
+          </DeckGroup>
+
           {selectedRun != null ? (
             <AdaptiveRunPane run={selectedRun} resultKind={schedule.result_kind} />
           ) : (
-            <div className={styles.outputEmpty}>
-              Select a run to view output
-            </div>
+            runs.length > 0 && <div className="dk-note">Select a run to view its output.</div>
           )}
         </div>
+
+        <div>
+          <h2 className="dk-group__h">launch spec</h2>
+          {kv.map(([k, v]) => (
+            <div className="dk-kv" key={k}>
+              <span>{k}</span>
+              <span>{v}</span>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -904,7 +929,6 @@ function CronBuilder({
     preset === "weekly" ||
     preset === "monthly";
 
-  // AM/PM conversion
   const amPm = hour < 12 ? "AM" : "PM";
   const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
 
@@ -922,15 +946,14 @@ function CronBuilder({
   }
 
   return (
-    <div className={styles.cronBuilder}>
-      {/* Repeat dropdown */}
-      <div className={styles.cronRow}>
-        <label className={styles.cronLabel} htmlFor="cb-preset">
-          Repeat
+    <div className={styles.grid}>
+      <div className={styles.field}>
+        <label className={styles.label} htmlFor="cb-preset">
+          repeat
         </label>
         <select
           id="cb-preset"
-          className={styles.select}
+          className={styles.ctl}
           value={preset}
           onChange={(e) => onPresetChange(e.target.value as PresetKind)}
         >
@@ -942,17 +965,17 @@ function CronBuilder({
         </select>
       </div>
 
-      {/* Time picker — shown for time-of-day presets */}
       {showTime && (
-        <div className={styles.cronRow}>
-          <label className={styles.cronLabel}>Time</label>
-          <div className={styles.timePicker}>
+        <div className={styles.field}>
+          <span className={styles.label}>time</span>
+          <div className={styles.row}>
             <select
-              className={styles.selectNarrow}
+              className={sx(styles.ctl, styles.narrowCtl)}
               value={displayHour}
               onChange={(e) => {
                 const h12 = Number(e.target.value);
-                const base = amPm === "PM" ? (h12 === 12 ? 12 : h12 + 12) : h12 === 12 ? 0 : h12;
+                const base =
+                  amPm === "PM" ? (h12 === 12 ? 12 : h12 + 12) : h12 === 12 ? 0 : h12;
                 onHourChange(base);
               }}
               aria-label="Hour"
@@ -963,9 +986,9 @@ function CronBuilder({
                 </option>
               ))}
             </select>
-            <span className={styles.timeSep}>:</span>
+            <span className="dim">:</span>
             <select
-              className={styles.selectNarrow}
+              className={sx(styles.ctl, styles.narrowCtl)}
               value={minute}
               onChange={(e) => onMinuteChange(Number(e.target.value))}
               aria-label="Minute"
@@ -977,7 +1000,7 @@ function CronBuilder({
               ))}
             </select>
             <select
-              className={styles.selectNarrow}
+              className={sx(styles.ctl, styles.narrowCtl)}
               value={amPm}
               onChange={(e) => handleAmPm(e.target.value)}
               aria-label="AM/PM"
@@ -989,16 +1012,16 @@ function CronBuilder({
         </div>
       )}
 
-      {/* Day-of-week chips for Weekly */}
       {preset === "weekly" && (
-        <div className={styles.cronRow}>
-          <label className={styles.cronLabel}>On</label>
-          <div className={styles.dayChips}>
+        <div className={sx(styles.field, styles.full)}>
+          <span className={styles.label}>on</span>
+          <div className="dk-actions">
             {WEEKDAY_LABELS.map((label, idx) => (
               <button
                 key={idx}
                 type="button"
-                className={`${styles.dayChip} ${weekdays.includes(idx) ? styles.dayChipOn : ""}`}
+                className={sx("dk-btn", weekdays.includes(idx) && "pri")}
+                aria-pressed={weekdays.includes(idx)}
                 onClick={() => toggleWeekday(idx)}
               >
                 {label}
@@ -1008,59 +1031,60 @@ function CronBuilder({
         </div>
       )}
 
-      {/* Day-of-month for Monthly */}
       {preset === "monthly" && (
-        <div className={styles.cronRow}>
-          <label className={styles.cronLabel} htmlFor="cb-dom">
-            Day
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="cb-dom">
+            day
           </label>
-          <select
-            id="cb-dom"
-            className={styles.selectNarrow}
-            value={dayOfMonth}
-            onChange={(e) => onDayOfMonthChange(Number(e.target.value))}
-          >
-            {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-          <span className={styles.fieldHint}>of each month (max 28)</span>
+          <div className={styles.row}>
+            <select
+              id="cb-dom"
+              className={sx(styles.ctl, styles.narrowCtl)}
+              value={dayOfMonth}
+              onChange={(e) => onDayOfMonthChange(Number(e.target.value))}
+            >
+              {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            <span className={styles.help}>of each month (max 28)</span>
+          </div>
         </div>
       )}
 
-      {/* N-hours selector */}
       {preset === "every_n_hours" && (
-        <div className={styles.cronRow}>
-          <label className={styles.cronLabel} htmlFor="cb-nhours">
-            Every
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="cb-nhours">
+            every
           </label>
-          <select
-            id="cb-nhours"
-            className={styles.selectNarrow}
-            value={everyNHours}
-            onChange={(e) => onEveryNHoursChange(Number(e.target.value))}
-          >
-            {N_HOURS_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <span className={styles.fieldHint}>hour(s)</span>
+          <div className={styles.row}>
+            <select
+              id="cb-nhours"
+              className={sx(styles.ctl, styles.narrowCtl)}
+              value={everyNHours}
+              onChange={(e) => onEveryNHoursChange(Number(e.target.value))}
+            >
+              {N_HOURS_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <span className={styles.help}>hour(s)</span>
+          </div>
         </div>
       )}
 
-      {/* Raw cron input — Custom only */}
       {preset === "custom" && (
-        <div className={styles.cronRow}>
-          <label className={styles.cronLabel} htmlFor="cb-custom">
-            Cron
+        <div className={sx(styles.field, styles.full)}>
+          <label className={styles.label} htmlFor="cb-custom">
+            cron
           </label>
           <input
             id="cb-custom"
-            className={`${styles.input} ${styles.inputMono}`}
+            className={styles.ctl}
             value={customCron}
             onChange={(e) => onCustomCronChange(e.target.value)}
             placeholder="0 9 * * *"
@@ -1072,18 +1096,14 @@ function CronBuilder({
   );
 }
 
-/** Live preview bar — calls cron-preview endpoint and shows description + next fires. */
-function CronPreviewBar({
-  previewInput,
-}: {
-  previewInput: CronPreviewInput;
-}): ReactElement {
+/** Live preview — calls the cron-preview endpoint and shows the description
+ *  plus the next three fires. */
+function CronPreviewBar({ previewInput }: { previewInput: CronPreviewInput }): ReactElement {
   const preview = useCronPreview();
   // Debounce a STABLE serialized key, not the object. previewInput is recreated
   // by the parent on every render (e.g. each prompt keystroke); debouncing the
   // object reference re-fires the mutation on unrelated edits and makes the bar
-  // blink. Keying on the JSON string only re-fires when the schedule actually
-  // changes.
+  // blink. Keying on the JSON string only re-fires when the schedule changes.
   const inputKey = useDebounce(JSON.stringify(previewInput), 400);
 
   // Retain the last good result so a legitimate refetch (e.g. editing the cron)
@@ -1096,9 +1116,7 @@ function CronPreviewBar({
       input.preset_kind != null ||
       (typeof input.cron_expr === "string" && input.cron_expr.trim().length > 0);
     if (!hasContent) return;
-    preview.mutate(input, {
-      onSuccess: (data) => setLastData(data),
-    });
+    preview.mutate(input, { onSuccess: (data) => setLastData(data) });
     // preview.mutate intentionally not in deps — mutation fn is stable
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputKey]);
@@ -1107,35 +1125,26 @@ function CronPreviewBar({
   if (!data && !preview.isPending) return <></>;
 
   return (
-    <div className={styles.previewBar}>
+    <div className="dk-note" style={{ padding: "var(--u2) var(--u3)" }}>
       {!data && preview.isPending ? (
-        <span className={styles.previewLoading}>Calculating…</span>
+        "Calculating…"
       ) : !data && preview.isError ? (
-        <span className={styles.previewError}>Invalid cron expression</span>
+        <span style={{ color: "var(--err)" }}>Invalid cron expression</span>
       ) : data ? (
-        <>
-          <span className={styles.previewIcon}>▶</span>
-          <span className={styles.previewDesc}>{data.description}</span>
-          <span className={styles.previewSep}>/</span>
-          <span className={styles.previewFires}>
-            Next:{" "}
-            {data.next_fires
-              .slice(0, 3)
-              .map((f) => fmtAbsTime(f))
-              .join(" · ")}
+        <span className={styles.row}>
+          <span className="dk-s" data-s="todo" role="img" aria-label="queued" />
+          <span style={{ color: "var(--fg-2)" }}>{data.description}</span>
+          {data.cron_expr && <span className="dk-tag">{data.cron_expr}</span>}
+          <span>
+            next {data.next_fires.slice(0, 3).map((f) => fmtAbsTime(f)).join(" · ")}
           </span>
-          {data.cron_expr && (
-            <code className={styles.previewCron} title="Cron expression">
-              {data.cron_expr}
-            </code>
-          )}
-        </>
+        </span>
       ) : null}
     </div>
   );
 }
 
-// ─── Job config fields ────────────────────────────────────────────────────────
+// ─── Form state ───────────────────────────────────────────────────────────────
 
 interface FormState {
   name: string;
@@ -1193,12 +1202,9 @@ function scheduleToForm(s: Schedule): FormState {
   // open as raw cron (Custom) so the exact expression is always visible.
   const isInterval = s.kind === "interval";
   return {
+    ...defaultForm(),
     name: s.name,
     preset: isInterval ? "every_n_hours" : "custom",
-    hour: 9,
-    minute: 0,
-    weekdays: [1],
-    dayOfMonth: 1,
     everyNHours:
       isInterval && s.interval_seconds
         ? Math.max(1, Math.round(s.interval_seconds / 3600))
@@ -1215,8 +1221,7 @@ function scheduleToForm(s: Schedule): FormState {
     permissionMode: s.permission_mode,
     allowedTools: s.allowed_tools ?? "",
     maxBudgetUsd: s.max_budget_usd != null ? String(s.max_budget_usd) : "",
-    maxRuntimeSec:
-      s.max_runtime_sec != null ? String(s.max_runtime_sec) : "",
+    maxRuntimeSec: s.max_runtime_sec != null ? String(s.max_runtime_sec) : "",
     notifyPolicy: s.notify_policy,
   };
 }
@@ -1236,27 +1241,107 @@ function formToPreviewInput(f: FormState): CronPreviewInput {
   };
 }
 
-// ─── Schedule form modal ──────────────────────────────────────────────────────
+/**
+ * Mirrors `_cron_helpers.preset_to_cron` for the create/edit path so we can
+ * pass a concrete cron_expr to the API without an extra round-trip.
+ */
+function encodedPresetCron(f: FormState): string {
+  const h = String(f.hour).padStart(2, "0");
+  const m = String(f.minute).padStart(2, "0");
+  switch (f.preset) {
+    case "daily":
+      return `${f.minute} ${f.hour} * * *`;
+    case "weekdays":
+      return `${f.minute} ${f.hour} * * 1-5`;
+    case "weekly": {
+      const days = f.weekdays.length > 0 ? f.weekdays.join(",") : "1";
+      return `${f.minute} ${f.hour} * * ${days}`;
+    }
+    case "monthly":
+      return `${f.minute} ${f.hour} ${f.dayOfMonth} * *`;
+    case "every_n_hours":
+      return `0 */${f.everyNHours} * * *`;
+    case "custom":
+      return f.customCron.trim();
+    default:
+      return `${m} ${h} * * *`;
+  }
+}
+
+// ─── Modal shell ──────────────────────────────────────────────────────────────
+
+/** Escape closes, as it does for `DeckMenu`; click-through on the scrim closes. */
+function Modal({
+  title,
+  onClose,
+  narrow,
+  children,
+  footer,
+}: {
+  title: string;
+  onClose: () => void;
+  narrow?: boolean;
+  children: ReactNode;
+  footer: ReactNode;
+}): ReactElement {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className={styles.scrim}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className={sx(styles.modal, narrow && styles.narrow)}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className={styles.modalHead}>
+          <h2>{title}</h2>
+          <span className={styles.spacer} />
+          <button
+            type="button"
+            className="dk-btn bare icon"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className={styles.modalBody}>{children}</div>
+        <div className={styles.modalFoot}>{footer}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Schedule form ────────────────────────────────────────────────────────────
 
 interface ScheduleFormModalProps {
   /** When non-null, we are editing an existing schedule. */
   editing: Schedule | null;
+  /** Starter values for a new schedule (empty-state shortcuts). */
+  seed?: Partial<FormState> | null;
   onClose: () => void;
 }
 
-function ScheduleFormModal({
-  editing,
-  onClose,
-}: ScheduleFormModalProps): ReactElement {
+function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): ReactElement {
   const [form, setForm] = useState<FormState>(
-    editing != null ? scheduleToForm(editing) : defaultForm(),
+    editing != null ? scheduleToForm(editing) : { ...defaultForm(), ...seed },
   );
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const providersQ = useProviders();
-  const providerModelsQ = useProviderModels(
-    form.providerId !== "" ? form.providerId : null,
-  );
+  const providerModelsQ = useProviderModels(form.providerId !== "" ? form.providerId : null);
   const projectsQ = useProjects();
   const configuredAgentsQ = useConfiguredAgents();
 
@@ -1271,23 +1356,14 @@ function ScheduleFormModal({
     if (key === "providerId" && val !== prevProviderIdRef.current) {
       prevProviderIdRef.current = val as number | "";
       // Auto-fill the provider's default model when switching providers.
-      const prov = (providersQ.data ?? []).find(
-        (p) => p.id === Number(val),
-      );
-      setForm((f) => ({
-        ...f,
-        [key]: val,
-        model: prov?.default_model ?? "",
-      }));
+      const prov = (providersQ.data ?? []).find((p) => p.id === Number(val));
+      setForm((f) => ({ ...f, [key]: val, model: prov?.default_model ?? "" }));
       return;
     }
     setForm((f) => ({ ...f, [key]: val }));
   }
 
-  // Gather agents: org agents + project agents
-  const allAgents = [
-    ...(configuredAgentsQ.data?.shared ?? []),
-  ];
+  const allAgents = [...(configuredAgentsQ.data?.shared ?? [])];
 
   // Auto-select first provider when creating a new schedule and providers load.
   useEffect(() => {
@@ -1329,10 +1405,8 @@ function ScheduleFormModal({
       artifact_dir: form.artifactDir.trim() || null,
       permission_mode: form.permissionMode,
       allowed_tools: form.allowedTools.trim() || null,
-      max_budget_usd:
-        form.maxBudgetUsd !== "" ? Number(form.maxBudgetUsd) : null,
-      max_runtime_sec:
-        form.maxRuntimeSec !== "" ? Number(form.maxRuntimeSec) : null,
+      max_budget_usd: form.maxBudgetUsd !== "" ? Number(form.maxBudgetUsd) : null,
+      max_runtime_sec: form.maxRuntimeSec !== "" ? Number(form.maxRuntimeSec) : null,
       notify_policy: form.notifyPolicy,
     };
 
@@ -1360,9 +1434,7 @@ function ScheduleFormModal({
         ? { interval_seconds: Math.max(1, form.everyNHours) * 3600 }
         : {
             cron_expr:
-              form.preset === "custom"
-                ? form.customCron.trim() || null
-                : encodedPresetCron(form),
+              form.preset === "custom" ? form.customCron.trim() || null : encodedPresetCron(form),
           };
     return {
       name: form.name.trim(),
@@ -1377,10 +1449,8 @@ function ScheduleFormModal({
       artifact_dir: form.artifactDir.trim() || null,
       permission_mode: form.permissionMode,
       allowed_tools: form.allowedTools.trim() || null,
-      max_budget_usd:
-        form.maxBudgetUsd !== "" ? Number(form.maxBudgetUsd) : null,
-      max_runtime_sec:
-        form.maxRuntimeSec !== "" ? Number(form.maxRuntimeSec) : null,
+      max_budget_usd: form.maxBudgetUsd !== "" ? Number(form.maxBudgetUsd) : null,
+      max_runtime_sec: form.maxRuntimeSec !== "" ? Number(form.maxRuntimeSec) : null,
       notify_policy: form.notifyPolicy,
     };
   }
@@ -1422,447 +1492,458 @@ function ScheduleFormModal({
   const providerModels = providerModelsQ.data ?? [];
 
   return (
-    <div
-      className={styles.modalOverlay}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <Modal
+      title={editing != null ? "edit schedule" : "new schedule"}
+      onClose={onClose}
+      footer={
+        <>
+          <span className={styles.spacer} />
+          <span className="dk-actions">
+            <button type="button" className="dk-btn" onClick={onClose} disabled={isPending}>
+              cancel
+            </button>
+            <button
+              type="button"
+              className="dk-btn pri"
+              onClick={handleSubmit}
+              disabled={isPending}
+            >
+              {isPending
+                ? editing != null
+                  ? "saving…"
+                  : "creating…"
+                : editing != null
+                  ? "save changes"
+                  : "create schedule"}
+            </button>
+          </span>
+        </>
+      }
     >
-      <div className={styles.modal} role="dialog" aria-modal="true">
-        <div className={styles.modalHeader}>
-          <h2 className={styles.modalTitle}>
-            {editing != null ? "Edit schedule" : "New schedule"}
-          </h2>
-          <button
-            type="button"
-            className={styles.btnClose}
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
+      <div className={styles.field}>
+        <label className={styles.label} htmlFor="sf-name">
+          name
+        </label>
+        <input
+          id="sf-name"
+          className={styles.ctl}
+          value={form.name}
+          onChange={(e) => patch("name", e.target.value)}
+          placeholder="Daily digest"
+          autoFocus
+        />
+      </div>
 
-        <div className={styles.modalBody}>
-          {/* Name */}
-          <div className={styles.formField}>
-            <label className={styles.fieldLabel} htmlFor="sf-name">
-              Name
+      <div className={styles.section}>
+        <div className={styles.sectionHead}>when it fires</div>
+        <CronBuilder
+          preset={form.preset}
+          hour={form.hour}
+          minute={form.minute}
+          weekdays={form.weekdays}
+          dayOfMonth={form.dayOfMonth}
+          everyNHours={form.everyNHours}
+          customCron={form.customCron}
+          onPresetChange={(p) => patch("preset", p)}
+          onHourChange={(h) => patch("hour", h)}
+          onMinuteChange={(m) => patch("minute", m)}
+          onWeekdaysChange={(w) => patch("weekdays", w)}
+          onDayOfMonthChange={(d) => patch("dayOfMonth", d)}
+          onEveryNHoursChange={(n) => patch("everyNHours", n)}
+          onCustomCronChange={(s) => patch("customCron", s)}
+        />
+        <CronPreviewBar previewInput={previewInput} />
+      </div>
+
+      <div className={styles.section}>
+        <div className={styles.sectionHead}>what it launches</div>
+        <div className={styles.grid}>
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="sf-project">
+              project
             </label>
-            <input
-              id="sf-name"
-              className={styles.input}
-              value={form.name}
-              onChange={(e) => patch("name", e.target.value)}
-              placeholder="Daily digest"
-              autoFocus
+            <select
+              id="sf-project"
+              className={styles.ctl}
+              value={form.projectId}
+              onChange={(e) =>
+                patch("projectId", e.target.value === "" ? "" : Number(e.target.value))
+              }
+            >
+              <option value="">Workspace / none</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="sf-provider">
+              provider
+            </label>
+            <select
+              id="sf-provider"
+              className={styles.ctl}
+              value={form.providerId}
+              onChange={(e) =>
+                patch("providerId", e.target.value === "" ? "" : Number(e.target.value))
+              }
+            >
+              <option value="" disabled>
+                Select a provider…
+              </option>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.display_name}
+                </option>
+              ))}
+            </select>
+            {providers.length === 0 && (
+              <span className={styles.help}>
+                No providers configured yet — add one in Settings before a schedule can run.
+              </span>
+            )}
+          </div>
+
+          {form.providerId !== "" && (
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="sf-model">
+                model
+              </label>
+              <select
+                id="sf-model"
+                className={styles.ctl}
+                value={form.model}
+                onChange={(e) => patch("model", e.target.value)}
+              >
+                <option value="">Provider default</option>
+                {providerModels.map((m) => (
+                  <option key={m.id} value={m.model_name}>
+                    {m.display_name}
+                  </option>
+                ))}
+                {/* Fallback: provider.models list if no provider_models rows */}
+                {providerModels.length === 0 &&
+                  (providers.find((p) => p.id === Number(form.providerId))?.models ?? []).map(
+                    (m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ),
+                  )}
+              </select>
+            </div>
+          )}
+
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="sf-agent">
+              agent
+            </label>
+            <select
+              id="sf-agent"
+              className={styles.ctl}
+              value={form.agentName}
+              onChange={(e) => patch("agentName", e.target.value)}
+            >
+              <option value="">None (no specific agent)</option>
+              {allAgents.map((a) => (
+                <option key={a.id} value={a.name}>
+                  {a.display_name ?? a.name}
+                  {a.kind === "org" ? " (org)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="sf-runmode">
+              run mode
+            </label>
+            <select
+              id="sf-runmode"
+              className={styles.ctl}
+              value={form.runMode}
+              onChange={(e) => patch("runMode", e.target.value as RunMode)}
+            >
+              <option value="background">Background (headless)</option>
+              <option value="windowed">Windowed (terminal opens)</option>
+            </select>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="sf-resultkind">
+              result type
+            </label>
+            <select
+              id="sf-resultkind"
+              className={styles.ctl}
+              value={form.resultKind}
+              onChange={(e) => patch("resultKind", e.target.value as ResultKind)}
+            >
+              <option value="transcript">Transcript</option>
+              <option value="artifact">Artifact (file output)</option>
+              <option value="summary">Summary (PASS/FAIL)</option>
+              <option value="notification">Notification</option>
+            </select>
+          </div>
+
+          {form.resultKind === "artifact" && (
+            <div className={sx(styles.field, styles.full)}>
+              <label className={styles.label} htmlFor="sf-artifactdir">
+                output path
+              </label>
+              <div className={styles.row}>
+                <input
+                  id="sf-artifactdir"
+                  className={styles.ctl}
+                  style={{ flex: "1 1 auto", width: "auto" }}
+                  value={form.artifactDir}
+                  onChange={(e) => patch("artifactDir", e.target.value)}
+                  placeholder="Default: workspace/schedule-artifacts/<name>"
+                />
+                <button
+                  type="button"
+                  className="dk-btn"
+                  onClick={() => {
+                    void (async () => {
+                      const { open } = await import("@tauri-apps/plugin-dialog");
+                      const result = await open({
+                        directory: true,
+                        multiple: false,
+                        title: "Choose artifact output folder",
+                      });
+                      if (typeof result === "string") {
+                        patch("artifactDir", result);
+                      }
+                    })();
+                  }}
+                >
+                  browse…
+                </button>
+              </div>
+              <span className={styles.help}>
+                Where the agent saves its file. Leave empty to use the workspace default. The
+                exact file path is appended to the prompt so the run can capture it.
+              </span>
+            </div>
+          )}
+
+          <div className={sx(styles.field, styles.full)}>
+            <label className={styles.label} htmlFor="sf-prompt">
+              prompt
+            </label>
+            <textarea
+              id="sf-prompt"
+              className={styles.ctl}
+              value={form.prompt}
+              onChange={(e) => patch("prompt", e.target.value)}
+              placeholder="Describe what the agent should do…"
+              rows={4}
             />
           </div>
-
-          {/* Cron builder */}
-          <div className={styles.formSection}>
-            <div className={styles.formSectionHeader}>
-              <span className={styles.sectionLabel}>Schedule</span>
-              <div className={styles.formSectionRule} />
-            </div>
-            <div className={styles.formSectionBody}>
-              <CronBuilder
-                preset={form.preset}
-                hour={form.hour}
-                minute={form.minute}
-                weekdays={form.weekdays}
-                dayOfMonth={form.dayOfMonth}
-                everyNHours={form.everyNHours}
-                customCron={form.customCron}
-                onPresetChange={(p) => patch("preset", p)}
-                onHourChange={(h) => patch("hour", h)}
-                onMinuteChange={(m) => patch("minute", m)}
-                onWeekdaysChange={(w) => patch("weekdays", w)}
-                onDayOfMonthChange={(d) => patch("dayOfMonth", d)}
-                onEveryNHoursChange={(n) => patch("everyNHours", n)}
-                onCustomCronChange={(s) => patch("customCron", s)}
-              />
-              <CronPreviewBar previewInput={previewInput} />
-            </div>
-          </div>
-
-          {/* Job config */}
-          <div className={styles.formSection}>
-            <div className={styles.formSectionHeader}>
-              <span className={styles.sectionLabel}>Job configuration</span>
-              <div className={styles.formSectionRule} />
-            </div>
-            <div className={styles.formSectionBody}>
-              <div className={styles.formGrid}>
-                {/* Project */}
-                <div className={styles.formField}>
-                  <label className={styles.fieldLabel} htmlFor="sf-project">
-                    Project
-                  </label>
-                  <select
-                    id="sf-project"
-                    className={styles.select}
-                    value={form.projectId}
-                    onChange={(e) =>
-                      patch(
-                        "projectId",
-                        e.target.value === "" ? "" : Number(e.target.value),
-                      )
-                    }
-                  >
-                    <option value="">Workspace / none</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Provider */}
-                <div className={styles.formField}>
-                  <label className={styles.fieldLabel} htmlFor="sf-provider">
-                    Provider
-                  </label>
-                  <select
-                    id="sf-provider"
-                    className={styles.select}
-                    value={form.providerId}
-                    onChange={(e) =>
-                      patch(
-                        "providerId",
-                        e.target.value === "" ? "" : Number(e.target.value),
-                      )
-                    }
-                  >
-                    <option value="" disabled>Select a provider…</option>
-                    {providers.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.display_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Model — only show when provider selected */}
-                {form.providerId !== "" && (
-                  <div className={styles.formField}>
-                    <label className={styles.fieldLabel} htmlFor="sf-model">
-                      Model
-                    </label>
-                    <select
-                      id="sf-model"
-                      className={styles.select}
-                      value={form.model}
-                      onChange={(e) => patch("model", e.target.value)}
-                    >
-                      <option value="">Provider default</option>
-                      {providerModels.map((m) => (
-                        <option key={m.id} value={m.model_name}>
-                          {m.display_name}
-                        </option>
-                      ))}
-                      {/* Fallback: provider.models list if no provider_models rows */}
-                      {providerModels.length === 0 &&
-                        (
-                          providers.find((p) => p.id === Number(form.providerId))
-                            ?.models ?? []
-                        ).map((m) => (
-                          <option key={m} value={m}>
-                            {m}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Agent */}
-                <div className={styles.formField}>
-                  <label className={styles.fieldLabel} htmlFor="sf-agent">
-                    Agent
-                  </label>
-                  <select
-                    id="sf-agent"
-                    className={styles.select}
-                    value={form.agentName}
-                    onChange={(e) => patch("agentName", e.target.value)}
-                  >
-                    <option value="">None (no specific agent)</option>
-                    {allAgents.map((a) => (
-                      <option key={a.id} value={a.name}>
-                        {a.display_name ?? a.name}
-                        {a.kind === "org" ? " (org)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Run mode */}
-                <div className={styles.formField}>
-                  <label className={styles.fieldLabel} htmlFor="sf-runmode">
-                    Run mode
-                  </label>
-                  <select
-                    id="sf-runmode"
-                    className={styles.select}
-                    value={form.runMode}
-                    onChange={(e) => patch("runMode", e.target.value as RunMode)}
-                  >
-                    <option value="background">Background (headless)</option>
-                    <option value="windowed">Windowed (terminal opens)</option>
-                  </select>
-                </div>
-
-                {/* Result kind */}
-                <div className={styles.formField}>
-                  <label className={styles.fieldLabel} htmlFor="sf-resultkind">
-                    Result type
-                  </label>
-                  <select
-                    id="sf-resultkind"
-                    className={styles.select}
-                    value={form.resultKind}
-                    onChange={(e) =>
-                      patch("resultKind", e.target.value as ResultKind)
-                    }
-                  >
-                    <option value="transcript">Transcript</option>
-                    <option value="artifact">Artifact (file output)</option>
-                    <option value="summary">Summary (PASS/FAIL)</option>
-                    <option value="notification">Notification</option>
-                  </select>
-                </div>
-
-                {/* Output path — artifact only */}
-                {form.resultKind === "artifact" && (
-                  <div className={`${styles.formField} ${styles.formFieldFull}`}>
-                    <label className={styles.fieldLabel} htmlFor="sf-artifactdir">
-                      Output path
-                    </label>
-                    <div className={styles.inputRow}>
-                      <input
-                        id="sf-artifactdir"
-                        className={styles.input}
-                        value={form.artifactDir}
-                        onChange={(e) => patch("artifactDir", e.target.value)}
-                        placeholder="Default: workspace/schedule-artifacts/<name>"
-                      />
-                      <button
-                        type="button"
-                        className={styles.btnGhost}
-                        onClick={() => {
-                          void (async () => {
-                            const { open } = await import("@tauri-apps/plugin-dialog");
-                            const result = await open({
-                              directory: true,
-                              multiple: false,
-                              title: "Choose artifact output folder",
-                            });
-                            if (typeof result === "string") {
-                              patch("artifactDir", result);
-                            }
-                          })();
-                        }}
-                      >
-                        Browse…
-                      </button>
-                    </div>
-                    <span className={styles.fieldHelper}>
-                      Where the agent saves its file. Leave empty to use the workspace default. The exact file path is appended to the prompt so the run can capture it.
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Prompt */}
-              <div className={styles.formField}>
-                <label className={styles.fieldLabel} htmlFor="sf-prompt">
-                  Prompt
-                </label>
-                <textarea
-                  id="sf-prompt"
-                  className={styles.textarea}
-                  value={form.prompt}
-                  onChange={(e) => patch("prompt", e.target.value)}
-                  placeholder="Describe what the agent should do…"
-                  rows={4}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Advanced section */}
-          <details
-            className={styles.advancedSection}
-            open={showAdvanced}
-            onToggle={(e) =>
-              setShowAdvanced((e.currentTarget as HTMLDetailsElement).open)
-            }
-          >
-            <summary className={styles.advancedSummary}>
-              Advanced options
-            </summary>
-            <div className={styles.formGrid}>
-              {/* Permission mode — only the two modes that are safe for an
-                  unattended run are offered. 'default'/'plan'/'auto' would
-                  block on an interactive prompt that no one can answer (and
-                  stall the run), so they are intentionally not selectable; a
-                  legacy value already stored on the schedule is preserved. */}
-              <div className={styles.formField}>
-                <label className={styles.fieldLabel} htmlFor="sf-perm">
-                  Tool access
-                </label>
-                <select
-                  id="sf-perm"
-                  className={styles.select}
-                  value={form.permissionMode}
-                  onChange={(e) => patch("permissionMode", e.target.value)}
-                >
-                  <option value="dontAsk">
-                    Allowed tools only (safe default)
-                  </option>
-                  <option value="bypassPermissions">
-                    Full access — runs any tool autonomously
-                  </option>
-                  {!["dontAsk", "bypassPermissions"].includes(
-                    form.permissionMode,
-                  ) && (
-                    <option value={form.permissionMode}>
-                      {form.permissionMode} (advanced)
-                    </option>
-                  )}
-                </select>
-                <span className={styles.fieldHelper}>
-                  {form.permissionMode === "bypassPermissions"
-                    ? "Unattended runs may use any tool (web, shell, file edits) without asking."
-                    : "Only the tools listed below run; anything else is denied — the run never stalls."}
-                </span>
-              </div>
-
-              {/* Notify policy */}
-              <div className={styles.formField}>
-                <label className={styles.fieldLabel} htmlFor="sf-notify">
-                  Notifications
-                </label>
-                <select
-                  id="sf-notify"
-                  className={styles.select}
-                  value={form.notifyPolicy}
-                  onChange={(e) =>
-                    patch("notifyPolicy", e.target.value as NotifyPolicy)
-                  }
-                >
-                  <option value="on_failure">On failure only</option>
-                  <option value="every_run">Every run</option>
-                  <option value="never">Never</option>
-                </select>
-              </div>
-
-              {/* Allowed tools */}
-              <div className={`${styles.formField} ${styles.formFieldFull}`}>
-                <label className={styles.fieldLabel} htmlFor="sf-tools">
-                  Allowed tools
-                </label>
-                <input
-                  id="sf-tools"
-                  className={`${styles.input} ${styles.inputMono}`}
-                  value={form.allowedTools}
-                  onChange={(e) => patch("allowedTools", e.target.value)}
-                  placeholder="Read,Bash,Edit"
-                />
-                <span className={styles.fieldHelper}>
-                  Comma-separated tool names. Leave empty to allow all tools.
-                </span>
-              </div>
-
-              {/* Max budget */}
-              <div className={styles.formField}>
-                <label className={styles.fieldLabel} htmlFor="sf-budget">
-                  Max budget
-                </label>
-                <input
-                  id="sf-budget"
-                  className={styles.input}
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.maxBudgetUsd}
-                  onChange={(e) => patch("maxBudgetUsd", e.target.value)}
-                  placeholder="e.g. 1.00"
-                />
-                <span className={styles.fieldHelper}>USD. Leave empty for no limit.</span>
-              </div>
-
-              {/* Max runtime */}
-              <div className={styles.formField}>
-                <label className={styles.fieldLabel} htmlFor="sf-runtime">
-                  Max runtime
-                </label>
-                <input
-                  id="sf-runtime"
-                  className={styles.input}
-                  type="number"
-                  min="0"
-                  step="60"
-                  value={form.maxRuntimeSec}
-                  onChange={(e) => patch("maxRuntimeSec", e.target.value)}
-                  placeholder="e.g. 3600"
-                />
-                <span className={styles.fieldHelper}>Seconds. Leave empty for no limit.</span>
-              </div>
-            </div>
-          </details>
-        </div>
-
-        <div className={styles.modalFooter}>
-          <button
-            type="button"
-            className={styles.btnGhost}
-            onClick={onClose}
-            disabled={isPending}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={styles.btnPrimary}
-            onClick={handleSubmit}
-            disabled={isPending}
-          >
-            {isPending
-              ? editing != null
-                ? "Saving…"
-                : "Creating…"
-              : editing != null
-                ? "Save changes"
-                : "Create schedule"}
-          </button>
         </div>
       </div>
-    </div>
+
+      <details
+        open={showAdvanced}
+        onToggle={(e) => setShowAdvanced((e.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary className={styles.sectionHead} style={{ cursor: "pointer" }}>
+          advanced
+        </summary>
+        <div className={styles.grid} style={{ marginTop: "var(--u3)" }}>
+          {/* Permission mode — only the two modes that are safe for an
+              unattended run are offered. 'default'/'plan'/'auto' would block on
+              an interactive prompt that no one can answer (and stall the run),
+              so they are intentionally not selectable; a legacy value already
+              stored on the schedule is preserved. */}
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="sf-perm">
+              tool access
+            </label>
+            <select
+              id="sf-perm"
+              className={styles.ctl}
+              value={form.permissionMode}
+              onChange={(e) => patch("permissionMode", e.target.value)}
+            >
+              <option value="dontAsk">Allowed tools only (safe default)</option>
+              <option value="bypassPermissions">Full access — runs any tool autonomously</option>
+              {!["dontAsk", "bypassPermissions"].includes(form.permissionMode) && (
+                <option value={form.permissionMode}>{form.permissionMode} (advanced)</option>
+              )}
+            </select>
+            <span className={styles.help}>
+              {form.permissionMode === "bypassPermissions"
+                ? "Unattended runs may use any tool (web, shell, file edits) without asking."
+                : "Only the tools listed below run; anything else is denied — the run never stalls."}
+            </span>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="sf-notify">
+              notifications
+            </label>
+            <select
+              id="sf-notify"
+              className={styles.ctl}
+              value={form.notifyPolicy}
+              onChange={(e) => patch("notifyPolicy", e.target.value as NotifyPolicy)}
+            >
+              <option value="on_failure">On failure only</option>
+              <option value="every_run">Every run</option>
+              <option value="never">Never</option>
+            </select>
+          </div>
+
+          <div className={sx(styles.field, styles.full)}>
+            <label className={styles.label} htmlFor="sf-tools">
+              allowed tools
+            </label>
+            <input
+              id="sf-tools"
+              className={styles.ctl}
+              value={form.allowedTools}
+              onChange={(e) => patch("allowedTools", e.target.value)}
+              placeholder="Read,Bash,Edit"
+            />
+            <span className={styles.help}>
+              Comma-separated tool names. Leave empty to allow all tools.
+            </span>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="sf-budget">
+              max budget
+            </label>
+            <input
+              id="sf-budget"
+              className={styles.ctl}
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.maxBudgetUsd}
+              onChange={(e) => patch("maxBudgetUsd", e.target.value)}
+              placeholder="e.g. 1.00"
+            />
+            <span className={styles.help}>USD. Leave empty for no limit.</span>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="sf-runtime">
+              max runtime
+            </label>
+            <input
+              id="sf-runtime"
+              className={styles.ctl}
+              type="number"
+              min="0"
+              step="60"
+              value={form.maxRuntimeSec}
+              onChange={(e) => patch("maxRuntimeSec", e.target.value)}
+              placeholder="e.g. 3600"
+            />
+            <span className={styles.help}>Seconds. Leave empty for no limit.</span>
+          </div>
+        </div>
+      </details>
+    </Modal>
   );
 }
 
-// ─── Schedule list row ────────────────────────────────────────────────────────
+// ─── Retention ────────────────────────────────────────────────────────────────
+
+function RetentionModal({ onClose }: { onClose: () => void }): ReactElement {
+  const retentionQ = useScheduleRetention();
+  const setRetention = useSetScheduleRetention();
+  // Retain the draft separately; the displayed value is the draft if it was
+  // touched, otherwise the server value (no setState-in-effect).
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? (retentionQ.data != null ? String(retentionQ.data.retention_days) : "30");
+
+  function handleSave(): void {
+    const days = Number(value);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      toast.error("Retention must be 1–365 days");
+      return;
+    }
+    setRetention.mutate(days, {
+      onSuccess: () => toast.success("Retention setting saved"),
+      onError: (e) => toast.error(`Save failed: ${e.message}`),
+    });
+  }
+
+  return (
+    <Modal
+      title="transcript retention"
+      onClose={onClose}
+      narrow
+      footer={
+        <>
+          <span className={styles.spacer} />
+          <span className="dk-actions">
+            <button type="button" className="dk-btn" onClick={onClose}>
+              cancel
+            </button>
+            <button
+              type="button"
+              className="dk-btn pri"
+              onClick={handleSave}
+              disabled={setRetention.isPending}
+            >
+              {setRetention.isPending ? "saving…" : "save"}
+            </button>
+          </span>
+        </>
+      }
+    >
+      <div className="dk-note sans">
+        Run metadata and artifact files are kept. Internal run transcripts (raw logs) are deleted
+        after this many days to reclaim disk space. The prune runs on startup and then once per
+        day.
+      </div>
+      <div className={styles.field}>
+        <label className={styles.label} htmlFor="ret-days">
+          keep transcripts for (days)
+        </label>
+        <input
+          id="ret-days"
+          className={styles.ctl}
+          type="number"
+          min="1"
+          max="365"
+          value={value}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Schedule row ─────────────────────────────────────────────────────────────
+
+const COLS_SCHEDULE = "14px minmax(0, 1fr) 180px 96px 150px 72px 94px 112px";
 
 interface ScheduleRowProps {
   schedule: Schedule;
+  cronLabel: string | null;
+  projectName: string | null;
   selected: boolean;
   onSelect: () => void;
   onEdit: () => void;
 }
 
-/** A single row in the schedule list. Fetches cron preview for human label. */
 function ScheduleRow({
   schedule,
+  cronLabel,
+  projectName,
   selected,
   onSelect,
   onEdit,
 }: ScheduleRowProps): ReactElement {
   useNow(); // keep next/last-run relative times ticking live
-  // Async cron description (interval/event kinds are described synchronously).
-  const [cronLabel, setCronLabel] = useState<string | null>(null);
-  const preview = useCronPreview();
   const update = useUpdateSchedule();
   const remove = useDeleteSchedule();
   const fire = useFireScheduleManual();
@@ -1870,220 +1951,248 @@ function ScheduleRow({
   const runs = runsQ.data?.runs ?? [];
   const lastRun = runs[0] ?? null;
 
-  // Fetch a friendly description for cron schedules only.
-  useEffect(() => {
-    if (schedule.kind === "cron" && schedule.cron_expr) {
-      preview.mutate(
-        { cron_expr: schedule.cron_expr, count: 0 },
-        { onSuccess: (d) => setCronLabel(d.description) },
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedule.kind, schedule.cron_expr]);
-
   const humanSchedule = cadenceLabel(schedule, cronLabel);
 
-  function handleToggle(e: React.MouseEvent): void {
-    e.stopPropagation();
+  function handleToggle(): void {
     update.mutate(
       { id: schedule.id, patch: { enabled: !schedule.enabled } },
       { onError: (err) => toast.error(`Toggle failed: ${err.message}`) },
     );
   }
 
-  function handleDelete(e: React.MouseEvent): void {
-    e.stopPropagation();
+  function handleDelete(): void {
     if (!confirm(`Delete schedule "${schedule.name}"?`)) return;
     remove.mutate(schedule.id, {
       onError: (err) => toast.error(`Delete failed: ${err.message}`),
     });
   }
 
-  function handleFire(e: React.MouseEvent): void {
-    e.stopPropagation();
+  function handleFire(): void {
     fire.mutate(schedule.id, {
       onSuccess: () => toast.success(`Fired ${schedule.name}`),
       onError: (err) => toast.error(`Fire failed: ${err.message}`),
     });
   }
 
-  function handleEdit(e: React.MouseEvent): void {
-    e.stopPropagation();
-    onEdit();
-  }
+  const menu: DeckMenuItem[] = [
+    {
+      label: schedule.enabled ? "Disable schedule" : "Enable schedule",
+      disabled: update.isPending,
+      onSelect: handleToggle,
+    },
+    {
+      label: "Delete schedule",
+      danger: true,
+      separated: true,
+      disabled: remove.isPending,
+      onSelect: handleDelete,
+    },
+  ];
 
   return (
-    <tr
-      className={`${styles.listRow} ${selected ? styles.listRowSelected : ""} ${!schedule.enabled ? styles.listRowDisabled : ""}`}
-      onClick={onSelect}
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") onSelect();
-      }}
-    >
-      {/* Status glyph derived from last run */}
-      <td className={styles.listCellStatus}>
-        {lastRun ? (
-          <RunStatusBadge status={lastRun.status} />
-        ) : (
-          <span className={`${styles.statusBadge} ${styles.statusGrey}`}>
-            — never run
-          </span>
-        )}
-      </td>
-
-      {/* Name */}
-      <td className={styles.listCellName}>
-        <div className={styles.rowName}>{schedule.name}</div>
-        {schedule.agent_name && (
-          <div className={styles.rowSub}>{schedule.agent_name}</div>
-        )}
-      </td>
-
-      {/* Type badge */}
-      <td className={styles.listCellType}>
-        <ResultKindBadge kind={schedule.result_kind} />
-      </td>
-
-      {/* Human schedule */}
-      <td className={styles.listCellSchedule}>
-        <span title={schedule.cron_expr ?? ""}>{humanSchedule}</span>
-      </td>
-
-      {/* Next run */}
-      <td
-        className={styles.listCellNext}
-        title={fmtAbsTime(schedule.next_fire_at)}
-      >
-        {schedule.enabled && schedule.next_fire_at
-          ? fmtRelTime(schedule.next_fire_at)
-          : "—"}
-      </td>
-
-      {/* Last run */}
-      <td className={styles.listCellLast}>
-        {lastRun ? (
-          <span title={fmtAbsTime(lastRun.started_at ?? lastRun.fired_at)}>
-            {fmtRelTime(lastRun.started_at ?? lastRun.fired_at)}
-          </span>
-        ) : (
-          "—"
-        )}
-      </td>
-
-      {/* Last duration */}
-      <td className={styles.listCellDuration}>
-        {fmtDurationMs(lastRun?.duration_ms)}
-      </td>
-
-      {/* Enabled toggle */}
-      <td className={styles.listCellToggle} onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
-          className={`${styles.toggleBtn} ${schedule.enabled ? styles.toggleOn : styles.toggleOff}`}
-          onClick={handleToggle}
-          disabled={update.isPending}
-          title={schedule.enabled ? "Disable" : "Enable"}
-          aria-label={schedule.enabled ? "Disable schedule" : "Enable schedule"}
-        >
-          {schedule.enabled ? "On" : "Off"}
-        </button>
-      </td>
-
-      {/* Project tag */}
-      <td className={styles.listCellProject}>
-        {schedule.project_id != null ? (
-          <span className={styles.projectTag}>proj #{schedule.project_id}</span>
-        ) : null}
-      </td>
-
-      {/* Quick actions */}
-      <td className={styles.listCellActions} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.rowActions}>
-          <button
-            type="button"
-            className={styles.actionBtn}
-            onClick={handleFire}
-            disabled={fire.isPending}
-            title="Run now"
-          >
-            ▶
-          </button>
-          <button
-            type="button"
-            className={styles.actionBtn}
-            onClick={handleEdit}
-            title="Edit"
-          >
-            ✎
-          </button>
-          <button
-            type="button"
-            className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
-            onClick={handleDelete}
-            disabled={remove.isPending}
-            title="Delete"
-          >
-            ✕
-          </button>
-        </div>
-      </td>
-    </tr>
+    <DeckLine
+      state={scheduleState(schedule, lastRun)}
+      selected={selected}
+      onOpen={onSelect}
+      cells={[
+        {
+          v: (
+            <>
+              {schedule.name}
+              {schedule.agent_name && (
+                <>
+                  {" "}
+                  <span className="dk-tag">{schedule.agent_name}</span>
+                </>
+              )}
+              {projectName && (
+                <>
+                  {" "}
+                  <span className="dim">· {projectName}</span>
+                </>
+              )}
+            </>
+          ),
+          cls: "sub",
+          title: schedule.name,
+        },
+        { v: humanSchedule, title: schedule.cron_expr ?? humanSchedule },
+        {
+          v: schedule.enabled && schedule.next_fire_at ? fmtRelTime(schedule.next_fire_at) : "—",
+          title: fmtAbsTime(schedule.next_fire_at),
+        },
+        {
+          v: lastRun ? (
+            <>
+              {fmtRelTime(lastRun.started_at ?? lastRun.fired_at)}{" "}
+              <span className="dim">{runWord(lastRun.status)}</span>
+            </>
+          ) : (
+            "never"
+          ),
+          title: lastRun ? fmtAbsTime(lastRun.started_at ?? lastRun.fired_at) : "never run",
+        },
+        { v: fmtDurationMs(lastRun?.duration_ms), cls: "r" },
+        resultKindLabel(schedule.result_kind),
+        {
+          v: (
+            <span className="dk-actions end" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className="dk-btn bare"
+                onClick={handleFire}
+                disabled={fire.isPending}
+                title="Run now (manual fire)"
+              >
+                run
+              </button>
+              <button type="button" className="dk-btn bare" onClick={onEdit}>
+                edit
+              </button>
+              <DeckMenu label={`Actions for ${schedule.name}`} items={menu} />
+            </span>
+          ),
+          cls: "r",
+        },
+      ]}
+    />
   );
 }
 
-// ─── Client-side preset → cron helper ─────────────────────────────────────────
+// ─── Empty state ──────────────────────────────────────────────────────────────
 
 /**
- * Mirrors `_cron_helpers.preset_to_cron` for the create/edit path so we can
- * pass a concrete cron_expr to the API without an extra round-trip.
+ * Three seeded starters. The empty state is what a fresh install opens on, and
+ * a page that only says "none yet" leaves the owner to invent a cadence, a
+ * prompt and a result type before anything can fire. Each of these opens the
+ * same form, pre-filled, so the first schedule is one edit away.
  */
-function encodedPresetCron(f: FormState): string {
-  const h = String(f.hour).padStart(2, "0");
-  const m = String(f.minute).padStart(2, "0");
-  switch (f.preset) {
-    case "daily":
-      return `${f.minute} ${f.hour} * * *`;
-    case "weekdays":
-      return `${f.minute} ${f.hour} * * 1-5`;
-    case "weekly": {
-      const days = f.weekdays.length > 0 ? f.weekdays.join(",") : "1";
-      return `${f.minute} ${f.hour} * * ${days}`;
-    }
-    case "monthly":
-      return `${f.minute} ${f.hour} ${f.dayOfMonth} * *`;
-    case "every_n_hours":
-      return `0 */${f.everyNHours} * * *`;
-    case "custom":
-      return f.customCron.trim();
-    default:
-      return `${m} ${h} * * *`;
-  }
+const STARTERS: ReadonlyArray<{ label: string; note: string; seed: Partial<FormState> }> = [
+  {
+    label: "morning digest",
+    note: "weekdays at 09:00 — one agent reads the board and says what changed",
+    seed: {
+      name: "Morning digest",
+      preset: "weekdays",
+      hour: 9,
+      minute: 0,
+      resultKind: "summary",
+      prompt:
+        "Summarise what changed since yesterday: tasks opened and closed, failed runs, and anything blocking. Keep it under ten lines.",
+    },
+  },
+  {
+    label: "nightly check",
+    note: "every day at 02:00 — runs the project's own checks and reports pass or fail",
+    seed: {
+      name: "Nightly check",
+      preset: "daily",
+      hour: 2,
+      minute: 0,
+      resultKind: "summary",
+      prompt:
+        "Run this project's full verification suite. Report PASS or FAIL, and on failure the first failing output.",
+    },
+  },
+  {
+    label: "weekly report",
+    note: "Mondays at 08:00 — writes a file you can send on",
+    seed: {
+      name: "Weekly report",
+      preset: "weekly",
+      weekdays: [1],
+      hour: 8,
+      minute: 0,
+      resultKind: "artifact",
+      prompt:
+        "Write a one-page report of the past week for this project and save it to the output path.",
+    },
+  },
+];
+
+function EmptyState({
+  hasProvider,
+  onStart,
+}: {
+  hasProvider: boolean;
+  onStart: (seed: Partial<FormState>) => void;
+}): ReactElement {
+  return (
+    <>
+      <div className="dk-note sans">
+        <div style={{ color: "var(--fg-2)" }}>No schedules yet</div>
+        <p>
+          A schedule is what turns a time into a running agent session. At the moment you choose
+          it starts a real session — an agent, a prompt, a project, a provider and a model — then
+          keeps the transcript, the cost and whatever file the run produced.
+        </p>
+        <p>Until one exists, nothing in this app fires on its own.</p>
+        {!hasProvider && (
+          <p style={{ color: "var(--warn)" }}>
+            No provider is configured yet. A schedule needs one to launch, so add a provider in
+            Settings first.
+          </p>
+        )}
+      </div>
+
+      <DeckGroup label="start from one of these" note="or use “new schedule” above" state="todo">
+        <DeckGrid cols="14px 150px minmax(0, 1fr)" label="Starter schedules">
+          <DeckHead cells={["starter", "what it does"]} />
+          {STARTERS.map((s) => (
+            <DeckLine
+              key={s.label}
+              state="todo"
+              onOpen={() => onStart(s.seed)}
+              cells={[
+                { v: s.label, cls: "sub" },
+                { v: s.note, title: s.note },
+              ]}
+            />
+          ))}
+        </DeckGrid>
+      </DeckGroup>
+    </>
+  );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
-/** Cache of human-readable descriptions per schedule id. */
+/** Its own component so the 1 s tick does not re-render an open form modal. */
+function NextFireStat({ at }: { at: string | undefined }): ReactElement {
+  useNow();
+  return (
+    <div className="dk-big">
+      <div className={sx("v", !at && "na")} title={fmtAbsTime(at)}>
+        {at ? fmtRelTime(at) : "—"}
+      </div>
+      <div className="l">next fire</div>
+    </div>
+  );
+}
 
 export function SchedulesPage(): ReactElement {
   const schedulesQ = useSchedules();
   const schedules = schedulesQ.data?.schedules ?? [];
+  const { data: projects = [] } = useProjects();
+  const { data: providers = [] } = useProviders();
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
+  const [formSeed, setFormSeed] = useState<Partial<FormState> | null>(null);
+  const [showRetention, setShowRetention] = useState(false);
   const [humanLabels, setHumanLabels] = useState<Record<number, string>>({});
 
   const queryClient = useQueryClient();
 
-  // Windowed mode (3.2): when a windowed run starts, auto-select its schedule
-  // and navigate to the runs list so the user sees the live output pane. Always
-  // refresh the run history so the newly-started run appears immediately.
+  // Windowed mode: when a windowed run starts, auto-select its schedule so the
+  // live output pane is on screen. Always refresh the run history so the
+  // newly-started run appears immediately.
   useScheduleRunStarted(
     useCallback(
       (payload: ScheduleRunStartedPayload) => {
         // Invalidate every query the list + detail read so the queued→running
-        // transition shows live (status badge, run-history row, single run).
+        // transition shows live (state glyph, run-history row, single run).
         void queryClient.invalidateQueries({ queryKey: ["schedules"] });
         void queryClient.invalidateQueries({
           queryKey: ["schedule-runs", payload.schedule_id],
@@ -2101,7 +2210,7 @@ export function SchedulesPage(): ReactElement {
   );
 
   // When a run finishes, invalidate every query the detail panel reads — the
-  // schedules list (next/last run), the run-history table, the single run, and
+  // schedules list (next/last run), the run-history grid, the single run, and
   // its transcript — so the UI updates live instead of only on re-select.
   useScheduleRunFinished(
     useCallback(
@@ -2123,7 +2232,8 @@ export function SchedulesPage(): ReactElement {
 
   const preview = useCronPreview();
 
-  // Build human labels for all schedules once they load
+  // One human label per cron schedule, fetched once and shared by the row and
+  // the detail panel.
   useEffect(() => {
     for (const s of schedules) {
       if (humanLabels[s.id] != null || !s.cron_expr) continue;
@@ -2135,209 +2245,136 @@ export function SchedulesPage(): ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedules]);
 
-  const selectedSchedule = schedules.find((s) => s.id === selectedId) ?? null;
-  const humanSchedule = selectedSchedule
-    ? cadenceLabel(
-        selectedSchedule,
-        selectedId != null ? humanLabels[selectedId] : null,
-      )
-    : "—";
+  const projectName = useCallback(
+    (id: number | null): string | null =>
+      id == null ? null : (projects.find((p) => p.id === id)?.name ?? `project #${id}`),
+    [projects],
+  );
 
-  const openNew = useCallback(() => {
+  const selectedSchedule = schedules.find((s) => s.id === selectedId) ?? null;
+
+  const openNew = useCallback((seed?: Partial<FormState>) => {
     setEditingSchedule(null);
+    setFormSeed(seed ?? null);
     setFormOpen(true);
   }, []);
 
-  const openEdit = useCallback(
-    (s: Schedule) => {
-      setEditingSchedule(s);
-      setFormOpen(true);
-    },
-    [],
-  );
+  const openEdit = useCallback((s: Schedule) => {
+    setEditingSchedule(s);
+    setFormSeed(null);
+    setFormOpen(true);
+  }, []);
 
   const closeForm = useCallback(() => {
     setFormOpen(false);
     setEditingSchedule(null);
+    setFormSeed(null);
   }, []);
 
-  const [showRetention, setShowRetention] = useState(false);
-  const retentionQ = useScheduleRetention();
-  const setRetention = useSetScheduleRetention();
-  // Retain the draft value separately; initialise from server data lazily.
-  // We avoid setState-in-effect by computing the displayed value inline.
-  const [retentionDraft, setRetentionDraft] = useState<string | null>(null);
-  // The displayed value is the draft if it was touched, otherwise the server value.
-  const retentionInput =
-    retentionDraft ?? (retentionQ.data != null ? String(retentionQ.data.retention_days) : "30");
-  function setRetentionInput(v: string): void {
-    setRetentionDraft(v);
-  }
+  const active = schedules.filter((s) => s.enabled);
+  const paused = schedules.filter((s) => !s.enabled);
 
-  function handleSaveRetention(): void {
-    const days = Number(retentionInput);
-    if (!Number.isInteger(days) || days < 1 || days > 365) {
-      toast.error("Retention must be 1–365 days");
-      return;
-    }
-    setRetention.mutate(days, {
-      onSuccess: () => toast.success("Retention setting saved"),
-      onError: (e) => toast.error(`Save failed: ${e.message}`),
-    });
-  }
+  // The soonest armed fire across every enabled schedule — the one number this
+  // page exists to answer at a glance.
+  const nextFire = active
+    .map((s) => s.next_fire_at)
+    .filter((v): v is string => v != null)
+    .sort()[0];
 
   const actions: ReactNode = (
-    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+    <span className="dk-actions">
       <button
         type="button"
-        className={styles.btnGhost}
-        onClick={() => setShowRetention((v) => !v)}
+        className="dk-btn"
+        onClick={() => setShowRetention(true)}
         title="Transcript retention settings"
-        style={{ fontSize: 13 }}
       >
-        ⚙ Retention
+        retention
       </button>
-      <button
-        type="button"
-        className={styles.btnPrimary}
-        onClick={openNew}
-      >
-        + New schedule
+      <button type="button" className="dk-btn pri" onClick={() => openNew()}>
+        new schedule
       </button>
-    </div>
+    </span>
   );
 
-  return (
-    <Shell topbarTitle="Schedules" actions={actions}>
-      <div className={styles.page}>
-        {/* Left: schedule list */}
-        <div className={styles.listPane}>
-          {schedulesQ.isPending ? (
-            <div className={styles.empty}>Loading…</div>
-          ) : schedules.length === 0 ? (
-            <div className={styles.empty}>
-              No schedules yet — click "New schedule" to create one.
-            </div>
-          ) : (
-            <div className={styles.tableWrapper}>
-              <table className={styles.listTable}>
-                <thead>
-                  <tr>
-                    <th>Status</th>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>Schedule</th>
-                    <th>Next run</th>
-                    <th>Last run</th>
-                    <th>Duration</th>
-                    <th>Enabled</th>
-                    <th>Project</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {schedules.map((s) => (
-                    <ScheduleRow
-                      key={s.id}
-                      schedule={s}
-                      selected={selectedId === s.id}
-                      onSelect={() =>
-                        setSelectedId((cur) => (cur === s.id ? null : s.id))
-                      }
-                      onEdit={() => openEdit(s)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Right: detail panel — shown when a schedule is selected */}
-        {selectedSchedule != null && (
-          <div className={styles.detailPane}>
-            <ScheduleDetail
-              schedule={selectedSchedule}
-              humanSchedule={humanSchedule}
-              onEdit={() => openEdit(selectedSchedule)}
-              onClose={() => setSelectedId(null)}
+  function renderGroup(label: string, rows: Schedule[], state: DeckState): ReactElement | null {
+    if (rows.length === 0) return null;
+    return (
+      <DeckGroup label={label} count={rows.length} state={state}>
+        <DeckGrid cols={COLS_SCHEDULE} label={`${label} schedules`}>
+          <DeckHead
+            cells={["schedule", "cadence", "next", "last run", "r took", "result", "r "]}
+          />
+          {rows.map((s) => (
+            <ScheduleRow
+              key={s.id}
+              schedule={s}
+              cronLabel={humanLabels[s.id] ?? null}
+              projectName={projectName(s.project_id)}
+              selected={selectedId === s.id}
+              onSelect={() => setSelectedId((cur) => (cur === s.id ? null : s.id))}
+              onEdit={() => openEdit(s)}
             />
-          </div>
-        )}
-      </div>
+          ))}
+        </DeckGrid>
+      </DeckGroup>
+    );
+  }
 
-      {/* Retention settings panel */}
-      {showRetention && (
-        <div
-          className={styles.modalOverlay}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowRetention(false);
-          }}
-        >
-          <div
-            className={styles.modal}
-            role="dialog"
-            aria-modal="true"
-            style={{ maxWidth: 400 }}
-          >
-            <div className={styles.modalHeader}>
-              <h2 className={styles.modalTitle}>Transcript retention</h2>
-              <button
-                type="button"
-                className={styles.btnClose}
-                onClick={() => { setShowRetention(false); setRetentionDraft(null); }}
-                aria-label="Close"
-              >
-                ×
-              </button>
+  return (
+    <DeckShell
+      title="schedules"
+      crumb={
+        schedules.length === 0
+          ? "nothing fires on its own yet"
+          : `${active.length} armed · ${paused.length} paused`
+      }
+      actions={actions}
+    >
+      {schedulesQ.isPending ? (
+        <div className="dk-note">Loading…</div>
+      ) : schedules.length === 0 ? (
+        <EmptyState hasProvider={providers.length > 0} onStart={(seed) => openNew(seed)} />
+      ) : (
+        <>
+          <div className="dk-bigs">
+            <div className="dk-big">
+              <div className="v">{active.length}</div>
+              <div className="l">armed · will fire on their own</div>
             </div>
-            <div className={styles.modalBody}>
-              <p style={{ fontSize: 13, color: "var(--fg-3)", marginBottom: 16 }}>
-                Run metadata and artifact files are kept. Internal run
-                transcripts (raw logs) are deleted after this many days to
-                reclaim disk space. The prune runs on startup and then once per
-                day.
-              </p>
-              <div className={styles.formField}>
-                <label className={styles.fieldLabel} htmlFor="ret-days">
-                  Keep transcripts for (days)
-                </label>
-                <input
-                  id="ret-days"
-                  className={styles.input}
-                  type="number"
-                  min="1"
-                  max="365"
-                  value={retentionInput}
-                  onChange={(e) => setRetentionInput(e.target.value)}
-                />
-              </div>
+            <div className="dk-big">
+              <div className={sx("v", paused.length === 0 && "na")}>{paused.length}</div>
+              <div className="l">paused · kept, but inert</div>
             </div>
-            <div className={styles.modalFooter}>
-              <button
-                type="button"
-                className={styles.btnGhost}
-                onClick={() => { setShowRetention(false); setRetentionDraft(null); }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className={styles.btnPrimary}
-                onClick={handleSaveRetention}
-                disabled={setRetention.isPending}
-              >
-                {setRetention.isPending ? "Saving…" : "Save"}
-              </button>
-            </div>
+            <NextFireStat at={nextFire} />
           </div>
-        </div>
+
+          {renderGroup("armed", active, "wait")}
+          {renderGroup("paused", paused, "idle")}
+
+          {selectedSchedule != null && (
+            <>
+              <hr className="dk-rule" />
+              <ScheduleDetail
+                key={selectedSchedule.id}
+                schedule={selectedSchedule}
+                humanSchedule={cadenceLabel(
+                  selectedSchedule,
+                  humanLabels[selectedSchedule.id] ?? null,
+                )}
+                projectName={projectName(selectedSchedule.project_id)}
+                onEdit={() => openEdit(selectedSchedule)}
+                onClose={() => setSelectedId(null)}
+              />
+            </>
+          )}
+        </>
       )}
 
-      {/* Form modal */}
+      {showRetention && <RetentionModal onClose={() => setShowRetention(false)} />}
       {formOpen && (
-        <ScheduleFormModal editing={editingSchedule} onClose={closeForm} />
+        <ScheduleFormModal editing={editingSchedule} seed={formSeed} onClose={closeForm} />
       )}
-    </Shell>
+    </DeckShell>
   );
 }
