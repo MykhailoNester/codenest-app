@@ -27,6 +27,7 @@ import {
 // since a reader skimming the import list could otherwise mistake the two.
 import { ConversationTurns } from "./agent-conversation";
 import { subagentLabel } from "../../lib/agent-views";
+import type { DeckState } from "../deck/deck-grid";
 import styles from "./agent-view-panel.module.css";
 
 /** Elapsed rendered the same way everywhere in this panel, with a live run
@@ -108,9 +109,13 @@ function SubagentView({
         <section className={styles.section}>
           <h4 className={styles.sectionTitle}>Result</h4>
           {hasOutput ? (
-            <pre className={block.isError ? styles.outputError : styles.output}>
-              {block.output}
-            </pre>
+            <div className="dk-out">
+              <pre
+                className={`dk-term__b ${block.isError ? styles.outputError : styles.output}`}
+              >
+                {block.output}
+              </pre>
+            </div>
           ) : (
             <p className={styles.muted}>{resultNote}</p>
           )}
@@ -120,14 +125,41 @@ function SubagentView({
   );
 }
 
+/** The four Deck states a phase agent can be in, and the word each reads as
+ *  — colour is never the only carrier, so the glyph needs a text alternative
+ *  as much as it needs its character. */
+type AgentDeckState = Extract<DeckState, "run" | "done" | "fail" | "idle">;
+
+const AGENT_STATE_WORD: Record<AgentDeckState, string> = {
+  run: "running",
+  done: "done",
+  fail: "failed",
+  idle: "not started",
+};
+
+function agentDeckState(state: OrchestrationAgent["state"]): AgentDeckState {
+  switch (state) {
+    case "start":
+    case "progress":
+      return "run";
+    case "done":
+      return "done";
+    case "error":
+      return "fail";
+    default:
+      return "idle";
+  }
+}
+
 function AgentRow({ agent }: { agent: OrchestrationAgent }): ReactElement {
   const running = agent.state === "start" || agent.state === "progress";
+  const deckState = agentDeckState(agent.state);
   return (
     <li className={styles.agent}>
-      <span className={`${styles.dot} ${styles[`dot_${agent.state}`] ?? ""}`} />
+      <span className="dk-s" role="img" data-s={deckState} aria-label={AGENT_STATE_WORD[deckState]} />
       <span className={styles.agentLabel}>{agent.label}</span>
-      {agent.agentType ? <span className={styles.chip}>{agent.agentType}</span> : null}
-      {agent.cached ? <span className={styles.chip}>cached</span> : null}
+      {agent.agentType ? <span className="dk-tag">{agent.agentType}</span> : null}
+      {agent.cached ? <span className="dk-tag">cached</span> : null}
       <span className={styles.agentMeta}>
         {agent.toolCalls !== null ? `${agent.toolCalls} tools` : null}
         {agent.tokens !== null ? ` · ${agent.tokens.toLocaleString("en-US")} tok` : null}

@@ -1,16 +1,20 @@
-/* Assistant markdown. Element selectors under one hashed class, because
-   `react-markdown` renders plain tags and takes no per-element className.
+/* Assistant markdown, on Deck. Element selectors under one hashed class,
+   because `react-markdown` renders plain tags and takes no per-element
+   className — which is why this is a module rather than a use of `.dk-prose`,
+   whose rules only reach the handful of elements it names.
 
-   Sizing matches `.msg` in `agent-conversation.module.css` (12.5px / 1.6) so a
-   rendered turn sits at the same optical weight as the user turn above it. The
-   one thing deliberately *not* inherited is `white-space: pre-wrap`: markdown
-   already carries its own block structure, and keeping pre-wrap would turn
-   every source line break into a second blank line. */
+   Sizing matches `.msg` in `agent-conversation.module.css` (Deck's 13px sans
+   prose at 1.65) so a rendered turn sits at the same optical weight as the
+   user turn above it. The one thing deliberately *not* inherited is
+   `white-space: pre-wrap`: markdown already carries its own block structure,
+   and keeping pre-wrap would turn every source line break into a second
+   blank line. */
 
 .md {
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--fg-1);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--fg-2);
   /* Overrides the `pre-wrap` inherited from the enclosing `.msg`. Without this
      every source newline inside a paragraph would survive as a line break on
      top of the block spacing below, double-spacing the whole reply. */
@@ -28,12 +32,12 @@
 }
 
 .md p {
-  margin: 0.5em 0;
+  margin: 0 0 var(--u3);
 }
 
 .md strong {
-  color: var(--fg-0);
-  font-weight: 650;
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .md em {
@@ -41,7 +45,7 @@
 }
 
 .md del {
-  opacity: 0.6;
+  color: var(--fg-4);
 }
 
 /* Headings: a model reaches for `##` inside what is really a chat message, so
@@ -53,10 +57,9 @@
 .md h4,
 .md h5,
 .md h6 {
-  color: var(--fg-0);
-  font-weight: 650;
-  line-height: 1.35;
-  margin: 1.1em 0 0.45em;
+  font: 500 14px/1.4 var(--sans);
+  color: var(--fg);
+  margin: var(--u4) 0 var(--u2);
 }
 
 .md h1 {
@@ -64,20 +67,20 @@
 }
 
 .md h2 {
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 .md h3,
 .md h4,
 .md h5,
 .md h6 {
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .md ul,
 .md ol {
-  margin: 0.5em 0;
-  padding-left: 1.35em;
+  margin: 0 0 var(--u3);
+  padding-left: var(--u4);
 }
 
 .md li {
@@ -100,28 +103,28 @@
    `disabled`; this keeps the cursor from implying otherwise). */
 .md li input[type="checkbox"] {
   margin-right: 0.4em;
-  accent-color: var(--accent);
+  accent-color: var(--run);
   pointer-events: none;
 }
 
 .md a {
-  color: var(--accent);
+  color: var(--run);
   text-decoration: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--run) 35%, transparent);
   cursor: pointer;
 }
 
 .md a:hover {
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--run);
 }
 
 .md code {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  background: var(--bg-3);
-  padding: 1px 4px;
-  border-radius: 3px;
-  color: var(--info);
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  background: var(--sel);
+  padding: 0 3px;
+  border-radius: 2px;
+  color: var(--fg);
   word-break: break-word;
 }
 
@@ -129,11 +132,11 @@
    harder to read than one the user scrolls. `code` inside resets the inline
    chip styling above. */
 .md pre {
-  margin: 0.6em 0;
-  padding: 9px 11px;
-  background: var(--bg-2);
-  border: 1px solid var(--line-3);
-  border-radius: var(--r-2);
+  margin: 0 0 var(--u3);
+  padding: var(--u2) var(--u3);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 3px;
   overflow-x: auto;
 }
 
@@ -142,17 +145,17 @@
   background: none;
   border: none;
   padding: 0;
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: var(--fg-1);
+  font-size: var(--fs-s);
+  line-height: 1.7;
+  color: var(--fg-2);
   white-space: pre;
   word-break: normal;
 }
 
 .md blockquote {
-  margin: 0.6em 0;
-  padding: 2px 0 2px 11px;
-  border-left: 2px solid var(--line-1);
+  margin: 0 0 var(--u3);
+  padding: 2px 0 2px var(--u3);
+  border-left: 2px solid var(--line-2);
   color: var(--fg-3);
 }
 
@@ -167,43 +170,49 @@
 }
 
 .md hr {
-  margin: 1em 0;
+  margin: var(--u4) 0;
   border: none;
-  border-top: 1px solid var(--line-3);
+  border-top: 1px solid var(--line);
 }
 
 /* Tables — the reason this file exists. `tableWrap` owns the horizontal
-   scroll (see the `table` override in `agent-markdown.tsx`). */
+   scroll (see the `table` override in `agent-markdown.tsx`). Mono inside,
+   because a table is the one place in a reply where columns have to line up
+   (Deck's rule 2). */
 .tableWrap {
-  margin: 0.7em 0;
+  margin: 0 0 var(--u3);
   overflow-x: auto;
-  border: 1px solid var(--line-3);
-  border-radius: var(--r-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
 }
 
 .tableWrap table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  font-variant-numeric: tabular-nums;
 }
 
 .tableWrap th,
 .tableWrap td {
-  padding: 6px 10px;
+  padding: var(--u) var(--u3);
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid var(--line-3);
+  border-bottom: 1px solid var(--line);
 }
 
 .tableWrap th {
-  background: var(--bg-2);
-  color: var(--fg-0);
-  font-weight: 600;
+  color: var(--fg-3);
+  font-weight: 400;
+  font-size: var(--fs-xs);
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 .tableWrap td {
-  color: var(--fg-1);
+  color: var(--fg-2);
 }
 
 /* The wrapper already draws the outer border, so the final row's is redundant.
@@ -215,7 +224,7 @@
 }
 
 .tableWrap tbody tr:hover td {
-  background: color-mix(in srgb, var(--fg-4) 8%, transparent);
+  background: var(--sel);
 }
 
 /* An image renders as a click-to-open chip, never as a fetched `<img>` — see
@@ -223,11 +232,11 @@
 .imgLink {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 6px;
-  border: 1px dashed var(--line-1);
-  border-radius: var(--r-2);
-  color: var(--accent);
+  gap: var(--u);
+  padding: 0 var(--u2);
+  border: 1px dashed var(--line-2);
+  border-radius: 3px;
+  color: var(--run);
   text-decoration: none;
   cursor: pointer;
 }

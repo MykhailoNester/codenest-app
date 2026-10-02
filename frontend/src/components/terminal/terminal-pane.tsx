@@ -970,25 +970,32 @@ export function TerminalPane({
           as the context menu above. */}
       {active && pastePayload !== null
         ? createPortal(
-            <div className={styles.pasteOverlay}>
-              <div className={styles.pasteModal}>
-                <h3>Paste multi-line content?</h3>
-                <pre className={styles.pastePreview}>{pastePayload}</pre>
-                <div className={styles.pasteActions}>
-                  <button
-                    type="button"
-                    className={styles.pasteBtnCancel}
-                    onClick={cancelPaste}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.pasteBtnConfirm}
-                    onClick={confirmPaste}
-                  >
-                    Paste
-                  </button>
+            // `deck` because this portals to `document.body`, outside the
+            // `.deck` the Sessions page draws inside — without it the modal
+            // would resolve Deck's tokens to nothing. `styles.deckScope` is
+            // `display: contents`, so the wrapper carries the tokens and
+            // draws no box of its own.
+            <div className={`deck ${styles.deckScope}`}>
+              <div className={`dk-scrim ${styles.pasteScrim}`}>
+                <div
+                  className="dk-modal"
+                  role="dialog"
+                  aria-label="Paste multi-line content?"
+                >
+                  <div className="dk-modal__h">paste multi-line content?</div>
+                  <div className="dk-modal__b">
+                    <pre className={styles.pastePreview}>{pastePayload}</pre>
+                  </div>
+                  <div className="dk-modal__f">
+                    <span className="dk-actions">
+                      <button type="button" className="dk-btn" onClick={cancelPaste}>
+                        Cancel
+                      </button>
+                      <button type="button" className="dk-btn pri" onClick={confirmPaste}>
+                        Paste
+                      </button>
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>,

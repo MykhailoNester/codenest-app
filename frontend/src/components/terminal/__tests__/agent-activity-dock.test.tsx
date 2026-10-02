@@ -369,7 +369,7 @@ describe("AgentActivityDock — Agents group", () => {
       screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
     );
     const row = screen.getByTestId("dock-agent-row");
-    expect(row.querySelector('[class*="dotDone"]')).not.toBeNull();
+    expect(row.querySelector('.dk-s[data-s="done"]')).not.toBeNull();
     expect(row.textContent).toContain("1.0s");
     expect(row.textContent).not.toContain("running");
   });
@@ -386,7 +386,7 @@ describe("AgentActivityDock — Agents group", () => {
       screen.getByTestId("dock-group-agents").querySelector("button") as HTMLButtonElement,
     );
     const row = screen.getByTestId("dock-agent-row");
-    expect(row.querySelector('[class*="dotFailed"]')).not.toBeNull();
+    expect(row.querySelector('.dk-s[data-s="fail"]')).not.toBeNull();
   });
 
   it("an exited session still lists its delegations and calls none of them running", () => {
@@ -401,7 +401,7 @@ describe("AgentActivityDock — Agents group", () => {
     const row = screen.getByTestId("dock-agent-row");
     // The wire never reported this call's end (the process died first), so
     // the row reads "ended", never "running" and never "done".
-    expect(row.querySelector('[class*="dotEnded"]')).not.toBeNull();
+    expect(row.querySelector('.dk-s[data-s="idle"]')).not.toBeNull();
     expect(row.textContent).not.toContain("running");
   });
 
@@ -627,7 +627,7 @@ describe("AgentActivityDock — Workflows group", () => {
 
     fireEvent.click(group.querySelector("button") as HTMLButtonElement);
     const row = screen.getByTestId("dock-workflow-row");
-    expect(row.querySelector('[class*="dotEnded"]')).not.toBeNull();
+    expect(row.querySelector('.dk-s[data-s="idle"]')).not.toBeNull();
     expect(screen.queryByText("Stop")).toBeNull();
   });
 
@@ -664,7 +664,7 @@ describe("AgentActivityDock — Workflows group", () => {
     expect(screen.queryByTestId("dock-workflow-rows")).toBeNull();
   });
 
-  it("the expanded panel lists each phase with one dot-marked row per agent", () => {
+  it("the expanded panel lists each phase with one state-marked row per agent", () => {
     let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
     state = applyFrame(
       state,
@@ -686,14 +686,14 @@ describe("AgentActivityDock — Workflows group", () => {
     const rows = screen.getAllByTestId("dock-workflow-agent-row");
     expect(rows).toHaveLength(2);
 
-    expect(rows[0]?.querySelector('[class*="dotRunning"]')).not.toBeNull();
-    expect(rows[0]?.querySelector(".d3-status__pulse")).not.toBeNull();
+    expect(rows[0]?.querySelector('.dk-s[data-s="run"]')).not.toBeNull();
+    expect(rows[0]?.querySelector('.dk-s[data-s="done"]')).toBeNull();
 
-    expect(rows[1]?.querySelector('[class*="dotDone"]')).not.toBeNull();
-    expect(rows[1]?.querySelector(".d3-status__pulse")).toBeNull();
+    expect(rows[1]?.querySelector('.dk-s[data-s="done"]')).not.toBeNull();
+    expect(rows[1]?.querySelector('.dk-s[data-s="run"]')).toBeNull();
   });
 
-  it("an errored workflow agent renders a warn dot and its error text", () => {
+  it("an errored workflow agent renders a stalled state glyph and its error text", () => {
     let state = applyFrame(liveState(), orchestrationTaskStartedFrame("wf1"), 1_000);
     state = applyFrame(
       state,
@@ -711,7 +711,7 @@ describe("AgentActivityDock — Workflows group", () => {
     );
 
     const row = screen.getByTestId("dock-workflow-agent-row");
-    expect(row.querySelector('[class*="dotWarn"]')).not.toBeNull();
+    expect(row.querySelector('.dk-s[data-s="stall"]')).not.toBeNull();
     expect(row.textContent).toContain("boom");
   });
 

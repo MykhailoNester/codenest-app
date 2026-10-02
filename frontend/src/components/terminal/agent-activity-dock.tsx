@@ -132,6 +132,7 @@ import {
   type OrchestrationRun,
 } from "../../lib/agent-conversation";
 import { MAIN_VIEW, sameView, viewKey, type AgentViewId } from "../../lib/agent-views";
+import type { DeckState } from "../deck/deck-grid";
 import { agentStopTask } from "../../lib/ipc";
 import { AgentSessionHud } from "./agent-session-hud";
 import { elapsedSecondsSinceMs, formatElapsed, formatTokens } from "./session-hud-format";
@@ -204,10 +205,10 @@ function present(values: readonly (string | null)[]): string[] {
   return values.filter((v): v is string => v !== null && v !== "");
 }
 
-/** The word a `DockRowStatus` reads as, for the dot's `title` and the row's
+/** The word a `DockRowStatus` reads as, for the glyph's `title` and the row's
  *  `aria-label` — colour is never the only signal for status. `warn` reads
  *  "error": it is the wire's own `workflow_agent.state === "error"`, softened
- *  to an amber dot rather than a red one because the run continues past it
+ *  to an amber `=` rather than a red `×` because the run continues past it
  *  (see `DockRowStatus`'s own doc comment), not softened in the word too. */
 function statusWord(status: DockRowStatus): string {
   switch (status) {
@@ -224,34 +225,33 @@ function statusWord(status: DockRowStatus): string {
   }
 }
 
-/** `styles.dot<Status>` for a `DockRowStatus`. No explicit `string` return
- *  type: a CSS module's classes are typed through an index signature, which
- *  `noUncheckedIndexedAccess` widens to `string | undefined` on every read
- *  (dotted or not) — harmless here, since the only use is inside a template
- *  literal below, but an annotated `string` return would need a fallback
- *  that can never actually trigger. */
-function dotClassName(status: DockRowStatus): string | undefined {
+/** A `DockRowStatus` as one of Deck's eight state glyphs. `warn` is the
+ *  wire's own `workflow_agent.state === "error"`, which the run continues
+ *  past — Deck's amber `=` (stalled) rather than the red `×` a terminal
+ *  failure gets, keeping the softer reading the amber dot used to give it. */
+function deckState(status: DockRowStatus): DeckState {
   switch (status) {
     case "running":
-      return styles.dotRunning;
+      return "run";
     case "done":
-      return styles.dotDone;
+      return "done";
     case "failed":
-      return styles.dotFailed;
+      return "fail";
     case "warn":
-      return styles.dotWarn;
+      return "stall";
     case "ended":
-      return styles.dotEnded;
+      return "idle";
   }
 }
 
-/** A 6px dot carrying a row's status. `running` composes the global
- *  `.d3-status__pulse` class (`d3-creative.css`) rather than re-authoring the
- *  pulse ring: that class is already a `currentColor` dot with an animated
- *  `::after` ring, and every other status renders it plain. */
-function StatusDot({ status, word }: { status: DockRowStatus; word: string }): ReactElement {
-  const pulse = status === "running" ? " d3-status__pulse" : "";
-  return <span className={`${styles.dot} ${dotClassName(status)}${pulse}`} title={word} />;
+/** A row's status, as the character in column one (Deck rule 3), replacing
+ *  the 6px dot this dock used to draw: the glyph reads with colour switched
+ *  off, survives a stylesheet that failed to load, and is the same mark the
+ *  transcript and every Deck list use for the same state. `title` keeps the
+ *  word on hover; the row's own `aria-label` already carries it for assistive
+ *  tech, so the glyph itself stays `aria-hidden`. */
+function StatusGlyph({ status, word }: { status: DockRowStatus; word: string }): ReactElement {
+  return <span className="dk-s" data-s={deckState(status)} title={word} aria-hidden="true" />;
 }
 
 /** A row's elapsed column: the literal word `running` in flight, an exact
@@ -271,7 +271,7 @@ function RowElapsed({
 }
 
 /**
- * One dock row: `[dot] name · description · meta… · elapsed`, used for every
+ * One dock row: `[glyph] name · description · meta… · elapsed`, used for every
  * row kind (sub-agent, workflow run, workflow phase-agent) so the three can
  * never drift into three different shapes.
  *
@@ -350,7 +350,7 @@ function DockRow(props: {
   const metaText = meta.join(" · ");
   const body = (
     <>
-      <StatusDot status={status} word={word} />
+      <StatusGlyph status={status} word={word} />
       <span className={styles.rowName}>{name}</span>
       {description !== null ? <span className={styles.rowDesc}>{description}</span> : null}
       {metaText !== "" ? <span className={styles.rowMeta}>{metaText}</span> : null}
@@ -801,8 +801,7 @@ export function AgentActivityDock({
                     row.running ? (
                       <button
                         type="button"
-                        className={`d3-btn d3-btn--sm ${styles.rowStop}`}
-                        style={{ borderColor: "rgba(239,68,68,0.30)", color: "var(--err)" }}
+                        className="dk-btn bare danger"
                         disabled={stopping}
                         onClick={() => {
                           setStoppingTaskIds((ids) =>

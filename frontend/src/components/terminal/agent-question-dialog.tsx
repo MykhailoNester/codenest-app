@@ -128,88 +128,94 @@ export function AgentQuestionDialog({
   const name = request.displayName ?? request.toolName;
 
   return (
-    <div className={styles.ask} data-question-dialog>
-      <h5 className={styles.askTitle}>
-        {name === request.toolName ? "Question" : name}
-        {pendingBehind > 0 ? (
-          <span className={styles.askCount}> (1 of {pendingBehind + 1})</span>
-        ) : null}
+    <div className={`dk-modal ${styles.ask}`} data-question-dialog>
+      <h5 className={`dk-modal__h ${styles.title}`}>
+        question
+        <span className={styles.count}>
+          {name === request.toolName ? "" : name}
+          {pendingBehind > 0 ? ` (1 of ${pendingBehind + 1})` : ""}
+        </span>
       </h5>
 
-      {questions.map((q, index) => {
-        const draft = drafts[index] ?? emptyDraft();
-        return (
-          <div key={`${q.question}-${index}`} className={styles.block}>
-            {q.header !== null ? <span className={styles.chip}>{q.header}</span> : null}
-            <p className={styles.prompt}>{q.question}</p>
-            <div
-              className={styles.options}
-              role={q.multiSelect ? "group" : "radiogroup"}
-              aria-label={q.question}
-            >
-              {q.options.map((option, oi) => {
-                const checked = draft.labels.includes(option.label);
-                return (
-                  <label key={option.label} className={styles.option}>
-                    <input
-                      type={q.multiSelect ? "checkbox" : "radio"}
-                      name={`q-${request.requestId}-${index}`}
-                      checked={checked}
-                      onChange={() => toggleOption(index, option.label)}
-                    />
-                    <span className={styles.optionBody}>
-                      <span className={styles.optionLabel}>
-                        {option.label}
-                        {oi < 9 ? <span className={styles.kbd}>{oi + 1}</span> : null}
+      <div className="dk-modal__b">
+        {questions.map((q, index) => {
+          const draft = drafts[index] ?? emptyDraft();
+          return (
+            <div key={`${q.question}-${index}`} className={styles.block}>
+              {q.header !== null ? <span className="dk-tag">{q.header}</span> : null}
+              <p className={styles.prompt}>{q.question}</p>
+              <div
+                className={styles.options}
+                role={q.multiSelect ? "group" : "radiogroup"}
+                aria-label={q.question}
+              >
+                {q.options.map((option, oi) => {
+                  const checked = draft.labels.includes(option.label);
+                  return (
+                    <label key={option.label} className={styles.option}>
+                      <input
+                        type={q.multiSelect ? "checkbox" : "radio"}
+                        name={`q-${request.requestId}-${index}`}
+                        checked={checked}
+                        onChange={() => toggleOption(index, option.label)}
+                      />
+                      <span className={styles.optionBody}>
+                        <span className={styles.optionLabel}>
+                          {option.label}
+                          {oi < 9 ? <span className={styles.kbd}>{oi + 1}</span> : null}
+                        </span>
+                        {option.description !== null ? (
+                          <span className={styles.optionMeta}>{option.description}</span>
+                        ) : null}
                       </span>
-                      {option.description !== null ? (
-                        <span className={styles.optionMeta}>{option.description}</span>
-                      ) : null}
-                    </span>
-                  </label>
-                );
-              })}
+                    </label>
+                  );
+                })}
 
-              <label className={styles.option}>
+                <label className={styles.option}>
+                  <input
+                    type={q.multiSelect ? "checkbox" : "radio"}
+                    name={`q-${request.requestId}-${index}`}
+                    checked={draft.otherOpen}
+                    onChange={() => toggleOther(index)}
+                  />
+                  <span className={styles.optionBody}>
+                    <span className={styles.optionLabel}>Other…</span>
+                  </span>
+                </label>
+              </div>
+              {draft.otherOpen ? (
                 <input
-                  type={q.multiSelect ? "checkbox" : "radio"}
-                  name={`q-${request.requestId}-${index}`}
-                  checked={draft.otherOpen}
-                  onChange={() => toggleOther(index)}
+                  type="text"
+                  data-question-other
+                  className={`dk-ctl ${styles.otherInput}`}
+                  aria-label={`Other answer for: ${q.question}`}
+                  placeholder="Type your answer"
+                  value={draft.otherText}
+                  onChange={(e) => update(index, (d) => ({ ...d, otherText: e.target.value }))}
                 />
-                <span className={styles.optionBody}>
-                  <span className={styles.optionLabel}>Other…</span>
-                </span>
-              </label>
+              ) : null}
             </div>
-            {draft.otherOpen ? (
-              <input
-                type="text"
-                data-question-other
-                className={styles.otherInput}
-                aria-label={`Other answer for: ${q.question}`}
-                placeholder="Type your answer"
-                value={draft.otherText}
-                onChange={(e) => update(index, (d) => ({ ...d, otherText: e.target.value }))}
-              />
-            ) : null}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
-      <div className={styles.btns}>
-        <button
-          ref={submitRef}
-          type="button"
-          className={`${styles.btn} ${styles.btnPri}`}
-          disabled={!complete}
-          onClick={submit}
-        >
-          Answer <span className={styles.kbd}>⏎</span>
-        </button>
-        <button type="button" className={`${styles.btn} ${styles.btnDanger}`} onClick={onDeny}>
-          Deny <span className={styles.kbd}>esc</span>
-        </button>
+      <div className="dk-modal__f">
+        <span className="dk-actions">
+          <button
+            ref={submitRef}
+            type="button"
+            className="dk-btn pri"
+            disabled={!complete}
+            onClick={submit}
+          >
+            Answer <span className={styles.kbd}>⏎</span>
+          </button>
+          <span className="sep" />
+          <button type="button" className="dk-btn danger" onClick={onDeny}>
+            Deny <span className={styles.kbd}>esc</span>
+          </button>
+        </span>
       </div>
     </div>
   );

@@ -9,6 +9,15 @@ export interface ContextMenuTarget {
   path?: string;
 }
 
+interface MenuItem {
+  label: string;
+  shortcut?: string;
+  onSelect: () => void;
+  disabled?: boolean;
+  /** Draws a rule above this item — once, before each trailing group. */
+  separated?: boolean;
+}
+
 interface PaneContextMenuProps {
   x: number;
   y: number;
@@ -77,87 +86,61 @@ export function PaneContextMenu({
     onClose();
   };
 
+  const items: MenuItem[] = [
+    { label: "Copy", shortcut: "⌘C", disabled: !hasSelection, onSelect: onCopy },
+    { label: "Paste", shortcut: "⌘V", onSelect: onPaste },
+    { label: "Clear", shortcut: "⌘K", onSelect: onClear },
+  ];
+  if (target.url) {
+    items.push(
+      { label: "Open Link", separated: true, onSelect: handleOpenLink },
+      { label: "Copy Link", onSelect: handleCopyLink },
+    );
+  }
+  if (target.path) {
+    items.push(
+      // Only when the link group above did not already draw the rule.
+      { label: "Open Path", separated: !target.url, onSelect: handleOpenPath },
+      { label: "Copy Path", onSelect: handleCopyPath },
+    );
+  }
+
   return (
-    <div
-      className={styles.menu}
-      style={{ left: x, top: y }}
-      // Stop the mousedown from propagating so the document handler above
-      // doesn't immediately close the menu that was just opened.
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      <button
-        type="button"
-        className={styles.item}
-        disabled={!hasSelection}
-        onClick={() => {
-          onCopy();
-          onClose();
-        }}
+    // `deck` because this portals to `document.body`, outside the `.deck`
+    // the Sessions page draws inside — without it the menu would resolve
+    // Deck's tokens to nothing. `styles.scope` is `display: contents`, so
+    // the wrapper carries the tokens and draws no box of its own.
+    <div className={`deck ${styles.scope}`}>
+      <span
+        className={`dk-menu ${styles.menu}`}
+        role="menu"
+        style={{ left: x, top: y }}
+        // Stop the mousedown from propagating so the document handler above
+        // doesn't immediately close the menu that was just opened.
+        onMouseDown={(e) => e.stopPropagation()}
       >
-        Copy
-        <span className={styles.shortcut}>⌘C</span>
-      </button>
-      <button
-        type="button"
-        className={styles.item}
-        onClick={() => {
-          onPaste();
-          onClose();
-        }}
-      >
-        Paste
-        <span className={styles.shortcut}>⌘V</span>
-      </button>
-      <button
-        type="button"
-        className={styles.item}
-        onClick={() => {
-          onClear();
-          onClose();
-        }}
-      >
-        Clear
-        <span className={styles.shortcut}>⌘K</span>
-      </button>
-      {(target.url ?? target.path) ? (
-        <div className={styles.separator} />
-      ) : null}
-      {target.url ? (
-        <>
-          <button
-            type="button"
-            className={styles.item}
-            onClick={handleOpenLink}
-          >
-            Open Link
-          </button>
-          <button
-            type="button"
-            className={styles.item}
-            onClick={handleCopyLink}
-          >
-            Copy Link
-          </button>
-        </>
-      ) : null}
-      {target.path ? (
-        <>
-          <button
-            type="button"
-            className={styles.item}
-            onClick={handleOpenPath}
-          >
-            Open Path
-          </button>
-          <button
-            type="button"
-            className={styles.item}
-            onClick={handleCopyPath}
-          >
-            Copy Path
-          </button>
-        </>
-      ) : null}
+        {items.map((item) => (
+          <span key={item.label}>
+            {item.separated === true ? <hr /> : null}
+            <button
+              type="button"
+              role="menuitem"
+              disabled={item.disabled}
+              onClick={() => {
+                item.onSelect();
+                // The link/path handlers already close the menu; closing
+                // again is a no-op and keeps every row's call site identical.
+                onClose();
+              }}
+            >
+              {item.label}
+              {item.shortcut !== undefined ? (
+                <span className={styles.shortcut}>{item.shortcut}</span>
+              ) : null}
+            </button>
+          </span>
+        ))}
+      </span>
     </div>
   );
 }

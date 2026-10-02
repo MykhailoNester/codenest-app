@@ -53,29 +53,35 @@ export function ShortcutsHint(): ReactElement {
       </button>
       {open
         ? createPortal(
-            <div
-              className={styles.backdrop}
-              onClick={() => setOpen(false)}
-              role="presentation"
-            >
+            // `deck` because this portals to `document.body`, outside the
+            // `.deck` the Sessions page draws inside — without it the panel
+            // would resolve Deck's tokens to nothing. `styles.scope` is
+            // `display: contents`, so the wrapper carries the tokens and
+            // draws no box of its own.
+            <div className={`deck ${styles.scope}`}>
               <div
-                className={styles.panel}
-                onClick={(e) => e.stopPropagation()}
+                className={styles.backdrop}
+                onClick={() => setOpen(false)}
+                role="presentation"
+              />
+              <div
+                className={`dk-modal ${styles.panel}`}
                 role="dialog"
                 aria-label="Terminal keyboard shortcuts"
               >
-                <div className={styles.header}>
-                  <span className={styles.title}>Keyboard Shortcuts</span>
+                <div className="dk-modal__h">
+                  keyboard shortcuts
+                  <span className="sp" />
                   <button
                     type="button"
-                    className={styles.close}
+                    className="dk-btn bare icon"
                     onClick={() => setOpen(false)}
                     aria-label="Close shortcuts"
                   >
                     ×
                   </button>
                 </div>
-                <ul className={styles.list}>
+                <ul className={`dk-modal__b ${styles.list}`}>
                   {SHORTCUTS.map(({ keys, label }) => (
                     <li key={label} className={styles.row}>
                       <span className={styles.keys}>

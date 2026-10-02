@@ -1,10 +1,16 @@
-/* Chrome for Zone B — the activity dock — new for this ticket. The dock is a
-   *sibling* of `.viewport` inside `agent-pane.module.css`'s `.body`, pinned
-   directly above the composer; see `agent-activity-dock.tsx`'s module doc for
-   the zone model this is half of.
+/* Chrome for Zone B — the activity dock. The dock is a *sibling* of
+   `.viewport` inside `agent-pane.module.css`'s `.body`, pinned directly above
+   the composer; see `agent-activity-dock.tsx`'s module doc for the zone model
+   this is half of.
 
-   `.dock` and `.groups` are the two flex layers that make "the composer never
-   moves" true even in a busy session:
+   On Deck: the dock sits on `--bg-1` like the rest of the pane, group headers
+   use the uppercase section-label idiom, rows are lines with the state glyph
+   in column one (`.dk-s`, set in the TSX — the dots are gone), and the
+   Workflow Stop button is `.dk-btn bare danger`. Only the two flex layers
+   below are load-bearing geometry.
+
+   `.dock` and `.groups` are what make "the composer never moves" true even in
+   a busy session:
 
    - `.dock` is `flex: 0 1 auto` with a `min-content` floor — it sizes to its
      own content and *can* shrink, but never grows to fight `.viewport`
@@ -43,10 +49,10 @@
   min-height: min-content;
   display: flex;
   flex-direction: column;
-  background: var(--bg-2);
-  border-top: 1px solid var(--line-1);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: var(--fs-s);
   /* No `position`, no `z-index` (D10): the composer's upward popovers
      (`agent-composer.module.css`'s `@`/`/` suggestion panel and `{}`
      preview) must keep painting over this element exactly as they used to
@@ -64,7 +70,7 @@
      now, and the dock's own `border-top` already rules the seam against the
      transcript. A `border-top` here would double that rule into a 2px line
      and leave the groups/metrics seam unruled. */
-  border-bottom: 1px solid var(--line-1);
+  border-bottom: 1px solid var(--line);
 }
 
 .group {
@@ -73,49 +79,42 @@
 }
 
 .group + .group {
-  border-top: 1px solid var(--line-1);
+  border-top: 1px solid var(--line);
 }
 
 .groupHead {
-  appearance: none;
-  background: none;
-  border: 0;
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 9px;
-  margin: 0;
-  font: inherit;
-  color: inherit;
+  gap: var(--u2);
+  height: 26px;
+  padding: 0 var(--u3);
   text-align: left;
-  cursor: pointer;
+  color: var(--fg-2);
 }
 
-.groupHead:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
+.groupHead:hover {
+  background: var(--sel);
 }
 
 .groupTwisty {
   color: var(--fg-4);
-  font-size: 8px;
   width: 9px;
   flex: none;
 }
 
-/* The `.key` idiom (`session-hud.module.css`) — uppercase, dim, small — so a
-   group header reads as a label first and a sentence second. */
+/* Deck's section-label idiom — uppercase, dim, small — so a group header
+   reads as a label first and a sentence second. */
 .groupLabel {
-  color: var(--fg-4);
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  letter-spacing: 1.1px;
   text-transform: uppercase;
   flex: none;
 }
 
 .groupSummary {
-  color: var(--fg-1);
+  color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -130,7 +129,7 @@
 }
 
 .groupBody {
-  padding: 0 9px 7px;
+  padding: 0 var(--u3) var(--u2);
 }
 
 /* The Tools group's "what now" row — mirrors `agent-conversation.module.css`'s
@@ -140,7 +139,7 @@
 .toolHead {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--u2);
   color: var(--fg-3);
   min-width: 0;
 }
@@ -157,66 +156,70 @@
 .rows {
   display: flex;
   flex-direction: column;
-  gap: 1px;
 }
 
 .row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--u2);
   min-width: 0;
 }
 
-/* Button reset matching `.groupHead` above — shared by the interactive
-   (`<button>`) and non-interactive (phase-agent `<div>`) row bodies, so a
-   phase-agent row lines up with the click-target rows around it. */
+/* The line. Shares `.dk-line`'s height and gap without being one: a dock row
+   is not a cell grid, and `.dk-line`'s `grid-template-columns` would collapse
+   the five variable-width parts below into fixed tracks. */
 .rowMain {
-  appearance: none;
-  background: none;
-  border: 0;
   font: inherit;
-  color: inherit;
+  color: var(--fg-2);
   text-align: left;
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 3px;
+  height: 24px;
+  padding: 0 var(--u);
+  border-radius: 2px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--u2);
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.rowMain:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
+/* The state glyph is one character and must never be the thing a crowded row
+   shrinks; `.dk-s` itself sets no width, because on a Deck grid the column
+   does. */
+.rowMain :global(.dk-s) {
+  flex: none;
+  width: 10px;
+}
+
+.rowMain:hover {
+  background: var(--sel);
+  color: var(--fg);
 }
 
 .rowSelected {
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--sel-2);
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--run);
 }
 
 /* The keyboard cursor — deliberately a different channel from `.rowSelected`
-   above (which owns the inset accent bar + wash): a dashed ring plus a
-   lighter fill, so a row that is both highlighted and selected reads as
-   both. Painted regardless of focus, because the cursor must stay visible
-   after Enter hands focus back to the composer. */
+   above (which owns the inset bar + wash): a dashed ring, so a row that is
+   both highlighted and selected reads as both. Painted regardless of focus,
+   because the cursor must stay visible after Enter hands focus back to the
+   composer. */
 .rowHighlighted {
-  background: var(--bg-4);
-  outline: 1px dashed var(--accent-line);
+  outline: 1px dashed var(--run);
   outline-offset: -1px;
 }
 
 .rowIndent {
-  padding-left: 14px;
+  padding-left: var(--u4);
 }
 
-/* Same 22ch clip `.cellLabel` (`session-hud.module.css`) applies to the
-   metrics strip — a pathologically long `subagent_type` must not stretch a
-   row past the dock's own width. */
+/* A pathologically long `subagent_type` must not stretch a row past the
+   dock's own width; the full value stays in the row's `aria-label`. */
 .rowName {
-  color: var(--fg-1);
+  color: var(--fg);
   flex: none;
   max-width: 22ch;
   overflow: hidden;
@@ -241,57 +244,21 @@
 }
 
 .rowLive {
-  color: var(--violet);
-}
-
-.dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
+  color: var(--run);
   flex: none;
-  display: inline-block;
-}
-
-.dotRunning {
-  color: var(--ok);
-}
-
-.dotDone {
-  color: var(--ok);
-}
-
-.dotFailed {
-  color: var(--err);
-}
-
-.dotWarn {
-  color: var(--warn);
-}
-
-.dotEnded {
-  color: var(--fg-4);
+  white-space: nowrap;
 }
 
 .phase {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding-left: 6px;
+  padding-left: var(--u2);
 }
 
 .phaseTitle {
-  color: var(--fg-2);
-  font-weight: 600;
-  padding: 2px 4px;
-}
-
-/* Geometry only, re-declared from the strip's now-orphaned `.detailStop`
-   (`session-hud.module.css:273-277`) rather than importing that module just
-   for this — the red border/colour still come from `d3-btn d3-btn--sm` plus
-   the same two inline properties the Stop button has always set. */
-.rowStop {
-  font: inherit;
-  padding: 2px 8px;
-  cursor: pointer;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  padding: var(--u) var(--u);
 }

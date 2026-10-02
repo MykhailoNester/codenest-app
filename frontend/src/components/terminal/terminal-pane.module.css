@@ -1,8 +1,12 @@
-/* What is left of the shell pane's own CSS after the Deck conversion (#293):
-   the pane frame, header and mode footer are `.dk-pane*` now. The xterm host
-   below has hard geometry constraints the design system must not touch, and
-   the paste modal portals to `document.body`, outside `.deck`'s scope, so it
-   keeps the app's own tokens.
+/* What is left of the shell pane's own CSS after the Deck conversion (#293,
+   finished for the pane's contents in #299): the pane frame, header and mode
+   footer are `.dk-pane*`, and the paste confirmation is `.dk-scrim` +
+   `.dk-modal`. The xterm host below has hard geometry constraints the design
+   system must not touch.
+
+   The paste modal `createPortal`s to `document.body`, outside the `.deck` the
+   Sessions page draws inside, so its markup carries its own `deck` scope —
+   `.deckScope` below.
  */
 
 .terminal {
@@ -31,89 +35,32 @@
 }
 
 .terminal :global(.xterm-viewport) {
-  border-radius: var(--r-3, 8px);
+  border-radius: 3px;
 }
 
 /* Paste-confirmation modal */
 
-.pasteOverlay {
-  position: fixed;
-  inset: 0;
+/* Carries Deck's tokens through the `document.body` portal without drawing a
+   box: `display: contents` removes the wrapper from layout while custom
+   properties and inherited values still pass to its children. */
+.deckScope {
+  display: contents;
+}
+
+/* `.dk-scrim` sits at z-index 60, which is right for a dialog inside a Deck
+   page but not for one portalled to `document.body` alongside the pane's own
+   context menu (9000) and the shortcuts panel (7001). Doubled so the order
+   the two stylesheets are injected in cannot decide it. */
+.pasteScrim.pasteScrim {
   z-index: 8000;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
-.pasteModal {
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-4);
-  box-shadow: var(--shadow-3);
-  padding: 20px 24px;
-  width: 420px;
-  max-width: 90vw;
-}
-
-.pasteModal h3 {
-  margin: 0 0 10px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg-0);
-}
-
+/* The modal itself is `.dk-scrim` + `.dk-modal`; only the preview's own
+   ceiling is left. */
 .pastePreview {
-  background: var(--bg-1);
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-2);
-  padding: 8px 10px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--fg-2);
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 160px;
-  overflow-y: auto;
-  margin-bottom: 14px;
 }
-
-.pasteActions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.pasteBtnCancel {
-  padding: 6px 14px;
-  background: transparent;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-2);
-  color: var(--fg-2);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 80ms;
-}
-
-.pasteBtnCancel:hover {
-  background: var(--bg-4);
-}
-
-.pasteBtnConfirm {
-  padding: 6px 14px;
-  background: var(--accent);
-  border: 1px solid transparent;
-  border-radius: var(--r-2);
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: opacity 80ms;
-}
-
-.pasteBtnConfirm:hover {
-  opacity: 0.88;
-}
-
