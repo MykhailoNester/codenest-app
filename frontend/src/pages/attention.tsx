@@ -1,5 +1,6 @@
 /**
- * Needs You — surface S2 of the v2 design (epic #153 / #162).
+ * Needs You — surface S2 of the v2 design (epic #153 / #162), and since #270
+ * the app's only queue.
  *
  * One list, severity-grouped, oldest first, with the action inline. The page's
  * own argument is that if it is empty you close the app, so the empty state is
@@ -12,8 +13,9 @@
  *    the dashboard keeps the hook's response open until a human clicks — a
  *    person on a hook's critical path, which is the exact failure the
  *    `--max-time` / `|| true` discipline exists to prevent. Until P2 ships the
- *    pre-authorise shape, every row gets **Inspect** and **Jump to pane**,
- *    which is most of the value: knowing within a second is the hard part.
+ *    pre-authorise shape, every row gets its one jump and, where there is one,
+ *    **inspect** — which is most of the value: knowing within a second is the
+ *    hard part.
  *
  * 2. **The empty state does not promise a tray notification.** The mockup's
  *    copy says "You'll get a tray notification the moment that changes." P1
@@ -22,21 +24,54 @@
  *    wrong. It names the 30-second re-check instead, which is real and is
  *    exactly what `useAttention`'s poll interval does.
  *
- * The page starts empty on today's database and that is expected, not a bug:
- * every blocking source is P2, and there are no schedules, no budget alerts
- * and no blocked tasks to derive anything else from.
+ * #265 — one row, one obvious action
+ * ----------------------------------
+ * The page used to offer "Inspect" (which went to a *list*) and "Jump to pane"
+ * (offered whenever `pane_id` was non-null, including for sessions that had
+ * ended, where it focused nothing and then opened an empty detached window).
+ * An item could therefore name a problem and not take you to it, which is the
+ * owner's own complaint about this page.
+ *
+ * The action is now resolved per item by `lib/attention-action.ts` and is
+ * exactly one of: focus the live pane, open the session's record, start a
+ * session seeded from the ticket, open the surface that owns it — or, when the
+ * row genuinely points at nothing, an em dash naming what is missing. A dead
+ * button is worse than no button, and this page cannot afford either.
+ *
+ * #270 — Notifications folded in
+ * ------------------------------
+ * The Notifications page is gone. Its unread rows are derived into the queue by
+ * `attention_service._produce_notifications` and carry a **mark read** action
+ * here, which is what closes them. The bell in the chrome keeps the full
+ * history, read and unread, on every screen.
  */
 
 import { useCallback, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAttention, type AttentionItem } from "../lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useAttention,
+  markNotificationRead,
+  markAllNotificationsRead,
+  type AttentionItem,
+} from "../lib/api";
 import { TERMINAL_ROUTE } from "../lib/nav-items";
 import { useTerminalStore } from "../stores/terminal-store";
 import { collectLeaves } from "../lib/layout-tree";
-import { openTerminalsWindow, emitFocusPaneToTerminals } from "../lib/ipc";
+import {
+  openTerminalsWindow,
+  emitFocusPaneToTerminals,
+  listLivePanes,
+} from "../lib/ipc";
 import { relativeTime } from "../lib/format-helpers";
+import {
+  primaryAction,
+  inspectPath,
+  notificationIdOf,
+  type AttentionAction,
+} from "../lib/attention-action";
+import { AttentionLaunchDialog } from "../components/launch/attention-launch-dialog";
 import { DeckShell } from "../components/deck/deck-shell";
-import { DECK_COLS } from "../components/deck/deck-cols";
 import {
   DeckGrid,
   DeckGroup,
@@ -46,6 +81,27 @@ import {
 } from "../components/deck/deck-grid";
 
 type QueueState = "open" | "resolved" | "muted";
+
+/**
+ * This page's column template.
+ *
+ * Not in `DECK_COLS`: that module is a deck primitive and is out of scope for
+ * this ticket, so the shape lives with the only list that has it rather than
+ * being added to a shared file by a page change. The queue needs a wider last
+ * column than any named template has — its rows carry up to two buttons whose
+ * labels vary ("jump to pane", "start session", "mark all read") — and the
+ * template it used before, `DECK_COLS.default`, declared six columns for the
+ * five cells this list renders, which left the action cell 62px and a 96px
+ * column with nothing in it.
+ */
+const ATTENTION_COLS = "14px minmax(0, 1fr) 150px 72px 196px";
+
+/** Action kinds a row's own activation (click / Enter / Space) may run. */
+const ROW_ACTIVATES: ReadonlySet<AttentionAction["kind"]> = new Set([
+  "pane",
+  "route",
+  "launch",
+]);
 
 const STATE_TABS: readonly { id: QueueState; label: string }[] = [
   { id: "open", label: "Open" },
@@ -90,76 +146,80 @@ function formatDuration(seconds: number | null): string {
   return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
 }
 
-/**
- * Where "Inspect" goes for each producer.
- *
- * Every destination is a page that exists today. The design's Session
- * Inspector — the natural target for a stalled session — is P4, so a session
- * item opens the Command Center, which is where a live session's activity is
- * actually readable right now. Returning `null` (no subject we can route to)
- * hides the button rather than shipping one that does nothing.
- */
-function inspectPath(item: AttentionItem): string | null {
-  switch (item.kind) {
-    case "task_blocked":
-      return item.task_id == null ? null : `/tasks/${item.task_id}`;
-    case "schedule_failed":
-      return "/schedules";
-    case "budget_threshold":
-      return "/budgets";
-    case "inbox_backlog":
-      return "/tasks";
-    case "session_stalled":
-      return "/command";
-    default:
-      return item.session_id ? "/command" : null;
-  }
+interface RowHandlers {
+  onInspect: (item: AttentionItem) => void;
+  onActivate: (item: AttentionItem) => void;
+  onMarkRead: (item: AttentionItem) => void;
 }
 
-function attentionCells(
+function actionCell(
   item: AttentionItem,
-  onInspect: (item: AttentionItem) => void,
-  onJump: (paneId: string) => void,
-) {
-  const meta = [item.project_name, item.detail, item.seen_count > 1 ? `seen ${item.seen_count}×` : null]
+  action: AttentionAction,
+  handlers: RowHandlers,
+): ReactElement {
+  const inspect = inspectPath(item);
+  return (
+    <span className="dk-actions">
+      {inspect && (
+        <button
+          type="button"
+          className="dk-btn bare"
+          onClick={(e) => {
+            e.stopPropagation();
+            handlers.onInspect(item);
+          }}
+        >
+          inspect
+        </button>
+      )}
+      {action.kind === "none" ? (
+        // The app's standing rule for a value it cannot measure, applied to an
+        // action it cannot offer: an em dash naming what is missing, never a
+        // button that does nothing.
+        <span className="note" title={action.waitingOn}>
+          —
+        </span>
+      ) : (
+        <button
+          type="button"
+          className="dk-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            handlers.onActivate(item);
+          }}
+        >
+          {action.label}
+        </button>
+      )}
+      {item.kind === "notification_unread" && (
+        <button
+          type="button"
+          className="dk-btn bare"
+          onClick={(e) => {
+            e.stopPropagation();
+            handlers.onMarkRead(item);
+          }}
+        >
+          mark read
+        </button>
+      )}
+    </span>
+  );
+}
+
+function attentionCells(item: AttentionItem, handlers: RowHandlers) {
+  const meta = [
+    item.project_name,
+    item.detail,
+    item.seen_count > 1 ? `seen ${item.seen_count}×` : null,
+  ]
     .filter(Boolean)
     .join(" · ");
-  const target = inspectPath(item);
   return [
     { v: item.title, cls: "sub", title: item.title },
     meta,
     relativeTime(item.first_seen_at),
-    {
-      v: (
-        <>
-          {target && (
-            <button
-              type="button"
-              className="dk-btn bare"
-              onClick={(e) => {
-                e.stopPropagation();
-                onInspect(item);
-              }}
-            >
-              inspect
-            </button>
-          )}
-          {item.pane_id && (
-            <button
-              type="button"
-              className="dk-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                onJump(item.pane_id as string);
-              }}
-            >
-              jump to pane
-            </button>
-          )}
-        </>
-      ),
-      cls: "r",
-    },
+    { v: actionCell(item, primaryAction(item), handlers), cls: "r" },
   ];
 }
 
@@ -167,9 +227,18 @@ export function AttentionPage(): ReactElement {
   const [state, setState] = useState<QueueState>("open");
   const { data, isLoading } = useAttention(state);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  /** The item a launch is being composed for, or null. */
+  const [launchFor, setLaunchFor] = useState<AttentionItem | null>(null);
 
   const items = data?.items ?? [];
   const counts = data?.counts;
+
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["attention"] });
+    void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+  }, [queryClient]);
 
   const handleInspect = useCallback(
     (item: AttentionItem) => {
@@ -180,17 +249,21 @@ export function AttentionPage(): ReactElement {
   );
 
   /**
-   * Jump to pane. The embedded path first — navigate to Sessions, hydrate the
-   * store (a session from a previous app run is not in it until that page has
-   * mounted once) and focus the leaf. If no tab owns the pane, it belongs to
-   * the detached terminals window, which has its own store in its own JS
-   * context and can only be reached by raising it and emitting `focus-pane`.
-   * The attention item carries a `pane_id` and no `target`, so rather than
-   * guessing which window owns it we try the one we can inspect and fall back
-   * to the one we cannot.
+   * Focus a live pane. The embedded path first — navigate to Sessions, hydrate
+   * the store (a session from a previous app run is not in it until that page
+   * has mounted once) and focus the leaf.
+   *
+   * If no tab owns the pane it may belong to the detached terminals window,
+   * which has its own store in its own JS context and can only be reached by
+   * raising it and emitting `focus-pane`. That used to be the unconditional
+   * fallback, which meant a pane that had simply gone away raised an empty
+   * window and focused nothing. The shell's `list_live_panes` is the only
+   * authoritative answer to "is this pane still alive?", so it decides: live
+   * and unowned → the detached window; not live → the session's own record,
+   * which is where the work actually is once its pane is gone.
    */
   const handleJump = useCallback(
-    (paneId: string) => {
+    (paneId: string, sessionId: string | null) => {
       void navigate(TERMINAL_ROUTE);
       void (async () => {
         const store = useTerminalStore.getState();
@@ -199,19 +272,67 @@ export function AttentionPage(): ReactElement {
         const tab = fresh.tabs.find((t) =>
           collectLeaves(t.layout).some((l) => l.terminalId === paneId),
         );
-        if (!tab) {
+        if (tab) {
+          // Order matters: `setActiveTab` focuses the tab's first leaf, so the
+          // specific pane has to be focused after it.
+          fresh.setActiveTab(tab.id);
+          fresh.setFocusedLeaf(paneId);
+          return;
+        }
+        const live = await listLivePanes().catch(() => [] as string[]);
+        if (live.includes(paneId)) {
           void openTerminalsWindow().catch(() => undefined);
           void emitFocusPaneToTerminals(paneId).catch(() => undefined);
           return;
         }
-        // Order matters: `setActiveTab` focuses the tab's first leaf, so the
-        // specific pane has to be focused after it.
-        fresh.setActiveTab(tab.id);
-        fresh.setFocusedLeaf(paneId);
+        if (sessionId) void navigate(`/sessions/${encodeURIComponent(sessionId)}`);
       })();
     },
     [navigate],
   );
+
+  const handleMarkRead = useCallback(
+    (item: AttentionItem) => {
+      const id = notificationIdOf(item);
+      if (id === null) return;
+      void markNotificationRead(id)
+        .then(refresh)
+        .catch(() => undefined);
+    },
+    [refresh],
+  );
+
+  /** The row's one action, run. */
+  const handleActivate = useCallback(
+    (item: AttentionItem) => {
+      const action = primaryAction(item);
+      switch (action.kind) {
+        case "pane":
+          handleJump(action.paneId, action.sessionId);
+          return;
+        case "route":
+          void navigate(action.path);
+          return;
+        case "launch":
+          setLaunchFor(item);
+          return;
+        case "markAllRead":
+          void markAllNotificationsRead()
+            .then(refresh)
+            .catch(() => undefined);
+          return;
+        case "none":
+          return;
+      }
+    },
+    [handleJump, navigate, refresh],
+  );
+
+  const handlers: RowHandlers = {
+    onInspect: handleInspect,
+    onActivate: handleActivate,
+    onMarkRead: handleMarkRead,
+  };
 
   const tiles = (
     <div className="dk-bigs">
@@ -256,6 +377,8 @@ export function AttentionPage(): ReactElement {
     </div>
   );
 
+  const launchAction = launchFor === null ? null : primaryAction(launchFor);
+
   return (
     <DeckShell title="needs you" crumb={`${counts?.open ?? 0} open`} actions={tabs}>
       {tiles}
@@ -269,11 +392,12 @@ export function AttentionPage(): ReactElement {
           </div>
           {/* The 30-second re-check is the whole of P1's freshness promise, and
               it is named here because it is the only thing that makes an empty
-              page trustworthy. No tray notification is promised. */}
+              page trustworthy. Nothing is promised about being told any other
+              way: there is no tray and no push behind this queue. */}
           <div>This page re-checks every 30 seconds while it is open.</div>
           <div>
-            Stalled sessions, failed scheduled runs, budget thresholds and blocked tasks appear
-            here on their own.
+            Stalled sessions, failed scheduled runs, budget thresholds, blocked tasks and
+            anything unread in the bell appear here on their own.
           </div>
         </div>
       ) : (
@@ -288,20 +412,36 @@ export function AttentionPage(): ReactElement {
               note={sev.note}
               state={SEV_STATE[sev.id]}
             >
-              <DeckGrid cols={DECK_COLS.default} label={sev.label}>
-                <DeckHead cells={["what", "where", "r waiting", "r "]} />
+              <DeckGrid cols={ATTENTION_COLS} label={sev.label}>
+                <DeckHead cells={["what", "where", "r waiting", "r action"]} />
                 {group.map((item) => (
                   <DeckLine
                     key={item.id}
                     state={SEV_STATE[item.severity] ?? "idle"}
-                    cells={attentionCells(item, handleInspect, handleJump)}
-                    onOpen={inspectPath(item) ? () => handleInspect(item) : undefined}
+                    cells={attentionCells(item, handlers)}
+                    // Row activation runs the action only when it *goes*
+                    // somewhere. "mark all read" is a write, and a write that
+                    // fires because Enter was pressed on a focused row is a
+                    // write nobody asked for; it stays on its button.
+                    onOpen={
+                      ROW_ACTIVATES.has(primaryAction(item).kind)
+                        ? () => handleActivate(item)
+                        : undefined
+                    }
                   />
                 ))}
               </DeckGrid>
             </DeckGroup>
           );
         })
+      )}
+
+      {launchFor !== null && launchAction?.kind === "launch" && (
+        <AttentionLaunchDialog
+          source={launchAction.source}
+          projectId={launchAction.projectId}
+          onClose={() => setLaunchFor(null)}
+        />
       )}
     </DeckShell>
   );

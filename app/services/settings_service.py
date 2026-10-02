@@ -38,7 +38,6 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
     {
         "attention",  # Needs You — the attention queue (slug: attention)
         "work",  # Work board — tasks kanban with triage (slug: tasks)
-        "notifications",  # Notifications page — existing event feed (slug: notifications)
         "schedules",  # Agent schedules (slug: schedules)
         "parallel",  # Parallel agent runs (slug: parallel)
         "preview",  # Dev-server preview pane (slug: preview)
@@ -63,7 +62,14 @@ KNOWN_FEATURES: frozenset[str] = frozenset(
 # ``000_baseline_schema.sql`` — can PUT its map back without a 422, but never
 # echoed by the reader below, which merges only ``KNOWN_FEATURES``. A genuine
 # typo is still rejected.
-_RETIRED_FEATURES: frozenset[str] = frozenset({"composer", "explorer"})
+#
+# ``notifications`` joins them for #270. The Notifications page is gone: its
+# unread queue is derived into ``attention_items`` by
+# ``attention_service._produce_notifications`` and read on Needs You, and the
+# bell in the chrome — which this slug never gated — keeps the history on every
+# screen. A slug with no page behind it cannot be a toggle, and for the same
+# reason as above it is still accepted on write.
+_RETIRED_FEATURES: frozenset[str] = frozenset({"composer", "explorer", "notifications"})
 
 # Default payload used when the ``enabled_features`` setting is absent. Core
 # modules (plus Schedules) are ON; the remaining extras are OFF (hidden from
@@ -75,7 +81,6 @@ _FEATURES_DEFAULT: dict[str, bool] = {
     # not shipped.
     "attention": True,
     "work": True,
-    "notifications": True,
     "parallel": True,
     "preview": True,
     "budgets": True,

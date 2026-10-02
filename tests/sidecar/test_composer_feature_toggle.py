@@ -1,9 +1,11 @@
-"""Tests for the retired `composer` / `explorer` feature slugs.
+"""Tests for the retired `composer` / `explorer` / `notifications` slugs.
 
-Both used to gate parts of the Terminal page: `composer` the native agent pane
-(now the default session surface) and `explorer` the workspace navigator beside
-it. Neither is toggleable any more, so this file pins the *retirement* contract
-rather than the gate:
+The first two used to gate parts of the Terminal page: `composer` the native
+agent pane (now the default session surface) and `explorer` the workspace
+navigator beside it. `notifications` gated the Notifications page, which #270
+folded into Needs You — the bell in the chrome it never gated keeps the
+history. None of the three is toggleable any more, so this file pins the
+*retirement* contract rather than the gate:
 
 * the reader never serves them, on any install, however the setting is stored —
   which is what lets the frontend drop its own gate;
@@ -41,7 +43,7 @@ async def test_app(migrated_db: aiosqlite.Connection):
 
 
 def test_retired_slugs_are_not_toggleable() -> None:
-    for slug in ("composer", "explorer"):
+    for slug in ("composer", "explorer", "notifications"):
         assert slug not in settings_service.KNOWN_FEATURES
         assert slug not in settings_service._FEATURES_DEFAULT
         assert slug in settings_service._RETIRED_FEATURES
@@ -55,6 +57,7 @@ async def test_lookups_never_serve_a_retired_slug(test_app) -> None:
     features = resp.json()["enabled_features"]
     assert "composer" not in features
     assert "explorer" not in features
+    assert "notifications" not in features
 
 
 @pytest.mark.asyncio
@@ -66,7 +69,12 @@ async def test_a_stored_retired_slug_is_accepted_but_dropped(test_app) -> None:
         "/api/v1/settings/enabled_features",
         json={
             "value_json": json.dumps(
-                {"composer": False, "explorer": False, "feed": True}
+                {
+                    "composer": False,
+                    "explorer": False,
+                    "notifications": True,
+                    "feed": True,
+                }
             )
         },
     )
@@ -75,6 +83,7 @@ async def test_a_stored_retired_slug_is_accepted_but_dropped(test_app) -> None:
     features = client.get("/api/v1/settings/lookups").json()["enabled_features"]
     assert "composer" not in features
     assert "explorer" not in features
+    assert "notifications" not in features
     assert features["feed"] is True
 
 

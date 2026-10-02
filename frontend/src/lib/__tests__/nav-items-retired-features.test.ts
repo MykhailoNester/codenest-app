@@ -4,10 +4,12 @@ import { FEATURE_DEFAULTS, KNOWN_FEATURES_ORDERED, FEATURES } from "../nav-items
 // The `composer` (native agent pane) and `explorer` (workspace navigator)
 // surfaces are unconditional parts of the Terminal page — they used to be
 // toggleable, and this file is what stops them being reintroduced as gates on
-// one side of the mirror only. The sidecar half is
+// one side of the mirror only. `notifications` joined them in #270: the page
+// it gated is folded into Needs You and the bell in the chrome was never
+// gated by it, so a toggle for it would switch nothing on. The sidecar half is
 // `tests/sidecar/test_composer_feature_toggle.py`.
 describe("nav-items — retired feature slugs", () => {
-  const retired = ["composer", "explorer"] as const;
+  const retired = ["composer", "explorer", "notifications"] as const;
 
   it("does not carry them in FEATURE_DEFAULTS", () => {
     for (const slug of retired) {
