@@ -914,15 +914,6 @@ export function ProjectsPage(): ReactElement {
                             <DeckMenu
                               label={`Actions for ${p.name}`}
                               items={[
-                                ...(p.path
-                                  ? [
-                                      {
-                                        label: "Open CLAUDE.md",
-                                        onSelect: () =>
-                                          void navigate(`/editor?project_id=${p.id}&kind=claude`),
-                                      },
-                                    ]
-                                  : []),
                                 {
                                   label: "Edit project",
                                   onSelect: () => {
