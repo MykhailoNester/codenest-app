@@ -42,7 +42,7 @@ describe("SubtasksCard", () => {
   it("renders no count chip and no progress bar with zero subtasks", () => {
     renderCard();
     expect(screen.queryByRole("progressbar")).toBeNull();
-    expect(document.querySelector(".td-count")).toBeNull();
+    expect(document.querySelector(".dk-group__h .n")).toBeNull();
     expect(screen.getByText("No subtasks yet.")).toBeTruthy();
   });
 
@@ -53,7 +53,7 @@ describe("SubtasksCard", () => {
         makeSubtask({ id: 2, title: "Wire the card", done: false }),
       ],
     });
-    expect(document.querySelector(".td-count")?.textContent).toBe("1/2");
+    expect(document.querySelector(".dk-group__h .n")?.textContent).toBe("1/2");
     const bar = screen.getByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe("1");
     expect(bar.getAttribute("aria-valuemax")).toBe("2");
@@ -67,7 +67,7 @@ describe("SubtasksCard", () => {
     fireEvent.click(box);
     expect(onToggle).toHaveBeenCalledWith(1, true);
     await waitFor(() => expect(box.checked).toBe(false));
-    expect(document.querySelector(".td-count")?.textContent).toBe("0/1");
+    expect(document.querySelector(".dk-group__h .n")?.textContent).toBe("0/1");
   });
 
   it("adds a subtask on submit and clears the draft", () => {

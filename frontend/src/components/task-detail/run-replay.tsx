@@ -6,7 +6,7 @@ import { ReplayPanel } from "../command-center/replay-panel";
 /**
  * The runs card's Replay affordance: reuses the Command Center's own
  * `ReplayPanel` (no second replay implementation) rendered inline in
- * `.td-doc`, directly under `RunsCard`.
+ * `.dk-detail__doc`, directly under `RunsCard`.
  *
  * The only file in this change that fetches for replay — `RunsCard` itself
  * stays prop-only, per `activity-card.tsx`'s precedent.
@@ -25,18 +25,14 @@ export function TaskRunReplay({
 
   if (isLoading) {
     return (
-      <div className="td-card">
-        <span className="td-dim td-sm">Loading replay…</span>
-      </div>
+      <div className="dk-note">Loading replay…</div>
     );
   }
 
   if (isError || !data) {
     return (
-      <div className="td-card">
-        <span className="td-dim td-sm">
-          This run has no recorded session events.
-        </span>
+      <div className="dk-note">
+        This run has no recorded session events.
       </div>
     );
   }

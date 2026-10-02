@@ -49,7 +49,7 @@ function renderCard(overrides: Partial<CommentsCardProps> = {}) {
 describe("CommentsCard", () => {
   it("cannot submit an empty draft", () => {
     const { props } = renderCard();
-    const button = screen.getByRole("button", { name: "Comment" });
+    const button = screen.getByRole("button", { name: /^comment$/i });
     expect(button.hasAttribute("disabled")).toBe(true);
 
     fireEvent.change(screen.getByLabelText("Write a comment"), {
@@ -66,7 +66,7 @@ describe("CommentsCard", () => {
     const textarea = screen.getByLabelText("Write a comment");
 
     fireEvent.change(textarea, { target: { value: "worth keeping" } });
-    fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    fireEvent.click(screen.getByRole("button", { name: /^comment$/i }));
 
     await waitFor(() => expect(onPost).toHaveBeenCalledWith("worth keeping"));
     expect((textarea as HTMLTextAreaElement).value).toBe("worth keeping");
@@ -78,7 +78,7 @@ describe("CommentsCard", () => {
     const textarea = screen.getByLabelText("Write a comment");
 
     fireEvent.change(textarea, { target: { value: "shipped" } });
-    fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    fireEvent.click(screen.getByRole("button", { name: /^comment$/i }));
 
     await waitFor(() =>
       expect((textarea as HTMLTextAreaElement).value).toBe(""),
@@ -125,8 +125,10 @@ describe("CommentsCard", () => {
     screen.getByText("Operator");
     screen.getByText("Dana");
     screen.getByText("Orion");
-    // Exactly one row carries the agent marks.
-    expect(container.querySelectorAll(".td-kind").length).toBe(1);
-    expect(container.querySelectorAll(".td-av--agent").length).toBe(1);
+    // Exactly one row carries the agent mark. Deck dropped the avatar
+    // (#298); the `.dk-tag` reading "agent" is now the whole of it.
+    const marks = container.querySelectorAll(".dk-tag");
+    expect(marks.length).toBe(1);
+    expect(marks[0]?.textContent).toBe("agent");
   });
 });

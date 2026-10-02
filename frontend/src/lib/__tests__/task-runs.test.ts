@@ -1,4 +1,4 @@
-// Pure helpers for the task detail Agent runs card (`.td-runs`): stamp
+// Pure helpers for the task detail's agent runs list: stamp
 // parsing that survives `agent_runs`' offset-suffixed timestamps, duration
 // formatting that never reads the clock, and the identity/summary/aggregate
 // rules pinned in the plan.

@@ -1,5 +1,5 @@
 /**
- * Honest derivation layer for the task detail Agent runs card (`.td-runs`).
+ * Honest derivation layer for the task detail's agent runs list.
  *
  * `agent_runs.started_at`/`ended_at` are written by
  * `agent_runs_service._now()` (`datetime.now(UTC).isoformat(timespec="seconds")`)

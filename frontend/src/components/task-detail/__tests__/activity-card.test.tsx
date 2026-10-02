@@ -37,7 +37,7 @@ describe("ActivityCard", () => {
         statusLabels={{}}
       />,
     );
-    const items = container.querySelectorAll(".td-feed li");
+    const items = container.querySelectorAll(".dk-line");
     expect(items.length).toBe(3);
     for (const li of items) {
       expect(li.querySelector("b")).not.toBeNull();
@@ -55,7 +55,7 @@ describe("ActivityCard", () => {
       />,
     );
     screen.getByText("No activity recorded yet.");
-    expect(container.querySelector(".td-feed")).toBeNull();
+    expect(container.querySelector(".dk-list")).toBeNull();
   });
 
   it("a null actor never invents a name", () => {
