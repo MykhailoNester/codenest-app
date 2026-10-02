@@ -55,6 +55,7 @@ import {
   useProjects,
   useTask,
   useTaskActivity,
+  useTaskCost,
   useTaskRuns,
   useTaskComments,
   useTaskSubtasks,
@@ -84,6 +85,7 @@ import { TaskRunReplay } from "../components/task-detail/run-replay";
 import { RunsCard } from "../components/task-detail/runs-card";
 import { SubtasksCard } from "../components/task-detail/subtasks-card";
 import { CommentsCard } from "../components/task-detail/comments-card";
+import { CostCard } from "../components/task-detail/cost-card";
 
 // Module-level sentinels so a not-yet-resolved query never hands a fresh
 // array/object reference into a memo dependency (`tasks.tsx`'s NO_* idiom).
@@ -133,6 +135,12 @@ export function TaskDetailPage(): ReactElement {
     isError: runsError,
     refetch: refetchRuns,
   } = useTaskRuns(taskId);
+  const {
+    data: cost,
+    isLoading: costLoading,
+    isError: costError,
+    refetch: refetchCost,
+  } = useTaskCost(taskId);
   const {
     data: subtasks = NO_SUBTASKS,
     isLoading: subtasksLoading,
@@ -790,6 +798,13 @@ export function TaskDetailPage(): ReactElement {
                 </DeckGrid>
               )}
             </DeckGroup>
+
+            <CostCard
+              cost={cost}
+              isLoading={costLoading}
+              isError={costError}
+              onRetry={() => void refetchCost()}
+            />
 
             <DeckGroup label="timestamps">
               <div className="dk-kv">

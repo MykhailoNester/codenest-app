@@ -676,6 +676,48 @@ export function useTaskActivity(
   });
 }
 
+/** One session counted against a task by `GET /api/v1/tasks/{id}/cost`. */
+export interface TaskCostSession {
+  session_id: string;
+  cost_usd: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  model: string | null;
+  status: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  git_branch: string | null;
+  /** `launch` = started from the task; `branch` = its branch names the task. */
+  attributed_by: "launch" | "branch";
+}
+
+/** What a task cost. The money fields are `null` — never `0` — when no
+ *  session is attributed to it; `reason` then says why. */
+export interface TaskCost {
+  task_id: number;
+  cost_usd: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  session_count: number;
+  by_launch: number;
+  by_branch: number;
+  reason: string | null;
+  sessions: TaskCostSession[];
+}
+
+export function useTaskCost(
+  taskId: number,
+  limit = 50, // mirrors task_cost_service.DEFAULT_SESSION_LIMIT
+): UseQueryResult<TaskCost, SidecarError> {
+  return useQuery<TaskCost, SidecarError>({
+    queryKey: ["task-cost", taskId, limit],
+    queryFn: () =>
+      fetchSidecar<TaskCost>(`/api/v1/tasks/${taskId}/cost?limit=${limit}`),
+    enabled: taskId > 0,
+    refetchInterval: 30_000,
+  });
+}
+
 export function useTaskRuns(
   taskId: number,
   limit = 50, // mirrors agent_runs_service.DEFAULT_SOURCE_LIMIT
