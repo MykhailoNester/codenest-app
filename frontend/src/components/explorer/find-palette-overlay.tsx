@@ -175,14 +175,13 @@ export function FindPaletteOverlay(): ReactElement | null {
           </div>
         </div>
         <ExplorerFind roots={roots} />
-        {/* `.dk-modal__f` is the footer Deck already draws for a panel — the
-            rule above it and the flush-right cluster. A status line carries no
-            buttons, so `.dk-meta` holds the text at the footnote tier. */}
-        <div className="dk-modal__f">
-          <span className="dk-meta">
-            {formatCount(totalFiles)} files indexed across {indexedRoots} roots
-            {watchBackend ? ` · watcher: ${watchBackend}` : ""}
-          </span>
+        {/* `.dk-side__f`, not `.dk-modal__f`: the latter is a button tray and
+            flushes its contents right, while this is a status line that reads
+            from the left. `.dk-side__f` is the rule-above-it footer the
+            navigator uses for exactly this — a count at the footnote tier. */}
+        <div className="dk-side__f">
+          {formatCount(totalFiles)} files indexed across {indexedRoots} roots
+          {watchBackend ? ` · watcher: ${watchBackend}` : ""}
         </div>
       </div>
     </div>
