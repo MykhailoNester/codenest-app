@@ -275,7 +275,7 @@ export function LaunchComposerDialog({
             The task or inbox item this launch was seeded from has been deleted.
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button className="d3-btn" type="button" onClick={onClose}>
+            <button className="dk-btn" type="button" onClick={onClose}>
               Cancel
             </button>
           </div>

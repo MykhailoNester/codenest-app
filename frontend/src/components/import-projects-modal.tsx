@@ -240,7 +240,7 @@ export function ImportProjectsModal({
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button
-              className="d3-btn d3-btn--ghost"
+              className="dk-btn bare"
               type="button"
               onClick={() => void handlePickFolder()}
               disabled={scan.isPending}
@@ -249,7 +249,7 @@ export function ImportProjectsModal({
               Pick folder...
             </button>
             <button
-              className="d3-btn d3-btn--ghost"
+              className="dk-btn bare"
               type="button"
               onClick={() => void handleAddFolder()}
               disabled={scan.isPending}
@@ -258,7 +258,7 @@ export function ImportProjectsModal({
               Add folder...
             </button>
             <button
-              className="d3-btn d3-btn--ghost"
+              className="dk-btn bare"
               type="button"
               onClick={handleScan}
               disabled={scan.isPending || !rootPath}
@@ -426,7 +426,7 @@ export function ImportProjectsModal({
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button
-              className="d3-btn d3-btn--ghost"
+              className="dk-btn bare"
               type="button"
               onClick={onClose}
               disabled={richImport.isPending}
@@ -434,7 +434,7 @@ export function ImportProjectsModal({
               Cancel
             </button>
             <button
-              className="d3-btn d3-btn--primary"
+              className="dk-btn pri"
               type="button"
               onClick={handleImport}
               disabled={
