@@ -214,8 +214,14 @@ describe("LaunchComposerDialog — seeding", () => {
       />,
     );
 
-    expect(document.querySelectorAll(".lp-pane--agent")).toHaveLength(4);
-    expect(document.querySelector(".lp-head__ref")?.textContent).toBe("#1");
+    // `.lp-pane--agent` → the pane tile's `data-pane-kind`, and the source
+    // ref now rides the `.dk-modal__h` meta rather than `.lp-head__ref` (#283).
+    expect(
+      document.querySelectorAll('[data-pane-kind="agent"]'),
+    ).toHaveLength(4);
+    expect(
+      document.querySelector(".dk-modal__h .dk-meta")?.textContent,
+    ).toContain("#1");
   });
 
   it('a null seed with a source renders the "Source no longer exists" panel and no composer', () => {
@@ -397,9 +403,9 @@ describe("LaunchComposerDialog — sticky defaults (decision 6)", () => {
     );
 
     const popoutButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>(".lp-seg button"),
+      document.querySelectorAll<HTMLButtonElement>(".dk-seg button"),
     ).find((b) => b.textContent === "Popout window");
-    expect(popoutButton?.className).toContain("is-on");
+    expect(popoutButton?.className).toContain("on");
   });
 
   it("with has_override true, the seed's target wins over a stored default", () => {
@@ -417,9 +423,9 @@ describe("LaunchComposerDialog — sticky defaults (decision 6)", () => {
     );
 
     const popoutButton = Array.from(
-      document.querySelectorAll<HTMLButtonElement>(".lp-seg button"),
+      document.querySelectorAll<HTMLButtonElement>(".dk-seg button"),
     ).find((b) => b.textContent === "Popout window");
-    expect(popoutButton?.className).toContain("is-on");
+    expect(popoutButton?.className).toContain("on");
   });
 
   it("after a launch, codenest.launch.defaults holds the launched target/profile and a pre-existing rows key", async () => {

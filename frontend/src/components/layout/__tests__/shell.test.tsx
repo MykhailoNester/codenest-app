@@ -93,7 +93,13 @@ describe("Shell — Launch entry points", () => {
     expect(
       document.querySelector('[aria-label="Launch session"]'),
     ).not.toBeNull();
-    expect(document.querySelector(".lp-head__ref")).toBeNull();
+    // Opened from the top bar there is no source, so the header carries no
+    // `#id — title` meta. Was `.lp-head__ref` before the Deck conversion
+    // (#283); the ref now rides `.dk-modal__h .dk-meta`.
+    expect(document.querySelector(".dk-modal__h .dk-meta")).toBeNull();
+    expect(document.querySelector(".dk-modal__h h2")?.textContent).toBe(
+      "launch session",
+    );
   });
 
   it("the OmniBar's open-launch event opens the same dialog", async () => {
