@@ -13,7 +13,7 @@ body,
 }
 
 /* The shell is a fixed viewport: every scroll in the app belongs to a pane
- * inside it (`.d3-page-scroll`, the transcript, the explorer tree), so the
+ * inside it (`.dk-page`, the transcript, the explorer tree), so the
  * document itself must never be able to scroll. Without this, anything that
  * overflows the shell turns into a page-level scrollbar and the whole app
  * scrolls as one — which is how #43 presented, alongside a root box stuck at a

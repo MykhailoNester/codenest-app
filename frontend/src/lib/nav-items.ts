@@ -137,8 +137,14 @@ export const NAV_ITEMS = [
     // #166. Icon key stays `dashboard` because that key exists in `icon.tsx`
     // and `Icon` renders `null` for an unknown name rather than throwing, so a
     // freshly invented key would silently render nothing.
+    //
+    // Labelled "Deck" since #345: `/` is `DeckHomePage`, the old dashboard is
+    // deleted, and this label is what the command palette prints for the row.
+    // The *slug* stays `mission` — it is the key the Deck rail's `KEPT` table
+    // resolves this path through, and it is persisted in settings, so renaming
+    // it would be a migration for no gain.
     slug: "mission",
-    label: "Mission Control",
+    label: "Deck",
     icon: "dashboard",
     path: "/",
     group: "attention",

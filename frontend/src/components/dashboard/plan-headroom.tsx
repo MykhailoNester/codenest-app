@@ -1,6 +1,7 @@
 /**
- * PlanHeadroom — the plan-usage panel Mission Control mounts (epic #153, #164
- * data / #166 mount).
+ * PlanHeadroom — the plan-usage panel (epic #153, #164 data / #166 mount).
+ * Mounted by Budgets (`components/budgets/usage-limits.tsx`) since #345 deleted
+ * the landing page that used to carry it.
  *
  * Every number on this panel is a raw counter out of Claude desktop's
  * `plan-usage-history.json`, and the panel's job is to show them without
@@ -15,7 +16,7 @@
  * per series and are never written down here. They move: both counters' upper
  * bounds on this machine changed within a day of #164 landing, so a range
  * pasted into the source is a panel that starts lying the moment a counter goes
- * past it. `mission-control.test.tsx` greps this file for the stale figures the
+ * past it. This component's own test greps this file for the stale figures the
  * design doc printed, which is the cheapest way to keep that promise honest.
  *
  * A series with no separation in its bounds (one sample, or a counter that has

@@ -176,8 +176,12 @@ export function ProvidersTab(): ReactElement {
 
   function scrollPageToTop(): void {
     requestAnimationFrame(() => {
+      // `.dk-page` is DeckShell's scroll container. It used to be the old
+      // Shell's `.d3-page-scroll`, which Settings stopped rendering when it
+      // moved onto Deck and which nothing renders at all since #345 deleted
+      // that shell — so this was silently scrolling nothing.
       rootRef.current
-        ?.closest(".d3-page-scroll")
+        ?.closest(".dk-page")
         ?.scrollTo({ top: 0, behavior: "smooth" });
     });
   }

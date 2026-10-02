@@ -32,7 +32,6 @@ import { CatalogFeedHost } from "./components/catalog-feed-host";
 import { CommandPalette } from "./components/command-palette";
 import { StartupSplash } from "./components/startup-splash";
 import { ToastHost } from "./components/toast-host";
-import { DashboardPage } from "./pages/dashboard";
 import { DeckHomePage } from "./pages/deck-home";
 import { AttentionPage } from "./pages/attention";
 import { DeckPreviewPage } from "./pages/deck-preview";
@@ -343,11 +342,12 @@ function AppInner(): ReactElement {
           path="/command"
           element={<Navigate to="/terminal?view=runs" replace />}
         />
-        {/* #282 — the Deck home screen. Mission Control keeps a route of its
-            own until the migration is signed off, so the two can be compared in
-            one window the way /deck let the shell be. */}
+        {/* #282 — the Deck home screen. The old dashboard kept a comparison
+            route of its own until the migration was signed off; #345 ended the
+            split and deleted it, along with the `Shell` it was one of the last
+            two pages on. No redirect: that route existed for a review that is
+            over, and nothing links to it. */}
         <Route path="/" element={<DeckHomePage />} />
-        <Route path="/mission-control" element={<DashboardPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         {/* #273 — the context map is a project's detail on the Projects
             surface. The old path stays as a redirect, carrying its param. */}
@@ -450,7 +450,7 @@ function AppInner(): ReactElement {
 export function App(): ReactElement {
   // Detached terminals window shares this Vite bundle and is
   // routed via a hash fragment. When that fragment is set we skip the full
-  // app shell (sidebar, topbar, MemoryRouter routes) and mount the
+  // app shell (the Deck rail, status row, MemoryRouter routes) and mount the
   // terminals-only root directly.
   const isTerminalsWindow = isTerminalsWindowHash();
 
