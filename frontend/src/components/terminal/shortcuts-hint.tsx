@@ -1,6 +1,99 @@
-import { useState, type ReactElement } from "react";
+import { useState, type CSSProperties, type ReactElement } from "react";
 import { createPortal } from "react-dom";
-import styles from "./shortcuts-hint.module.css";
+
+/* ── Local constants ─────────────────────────────────────────────────────
+   The shortcuts panel. It `createPortal`s to `document.body`, outside the
+   `.deck` the Sessions page draws inside, so the markup carries its own `deck`
+   scope and the panel itself is Deck's dialog primitive — `.dk-modal` with
+   `__h`/`__b` — anchored bottom-right instead of centred in a scrim. Declared
+   here rather than in `components/deck/*` or `design/deck/*`, which #283 does
+   not touch — the precedent is the composer's `EDITOR_*` constants and the
+   launch composer's `SCRIM_STYLE`.
+
+   Inline, so these override the `.dk-*` rules without depending on which
+   stylesheet the bundler injects first. */
+
+/** Carries Deck's tokens through the portal without drawing a box of its own:
+ *  `display: contents` removes the wrapper from layout while custom properties
+ *  and inherited values still pass to its children. */
+const DECK_SCOPE_STYLE: CSSProperties = { display: "contents" };
+
+/** Backdrop — closes the panel on click. No fill: this panel is a reference
+ *  card, not a modal that blocks the session behind it. That is why it is not
+ *  `.dk-scrim`, which dims what is underneath and centres its child. */
+const BACKDROP_STYLE: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 7000,
+};
+
+const PANEL_STYLE: CSSProperties = {
+  position: "fixed",
+  bottom: "var(--u4)",
+  right: "var(--u6)",
+  zIndex: 7001,
+  width: 340,
+  maxHeight: "min(70vh, 560px)",
+};
+
+/** The list is the modal body; `.dk-modal__b`'s 16px page padding is the wrong
+ *  rhythm for eighteen one-line rows. */
+const LIST_STYLE: CSSProperties = {
+  listStyle: "none",
+  margin: 0,
+  padding: "var(--u2) var(--u3)",
+};
+
+const ROW_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "var(--u3)",
+  minHeight: "var(--row)",
+  padding: "0 var(--u)",
+};
+
+/** `.row + .row` as data: an adjacent-sibling rule is the other thing an
+ *  inline style cannot express, so the divider is drawn from the row index. */
+const ROW_DIVIDED_STYLE: CSSProperties = {
+  ...ROW_STYLE,
+  borderTop: "1px solid var(--line)",
+};
+
+const KEYS_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 3,
+  flexShrink: 0,
+};
+
+/** One key cap. `.dk-tag` is Deck's nearest pill and is the wrong one — it
+ *  carries no border, and a keystroke has to read as a key rather than as a
+ *  label. */
+const KBD_STYLE: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 20,
+  padding: "0 var(--u)",
+  background: "var(--bg-2)",
+  border: "1px solid var(--line-2)",
+  borderRadius: 2,
+  fontFamily: "var(--mono)",
+  fontSize: "var(--fs-xs)",
+  color: "var(--fg-2)",
+  textAlign: "center",
+  whiteSpace: "nowrap",
+};
+
+const DESC_STYLE: CSSProperties = {
+  flex: "1 1 auto",
+  textAlign: "right",
+  color: "var(--fg-3)",
+  fontSize: "var(--fs-s)",
+};
+
+const TRIGGER_STYLE: CSSProperties = { marginLeft: "auto" };
 
 interface ShortcutRow {
   keys: string[];
@@ -43,7 +136,7 @@ export function ShortcutsHint(): ReactElement {
       <button
         type="button"
         className="dk-tab"
-        style={{ marginLeft: "auto" }}
+        style={TRIGGER_STYLE}
         onClick={() => setOpen((v) => !v)}
         aria-label="Keyboard shortcuts"
         title="Keyboard shortcuts"
@@ -55,17 +148,18 @@ export function ShortcutsHint(): ReactElement {
         ? createPortal(
             // `deck` because this portals to `document.body`, outside the
             // `.deck` the Sessions page draws inside — without it the panel
-            // would resolve Deck's tokens to nothing. `styles.scope` is
+            // would resolve Deck's tokens to nothing. `DECK_SCOPE_STYLE` is
             // `display: contents`, so the wrapper carries the tokens and
             // draws no box of its own.
-            <div className={`deck ${styles.scope}`}>
+            <div className="deck" style={DECK_SCOPE_STYLE}>
               <div
-                className={styles.backdrop}
+                style={BACKDROP_STYLE}
                 onClick={() => setOpen(false)}
                 role="presentation"
               />
               <div
-                className={`dk-modal ${styles.panel}`}
+                className="dk-modal"
+                style={PANEL_STYLE}
                 role="dialog"
                 aria-label="Terminal keyboard shortcuts"
               >
@@ -81,17 +175,17 @@ export function ShortcutsHint(): ReactElement {
                     ×
                   </button>
                 </div>
-                <ul className={`dk-modal__b ${styles.list}`}>
-                  {SHORTCUTS.map(({ keys, label }) => (
-                    <li key={label} className={styles.row}>
-                      <span className={styles.keys}>
+                <ul className="dk-modal__b" style={LIST_STYLE}>
+                  {SHORTCUTS.map(({ keys, label }, row) => (
+                    <li key={label} style={row === 0 ? ROW_STYLE : ROW_DIVIDED_STYLE}>
+                      <span style={KEYS_STYLE}>
                         {keys.map((k, i) => (
-                          <kbd key={i} className={styles.kbd}>
+                          <kbd key={i} style={KBD_STYLE}>
                             {k}
                           </kbd>
                         ))}
                       </span>
-                      <span className={styles.desc}>{label}</span>
+                      <span style={DESC_STYLE}>{label}</span>
                     </li>
                   ))}
                 </ul>
