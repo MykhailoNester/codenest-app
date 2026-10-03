@@ -199,7 +199,7 @@ async def test_duplicated_agent_names_are_all_invocable_under_aliases(
     name the project itself uses, so a picker row still reads like the project.
     """
     first = await _insert_project(migrated_db, "codenest-app", "/repo/codenest-app")
-    second = await _insert_project(migrated_db, "miragold", "/repo/miragold")
+    second = await _insert_project(migrated_db, "mercury", "/repo/mercury")
     await _insert_asset(migrated_db, "agents", first, "code-reviewer")
     await _insert_asset(migrated_db, "agents", second, "code-reviewer")
 
@@ -208,11 +208,11 @@ async def test_duplicated_agent_names_are_all_invocable_under_aliases(
     assert result["shadowed"] == []
     assert {a["invoke_token"] for a in result["agents"]} == {
         "@agent-codenest-app--code-reviewer",
-        "@agent-miragold--code-reviewer",
+        "@agent-mercury--code-reviewer",
     }
     assert {a["alias"] for a in result["agents"]} == {
         "codenest-app:code-reviewer",
-        "miragold:code-reviewer",
+        "mercury:code-reviewer",
     }
     assert all(a["materialized"] for a in result["agents"])
 
@@ -224,7 +224,7 @@ async def test_an_unaliasable_duplicate_is_reported_never_invocable(
     """A file with no frontmatter `name:` cannot be renamed, so when two of them
     claim one name the second is reported instead of offered."""
     first = await _insert_project(migrated_db, "codenest-app", "/repo/codenest-app")
-    second = await _insert_project(migrated_db, "miragold", "/repo/miragold")
+    second = await _insert_project(migrated_db, "mercury", "/repo/mercury")
     await _insert_asset(migrated_db, "agents", first, "code-reviewer", aliasable=False)
     await _insert_asset(migrated_db, "agents", second, "code-reviewer", aliasable=False)
 
@@ -235,7 +235,7 @@ async def test_an_unaliasable_duplicate_is_reported_never_invocable(
     assert len(result["shadowed"]) == 1
     shadowed = result["shadowed"][0]
     assert shadowed["name"] == "code-reviewer"
-    assert shadowed["project"] == "miragold"
+    assert shadowed["project"] == "mercury"
     assert shadowed["shadowed_by"] == "codenest-app"
 
 
@@ -243,7 +243,7 @@ async def test_an_unaliasable_duplicate_is_reported_never_invocable(
 async def test_skill_token_is_the_linked_directory_segment(migrated_db, workspace):
     """A duplicated skill name really is disambiguated by its workspace entry."""
     first = await _insert_project(migrated_db, "codenest-app", "/repo/codenest-app")
-    second = await _insert_project(migrated_db, "miragold", "/repo/miragold")
+    second = await _insert_project(migrated_db, "mercury", "/repo/mercury")
     await _insert_asset(migrated_db, "skills", first, "frontend-design")
     await _insert_asset(migrated_db, "skills", second, "frontend-design")
 
@@ -251,23 +251,23 @@ async def test_skill_token_is_the_linked_directory_segment(migrated_db, workspac
     tokens = {s["invoke_token"] for s in skills}
 
     assert "/frontend-design" in tokens
-    assert "/miragold--frontend-design" in tokens
+    assert "/mercury--frontend-design" in tokens
     # The alias stays the name the project declared, so a picker row reads the way
     # its author would recognise it.
-    prefixed = next(s for s in skills if s["name"] == "miragold--frontend-design")
-    assert prefixed["alias"] == "miragold:frontend-design"
+    prefixed = next(s for s in skills if s["name"] == "mercury--frontend-design")
+    assert prefixed["alias"] == "mercury:frontend-design"
 
 
 @pytest.mark.asyncio
 async def test_command_token_is_the_linked_file_stem(migrated_db, workspace):
     first = await _insert_project(migrated_db, "codenest-app", "/repo/codenest-app")
-    second = await _insert_project(migrated_db, "miragold", "/repo/miragold")
+    second = await _insert_project(migrated_db, "mercury", "/repo/mercury")
     await _insert_asset(migrated_db, "commands", first, "ship")
     await _insert_asset(migrated_db, "commands", second, "ship")
 
     commands = (await list_invocables(migrated_db))["commands"]
 
-    assert {c["invoke_token"] for c in commands} == {"/ship", "/miragold--ship"}
+    assert {c["invoke_token"] for c in commands} == {"/ship", "/mercury--ship"}
     assert all(not c["name"].endswith(".md") for c in commands)
 
 
@@ -325,11 +325,11 @@ async def test_project_scope_returns_that_projects_own_assets(
 ):
     """A pane rooted in a project reads that project's `.claude/`, and nothing
     else: not the org agents, not another project's."""
-    root = tmp_path / "repo" / "miragold"
+    root = tmp_path / "repo" / "mercury"
     root.mkdir(parents=True)
     await _insert_org_agent(migrated_db, "orion-ops")
     other = await _insert_project(migrated_db, "codenest-app", tmp_path / "repo/cn")
-    mine = await _insert_project(migrated_db, "miragold", root)
+    mine = await _insert_project(migrated_db, "mercury", root)
     await _insert_asset(migrated_db, "agents", other, "coder-agent")
     await _insert_asset(migrated_db, "agents", mine, "debugger")
     await _insert_asset(migrated_db, "skills", mine, "frontend-design")
@@ -349,9 +349,9 @@ async def test_project_scope_returns_that_projects_own_assets(
 async def test_project_scope_includes_unshared_assets(migrated_db, workspace, tmp_path):
     """`enabled` controls sharing into the workspace, not what the project's own
     session can reach — the file is right there either way."""
-    root = tmp_path / "repo" / "miragold"
+    root = tmp_path / "repo" / "mercury"
     root.mkdir(parents=True)
-    pid = await _insert_project(migrated_db, "miragold", root)
+    pid = await _insert_project(migrated_db, "mercury", root)
     await _insert_asset(migrated_db, "agents", pid, "local-agent", enabled=0)
 
     agent = (await list_invocables(migrated_db, cwd=str(root)))["agents"][0]
@@ -369,10 +369,10 @@ async def test_an_aliased_agent_keeps_its_bare_name_in_its_own_project(
 ):
     """The alias exists to disambiguate the *shared* workspace. A session rooted in
     the project reads the project's own file, which declares the plain name."""
-    root = tmp_path / "repo" / "miragold"
+    root = tmp_path / "repo" / "mercury"
     root.mkdir(parents=True)
     first = await _insert_project(migrated_db, "codenest-app", tmp_path / "repo/cn")
-    second = await _insert_project(migrated_db, "miragold", root)
+    second = await _insert_project(migrated_db, "mercury", root)
     await _insert_asset(migrated_db, "agents", first, "code-reviewer")
     await _insert_asset(migrated_db, "agents", second, "code-reviewer")
 
@@ -459,10 +459,10 @@ async def client(migrated_db):
 async def test_endpoint_scopes_on_the_cwd_query_param(
     client, migrated_db, workspace, tmp_path
 ):
-    root = tmp_path / "repo" / "miragold"
+    root = tmp_path / "repo" / "mercury"
     root.mkdir(parents=True)
     await _insert_org_agent(migrated_db, "orion-ops")
-    pid = await _insert_project(migrated_db, "miragold", root)
+    pid = await _insert_project(migrated_db, "mercury", root)
     await _insert_asset(migrated_db, "agents", pid, "debugger")
 
     workspace_body = client.get("/api/v1/command-center/invocables").json()
@@ -472,4 +472,4 @@ async def test_endpoint_scopes_on_the_cwd_query_param(
 
     assert [a["name"] for a in workspace_body["agents"]] == ["orion-ops", "debugger"]
     assert [a["name"] for a in project_body["agents"]] == ["debugger"]
-    assert project_body["project_name"] == "miragold"
+    assert project_body["project_name"] == "mercury"

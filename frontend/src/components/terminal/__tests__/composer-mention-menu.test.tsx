@@ -111,7 +111,7 @@ function invocable(over: Record<string, unknown>): Record<string, unknown> {
     description: null,
     model: null,
     project_id: 5,
-    project_name: "miragold",
+    project_name: "mercury",
     canonical_path: "/repo/.claude/agents/x.md",
     link_path: "/ws/.claude/agents/x.md",
     verify_status: "ok",
@@ -155,21 +155,21 @@ beforeEach(() => {
       agents: [
         invocable({
           name: "aliasing-agent",
-          alias: "miragold:aliasing-agent",
+          alias: "mercury:aliasing-agent",
           invoke_token: "@agent-aliasing-agent",
           description: "Reviews aliasing.",
         }),
         invocable({
-          name: "miragold--code-reviewer",
-          alias: "miragold:code-reviewer",
-          invoke_token: "@agent-miragold--code-reviewer",
+          name: "mercury--code-reviewer",
+          alias: "mercury:code-reviewer",
+          invoke_token: "@agent-mercury--code-reviewer",
           materialized: true,
         }),
       ],
       skills: [
         invocable({
           name: "aliasing-skill",
-          alias: "miragold:aliasing-skill",
+          alias: "mercury:aliasing-skill",
           invoke_token: "/aliasing-skill",
         }),
       ],
@@ -195,8 +195,8 @@ describe("@ mention menu", () => {
     typeDraft("@ali");
 
     const listbox = await screen.findByRole("listbox");
-    expect(listbox.textContent).toContain("miragold:aliasing-agent");
-    expect(listbox.textContent).toContain("miragold:aliasing-skill");
+    expect(listbox.textContent).toContain("mercury:aliasing-agent");
+    expect(listbox.textContent).toContain("mercury:aliasing-skill");
     expect(listbox.textContent).toContain("Align the migration");
     expect(listbox.textContent).toContain("Aliasing notes");
     expect(listbox.textContent).toContain("agents");
@@ -206,11 +206,11 @@ describe("@ mention menu", () => {
   });
 
   it("scopes the catalog to the pane's cwd", async () => {
-    renderComposer("/repo/miragold");
+    renderComposer("/repo/mercury");
     typeDraft("@ali");
     await screen.findByRole("listbox");
 
-    expect(useInvocablesMock).toHaveBeenCalledWith("/repo/miragold");
+    expect(useInvocablesMock).toHaveBeenCalledWith("/repo/mercury");
   });
 
   it("still lists agents when the catalog fetch failed — no error state", async () => {
@@ -270,7 +270,7 @@ describe("@ mention menu", () => {
     typeDraft("@ali");
     await screen.findByRole("listbox");
 
-    fireEvent.click(screen.getByText("miragold:aliasing-agent"));
+    fireEvent.click(screen.getByText("mercury:aliasing-agent"));
 
     await waitFor(() => expect(editor().value).toBe("@agent-aliasing-agent "));
     expect(useComposerStore.getState().panes[LEAF]?.pills ?? []).toEqual([]);
@@ -281,10 +281,10 @@ describe("@ mention menu", () => {
     typeDraft("@code-rev");
     await screen.findByRole("listbox");
 
-    fireEvent.click(screen.getByText("miragold:code-reviewer"));
+    fireEvent.click(screen.getByText("mercury:code-reviewer"));
 
     await waitFor(() =>
-      expect(editor().value).toBe("@agent-miragold--code-reviewer "),
+      expect(editor().value).toBe("@agent-mercury--code-reviewer "),
     );
   });
 
@@ -293,7 +293,7 @@ describe("@ mention menu", () => {
     typeDraft("@alias");
     await screen.findByRole("listbox");
 
-    fireEvent.click(screen.getByText("miragold:aliasing-skill"));
+    fireEvent.click(screen.getByText("mercury:aliasing-skill"));
 
     await waitFor(() => expect(editor().value).toBe("/aliasing-skill "));
   });
@@ -303,7 +303,7 @@ describe("@ mention menu", () => {
     typeDraft("please use @alias");
     await screen.findByRole("listbox");
 
-    fireEvent.click(screen.getByText("miragold:aliasing-skill"));
+    fireEvent.click(screen.getByText("mercury:aliasing-skill"));
 
     await waitFor(() => expect(editor().value).toBe("please use aliasing-skill "));
   });

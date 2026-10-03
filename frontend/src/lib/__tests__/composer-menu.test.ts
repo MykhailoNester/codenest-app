@@ -109,8 +109,8 @@ describe("mentionRowToSuggest", () => {
       { kind: "agent", label: "Bob", meta: "ops", insertText: "@agent-bob" },
       {
         kind: "skill",
-        label: "miragold:frontend-design",
-        meta: "miragold",
+        label: "mercury:frontend-design",
+        meta: "mercury",
         insertText: "/frontend-design",
         name: "frontend-design",
       },
@@ -137,7 +137,7 @@ describe("mentionRowToSuggest", () => {
     expect(suggested.map((s) => s.label)).toEqual([
       "Alice",
       "Bob",
-      "miragold:frontend-design",
+      "mercury:frontend-design",
       "Fix it",
       "Notes",
     ]);

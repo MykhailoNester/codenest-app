@@ -63,8 +63,8 @@ describe("AgentMarkdown", () => {
         text={[
           "| Project | Path | What it is |",
           "|---|---|---|",
-          "| **CodeNest** | `~/Documents/Work/CodeNest` | The umbrella directory |",
-          "| **miragold** | `…/CodeNest/miragold` | Jewelry inventory app |",
+          "| **workspace** | `~/code/workspace` | The umbrella directory |",
+          "| **mercury** | `…/code/mercury` | Inventory app |",
         ].join("\n")}
       />,
     );

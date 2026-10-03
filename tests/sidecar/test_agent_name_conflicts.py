@@ -321,7 +321,7 @@ async def test_aliasable_duplicates_clear_the_health_view(
     migrated_db: aiosqlite.Connection,
 ):
     """The install this shipped for: three projects, one `code-reviewer` each."""
-    for project in ("codenest-app", "networa", "miragold"):
+    for project in ("codenest-app", "networa", "mercury"):
         pid = await _insert_project(migrated_db, project)
         await _insert_agent(migrated_db, pid, "code-reviewer", f"/w/{project}/cr.md")
 

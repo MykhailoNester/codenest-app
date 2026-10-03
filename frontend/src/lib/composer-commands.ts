@@ -350,7 +350,7 @@ export function findCommand(
  * twice. Built-ins match by prefix only, as they always have. A discovered
  * command also matches on a substring, because the workspace links a name two
  * projects both claim as `<project-slug>--<name>` — prefix-only would make
- * `/ship` find nothing and demand `/miragold--ship`, a name nobody types.
+ * `/ship` find nothing and demand `/mercury--ship`, a name nobody types.
  */
 export function matchCommands(
   prefix: string,
