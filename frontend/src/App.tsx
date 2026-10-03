@@ -34,7 +34,6 @@ import { StartupSplash } from "./components/startup-splash";
 import { ToastHost } from "./components/toast-host";
 import { DeckHomePage } from "./pages/deck-home";
 import { AttentionPage } from "./pages/attention";
-import { DeckPreviewPage } from "./pages/deck-preview";
 import { TasksPage } from "./pages/tasks";
 import { TaskDetailPage } from "./pages/task-detail";
 import { TeamPage } from "./pages/team";
@@ -356,7 +355,6 @@ function AppInner(): ReactElement {
           element={<ProjectContextRedirect />}
         />
         {/* #280 — the Deck shell, reviewable beside the old one. Removed by #281/#282. */}
-        <Route path="/deck" element={<DeckPreviewPage />} />
         <Route
           path="/attention"
           element={
