@@ -85,6 +85,70 @@ async def api_create_schedule(request: Request) -> JSONResponse:
     )
 
 
+# ── Transcript retention ─────────────────────────────────────────────────────
+#
+# These sit ABOVE `/{schedule_id}` deliberately. FastAPI matches in declaration
+# order, so with the parameterised route first, `GET /retention` was matched as
+# a schedule id and 422'd on the int parse — unreachable from the day it was
+# added. Any future literal path under this router belongs here too.
+
+
+@router.get("/retention")
+async def api_get_retention() -> JSONResponse:
+    """Return the current transcript retention setting (days)."""
+    import json
+
+    db = await get_db()
+    row = await db.execute(
+        "SELECT value_json FROM app_settings WHERE key = 'schedule_transcript_retention_days'",
+    )
+    r = await row.fetchone()
+    if r:
+        try:
+            days = int(json.loads(r["value_json"]))
+        except (ValueError, TypeError):
+            days = 30
+    else:
+        days = 30
+    return JSONResponse({"retention_days": days})
+
+
+@router.put("/retention")
+async def api_set_retention(request: Request) -> JSONResponse:
+    """Set transcript retention days (1–365)."""
+    import json
+
+    body = await read_json_body(request, 512)
+    raw = body.get("retention_days")
+    if raw is None:
+        raise HTTPException(status_code=400, detail="'retention_days' is required")
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400, detail="'retention_days' must be an integer"
+        )
+    if not (1 <= days <= 365):
+        raise HTTPException(status_code=400, detail="'retention_days' must be 1–365")
+    db = await get_db()
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
+    await db.execute(
+        """INSERT INTO app_settings (key, value_json, updated_at)
+           VALUES ('schedule_transcript_retention_days', ?, ?)
+           ON CONFLICT(key) DO UPDATE SET
+               value_json = excluded.value_json,
+               updated_at = excluded.updated_at""",
+        (json.dumps(days), now),
+    )
+    await db.commit()
+    return JSONResponse({"retention_days": days})
+
+
+# ── Event dispatch ───────────────────────────────────────────────────────────
+
+
 @router.get("/{schedule_id}")
 async def api_get_schedule(schedule_id: int) -> JSONResponse:
     db = await get_db()
@@ -368,65 +432,6 @@ async def api_fire_manual(schedule_id: int) -> JSONResponse:
     """Force-fire a schedule from the UI; inserts a queued run for the Rust shell."""
     db = await get_db()
     return JSONResponse(await schedule_service.fire_manual(db, schedule_id))
-
-
-# ── Transcript retention ─────────────────────────────────────────────────────
-
-
-@router.get("/retention")
-async def api_get_retention() -> JSONResponse:
-    """Return the current transcript retention setting (days)."""
-    import json
-
-    db = await get_db()
-    row = await db.execute(
-        "SELECT value_json FROM app_settings WHERE key = 'schedule_transcript_retention_days'",
-    )
-    r = await row.fetchone()
-    if r:
-        try:
-            days = int(json.loads(r["value_json"]))
-        except (ValueError, TypeError):
-            days = 30
-    else:
-        days = 30
-    return JSONResponse({"retention_days": days})
-
-
-@router.put("/retention")
-async def api_set_retention(request: Request) -> JSONResponse:
-    """Set transcript retention days (1–365)."""
-    import json
-
-    body = await read_json_body(request, 512)
-    raw = body.get("retention_days")
-    if raw is None:
-        raise HTTPException(status_code=400, detail="'retention_days' is required")
-    try:
-        days = int(raw)
-    except (TypeError, ValueError):
-        raise HTTPException(
-            status_code=400, detail="'retention_days' must be an integer"
-        )
-    if not (1 <= days <= 365):
-        raise HTTPException(status_code=400, detail="'retention_days' must be 1–365")
-    db = await get_db()
-    from datetime import UTC, datetime
-
-    now = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
-    await db.execute(
-        """INSERT INTO app_settings (key, value_json, updated_at)
-           VALUES ('schedule_transcript_retention_days', ?, ?)
-           ON CONFLICT(key) DO UPDATE SET
-               value_json = excluded.value_json,
-               updated_at = excluded.updated_at""",
-        (json.dumps(days), now),
-    )
-    await db.commit()
-    return JSONResponse({"retention_days": days})
-
-
-# ── Event dispatch ───────────────────────────────────────────────────────────
 
 
 @router.post("/events")

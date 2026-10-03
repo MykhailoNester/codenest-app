@@ -154,3 +154,106 @@ async def test_rule_that_didnt_fire_today_can_fire_later_same_day(db):
     assert keys_second == {"provider_dominant_share"}, (
         f"expected only provider_dominant_share, got {keys_second}"
     )
+
+
+# ─── Supersession ────────────────────────────────────────────────────────────
+#
+# These rules describe standing conditions, so a second day's card is the same
+# fact with a fresher number rather than a second thing to do. Without
+# supersession each rule added an inbox row every day it fired: 17 of 47 open
+# items came from three rules.
+
+
+async def _publish_on_day(db: aiosqlite.Connection, day_key: str) -> int:
+    """Publish the cost-spike card as if it were `day_key`, return its inbox id."""
+    await db.execute("DELETE FROM insight_runs WHERE day_key = ?", (day_key,))
+    await db.commit()
+    published = await insights_service.generate_and_publish(db, day_key=day_key)
+    spike = [p for p in published if p["rule_key"] == "cost_spike_week_over_week"]
+    assert spike, f"cost spike did not fire on {day_key}"
+    return int(spike[0]["inbox_id"])
+
+
+@pytest.mark.asyncio
+async def test_a_new_card_supersedes_its_rules_untriaged_predecessor(db):
+    await _insert_session(db, session_id="a", cost=10.0, days_ago=1)
+    await _insert_session(db, session_id="b", cost=2.0, days_ago=10)
+
+    first = await _publish_on_day(db, "2026-10-01")
+    second = await _publish_on_day(db, "2026-10-02")
+    assert first != second
+
+    async with db.execute(
+        "SELECT id, status, description FROM workflow_items WHERE id IN (?, ?)",
+        (first, second),
+    ) as cur:
+        rows = {int(r["id"]): r for r in await cur.fetchall()}
+
+    assert rows[first]["status"] == "rejected"
+    assert f"Superseded by inbox #{second}" in rows[first]["description"]
+    assert rows[second]["status"] == "inbox"
+
+
+@pytest.mark.asyncio
+async def test_supersession_never_overwrites_a_human_decision(db):
+    await _insert_session(db, session_id="a", cost=10.0, days_ago=1)
+    await _insert_session(db, session_id="b", cost=2.0, days_ago=10)
+
+    first = await _publish_on_day(db, "2026-10-01")
+    # Someone triaged it — that is a decision, not a stale card.
+    await db.execute(
+        "UPDATE workflow_items SET status = 'ready' WHERE id = ?", (first,)
+    )
+    await db.commit()
+
+    await _publish_on_day(db, "2026-10-02")
+
+    async with db.execute(
+        "SELECT status FROM workflow_items WHERE id = ?", (first,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_supersession_is_keyed_per_rule(db):
+    """Each rule replaces only its own card.
+
+    Both rules re-fire on the second day, so both day-one cards are correctly
+    superseded — the property that matters is *by which card*. A rule that
+    swept every open insight would also reject its sibling's current one.
+    """
+    await _insert_session(db, session_id="a", cost=10.0, days_ago=1, model="opus")
+    await _insert_session(db, session_id="b", cost=2.0, days_ago=10)
+
+    day1 = await insights_service.generate_and_publish(db, day_key="2026-10-01")
+    first = {p["rule_key"]: int(p["inbox_id"]) for p in day1}
+    assert len(first) >= 2, f"need two rules to fire, got {first}"
+
+    await db.execute("DELETE FROM insight_runs WHERE day_key = ?", ("2026-10-02",))
+    await db.commit()
+    day2 = await insights_service.generate_and_publish(db, day_key="2026-10-02")
+    second = {p["rule_key"]: int(p["inbox_id"]) for p in day2}
+
+    for rule_key, old_id in first.items():
+        if rule_key not in second:
+            continue
+        async with db.execute(
+            "SELECT status, description FROM workflow_items WHERE id = ?", (old_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["status"] == "rejected", f"{rule_key}'s old card should be closed"
+        assert f"Superseded by inbox #{second[rule_key]}" in row["description"], (
+            f"{rule_key}'s card must name its own successor, not another rule's"
+        )
+
+    # and every rule's current card is still open
+    for rule_key, new_id in second.items():
+        async with db.execute(
+            "SELECT status FROM workflow_items WHERE id = ?", (new_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["status"] == "inbox", f"{rule_key}'s current card was closed"

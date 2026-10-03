@@ -281,6 +281,13 @@ def default_retention_days() -> dict[str, int]:
     return {c.key: c.default_days for c in RETENTION_CLASSES}
 
 
+# The range both retention writers accept (`PUT /api/v1/schedules/retention`
+# and the settings surface). Declared here because `resolve_retention_days` is
+# the one place that has to assume nothing about how a row got into the store.
+MIN_RETENTION_DAYS = 1
+MAX_RETENTION_DAYS = 365
+
+
 async def resolve_retention_days(db: aiosqlite.Connection) -> dict[str, int]:
     """Effective window per class: stored `app_settings` value, else default.
 
@@ -311,13 +318,32 @@ async def resolve_retention_days(db: aiosqlite.Connection) -> dict[str, int]:
         if cls is None:
             continue
         try:
-            effective[cls.key] = int(json.loads(row["value_json"]))
+            stored = int(json.loads(row["value_json"]))
         except (ValueError, TypeError, json.JSONDecodeError):
             logger.warning(
                 "event retention: setting %s is not an integer; using default %dd",
                 cls.setting_key,
                 cls.default_days,
             )
+            continue
+        # Clamp on the way out, not just on the way in. The writers validate
+        # 1-365, but a hand-edited `app_settings` row, a restored backup or an
+        # older build can put anything here, and this value becomes a prune
+        # cutoff: 0 means "delete everything up to now" and a negative means a
+        # cutoff in the future. A reader that trusts the store turns a bad row
+        # into data loss, so it is defended here as well.
+        if not MIN_RETENTION_DAYS <= stored <= MAX_RETENTION_DAYS:
+            clamped = min(max(stored, MIN_RETENTION_DAYS), MAX_RETENTION_DAYS)
+            logger.warning(
+                "event retention: setting %s is %dd, outside %d-%d; using %dd",
+                cls.setting_key,
+                stored,
+                MIN_RETENTION_DAYS,
+                MAX_RETENTION_DAYS,
+                clamped,
+            )
+            stored = clamped
+        effective[cls.key] = stored
     return effective
 
 

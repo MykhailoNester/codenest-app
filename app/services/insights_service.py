@@ -227,8 +227,53 @@ def _utc_day_key() -> str:
     return datetime.now(UTC).date().isoformat()
 
 
+async def _supersede_open_cards(
+    db: aiosqlite.Connection, rule_key: str, keep_inbox_id: int
+) -> int:
+    """Reject this rule's earlier cards that nobody has triaged yet.
+
+    These rules describe *standing conditions* — "opus is 86% of weekly spend"
+    is the same fact restated with a fresher number, not a second thing to do.
+    The `(rule_key, day_key)` ledger stops a restart republishing inside one
+    day, but across days each rule still added a row forever: 17 of 47 open
+    inbox items came from these three rules, several of them the same week
+    twice.
+
+    So a new card supersedes its own rule's untriaged predecessors, leaving
+    exactly one open card per rule, always carrying the current figure. Only
+    `status='inbox'` rows are touched — once someone has moved a card to
+    review, ready, promoted or rejected it, that is a human decision and this
+    must not overwrite it.
+    """
+    cur = await db.execute(
+        """
+        SELECT w.id FROM workflow_items w
+          JOIN insight_runs r ON r.inbox_id = w.id
+         WHERE r.rule_key = ? AND w.id != ? AND w.status = 'inbox'
+        """,
+        (rule_key, keep_inbox_id),
+    )
+    stale = [int(row["id"]) for row in await cur.fetchall()]
+    for item_id in stale:
+        await db.execute(
+            "UPDATE workflow_items SET status = 'rejected', "
+            "description = description || ? WHERE id = ?",
+            (f"\n\nSuperseded by inbox #{keep_inbox_id}.", item_id),
+        )
+    if stale:
+        await db.commit()
+        log.info(
+            "insights: %s superseded %d untriaged card(s): %s",
+            rule_key,
+            len(stale),
+            stale,
+        )
+    return len(stale)
+
+
 async def generate_and_publish(
     db: aiosqlite.Connection,
+    day_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run every rule once; publish any new card; return what was published.
 
@@ -242,7 +287,9 @@ async def generate_and_publish(
     C1 review fix, with the steady-state polling cost dropped to a single
     indexed COUNT.
     """
-    day_key = _utc_day_key()
+    # `day_key` is injectable so a test can publish across two days without
+    # waiting for one; production always passes nothing and gets today.
+    day_key = day_key or _utc_day_key()
     async with db.execute(
         "SELECT COUNT(*) AS n FROM insight_runs WHERE day_key = ?", (day_key,)
     ) as cur:
@@ -283,6 +330,7 @@ async def generate_and_publish(
             (inbox_id, candidate.rule_key, day_key),
         )
         await db.commit()
+        await _supersede_open_cards(db, candidate.rule_key, inbox_id)
         published.append(
             {
                 "rule_key": candidate.rule_key,
