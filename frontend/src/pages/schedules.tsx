@@ -77,6 +77,7 @@ import {
 } from "../components/deck/deck-grid";
 import { DeckMenu, type DeckMenuItem } from "../components/deck/deck-menu";
 import { useDebounce } from "../hooks/use-debounce";
+import { runModeOptions } from "../lib/run-modes";
 import {
   relativeTime as fmtRelTime,
   formatDurationMs as fmtDurationMs,
@@ -1666,8 +1667,11 @@ function ScheduleFormModal({ editing, seed, onClose }: ScheduleFormModalProps): 
               value={form.runMode}
               onChange={(e) => patch("runMode", e.target.value as RunMode)}
             >
-              <option value="background">Background (headless)</option>
-              <option value="windowed">Windowed (terminal opens)</option>
+              {runModeOptions(form.runMode).map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -2199,9 +2203,14 @@ export function SchedulesPage(): ReactElement {
         void queryClient.invalidateQueries({
           queryKey: ["schedule-run", payload.run_id],
         });
+        // Legacy `windowed` schedules still run headless — the shell does not
+        // branch on run_mode (#44). Surface the live output pane, but do not
+        // claim a terminal opened.
         if (payload.run_mode === "windowed") {
           setSelectedId(payload.schedule_id);
-          toast.info(`Schedule '${payload.schedule_name}' started (windowed mode)`);
+          toast.info(
+            `Schedule '${payload.schedule_name}' started — running headless; windowed panes are not built yet`,
+          );
         }
       },
       [queryClient],

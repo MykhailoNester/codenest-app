@@ -286,6 +286,13 @@ fn dispatch_run(
         .schedule_name
         .clone()
         .unwrap_or_else(|| format!("schedule#{schedule_id}"));
+    // Carried into the started event and the log, but deliberately NOT branched
+    // on: every run below spawns headless. A `windowed` run would need an
+    // interactive process, which never exits on its own, so the watchdog, the
+    // finish path and the stream-json token/cost source would all need
+    // replacing — a feature with its own ticket, not a branch here. The
+    // schedules form no longer offers the mode (see `lib/run-modes.ts`); a
+    // legacy `windowed` row reaching this point runs headless, as it always did.
     let run_mode = run
         .run_mode
         .clone()
@@ -914,13 +921,15 @@ fn build_claude_command(
     // the password database (never from the parent environment) when the
     // process did not inherit one; an inherited or provider-supplied value
     // always wins.
-    if let Some(login) = os_login_name() {
-        for key in ["USER", "LOGNAME"] {
-            let inherited_is_usable = std::env::var(key).is_ok_and(|v| !v.is_empty());
-            if !inherited_is_usable {
-                env.entry(key.to_string()).or_insert_with(|| login.clone());
-            }
-        }
+    let inherited_user = std::env::var("USER").ok();
+    let inherited_logname = std::env::var("LOGNAME").ok();
+    let login = os_login_name();
+    for (key, value) in identity_overlay(
+        inherited_user.as_deref(),
+        inherited_logname.as_deref(),
+        login.as_deref(),
+    ) {
+        env.entry(key.to_string()).or_insert(value);
     }
 
     // Prompt is the last positional arg.
@@ -1210,6 +1219,29 @@ fn no_credential_message(config_dir: Option<&str>) -> String {
          provider a CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`.",
     );
     msg
+}
+
+/// Which identity variables the env overlay must supply.
+///
+/// Pure so the case that actually matters — a parent with no `USER`, which is
+/// what a Finder-launched app gets — is testable without mutating the test
+/// process's own environment.
+///
+/// An inherited, non-empty value always wins: the fallback exists to recover an
+/// identity, never to override one the app was given.
+fn identity_overlay(
+    inherited_user: Option<&str>,
+    inherited_logname: Option<&str>,
+    login: Option<&str>,
+) -> Vec<(&'static str, String)> {
+    let Some(login) = login.filter(|s| !s.is_empty()) else {
+        return Vec::new();
+    };
+    [("USER", inherited_user), ("LOGNAME", inherited_logname)]
+        .into_iter()
+        .filter(|(_, inherited)| !inherited.is_some_and(|v| !v.is_empty()))
+        .map(|(key, _)| (key, login.to_string()))
+        .collect()
 }
 
 /// The login name from the password database, independent of the environment.
@@ -1557,6 +1589,46 @@ mod tests {
                 assert_eq!(name, env_user);
             }
         }
+    }
+
+    /// The case the fix exists for: a parent with no `USER` (a Finder-launched
+    /// app) must still hand the child an identity, taken from the password
+    /// database. Without this the keychain login lookup misses entirely.
+    #[test]
+    fn identity_overlay_supplies_a_login_when_the_parent_has_none() {
+        assert_eq!(
+            identity_overlay(None, None, Some("pat")),
+            vec![("USER", "pat".to_string()), ("LOGNAME", "pat".to_string())]
+        );
+        // An empty inherited value is as useless as a missing one.
+        assert_eq!(
+            identity_overlay(Some(""), Some(""), Some("pat")),
+            vec![("USER", "pat".to_string()), ("LOGNAME", "pat".to_string())]
+        );
+    }
+
+    /// An identity the app was actually given always wins — the fallback
+    /// recovers one, it never overrides one.
+    #[test]
+    fn identity_overlay_never_overrides_an_inherited_login() {
+        assert!(identity_overlay(Some("pat"), Some("pat"), Some("other")).is_empty());
+        // Each variable is decided on its own.
+        assert_eq!(
+            identity_overlay(Some("pat"), None, Some("pat")),
+            vec![("LOGNAME", "pat".to_string())]
+        );
+        assert_eq!(
+            identity_overlay(None, Some("pat"), Some("pat")),
+            vec![("USER", "pat".to_string())]
+        );
+    }
+
+    /// With no login resolvable there is nothing to seed — and nothing empty
+    /// must be seeded, which would mask the real lookup.
+    #[test]
+    fn identity_overlay_is_empty_without_a_resolvable_login() {
+        assert!(identity_overlay(None, None, None).is_empty());
+        assert!(identity_overlay(None, None, Some("")).is_empty());
     }
 
     /// `build_claude_command` must leave an inherited `USER` alone (the dev
