@@ -1,3 +1,8 @@
+// @vitest-environment jsdom
+//
+// Needs a DOM: this one touches browser globals (localStorage, matchMedia,
+// or a real element). The suite default is `node` — see `vite.config.ts`.
+
 // The `agent_runs` write contract, plus the window check that decides a run's
 // `target`. Both are small, and both are load-bearing: a pane that posts nothing
 // is invisible on the Command Center, and a pane that posts the wrong target

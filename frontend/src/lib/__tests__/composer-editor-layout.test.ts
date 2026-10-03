@@ -1,3 +1,8 @@
+// @vitest-environment jsdom
+//
+// Needs a DOM: this one touches browser globals (localStorage, matchMedia,
+// or a real element). The suite default is `node` — see `vite.config.ts`.
+
 // The composer editor's one measurement, from three angles: the box height it
 // produces, the overlay geometry it keeps aligned, and the row count it
 // reports. Exercised against bare elements appended to `document.body` — no

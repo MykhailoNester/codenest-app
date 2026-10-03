@@ -1,3 +1,8 @@
+// @vitest-environment jsdom
+//
+// Needs a DOM: this one touches browser globals (localStorage, matchMedia,
+// or a real element). The suite default is `node` — see `vite.config.ts`.
+
 // The single restore sequence for a programmatic composer draft write:
 // focus() -> setSelectionRange(caret, caret) -> resizeComposerEditor(),
 // deferred to a requestAnimationFrame. These tests exercise `composer-focus.ts`

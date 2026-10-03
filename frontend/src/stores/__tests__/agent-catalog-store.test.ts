@@ -1,3 +1,8 @@
+// @vitest-environment jsdom
+//
+// Needs a DOM: this one touches browser globals (localStorage, matchMedia,
+// or a real element). The suite default is `node` — see `vite.config.ts`.
+
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useAgentCatalogStore } from "../agent-catalog-store";
 import type { AgentSelection, CatalogProvider } from "../agent-catalog-store";
