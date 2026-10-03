@@ -1,3 +1,8 @@
+// @vitest-environment jsdom
+//
+// Needs a DOM: this one touches browser globals (localStorage, matchMedia,
+// or a real element). The suite default is `node` — see `vite.config.ts`.
+
 // #43 — the app rendered at the window's previous, smaller size in the top-left
 // corner and the whole page became scrollable, because nothing re-measured the
 // root after the window changed size under a reload. These pin the re-measure:

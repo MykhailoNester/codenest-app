@@ -18,8 +18,12 @@ export default defineConfig({
     // Vite 8 (rolldown) defaults to oxc minifier; do not pin esbuild here.
   },
   test: {
-    environment: "jsdom",
-    include: ["src/**/__tests__/**/*.test.ts", "src/**/__tests__/**/*.test.tsx"],
+    // Unit tests only — pure logic, no component mounting. Building a jsdom
+    // per file cost ~2s before a single assertion ran and was the whole reason
+    // CI was slow. The handful of files that touch a DOM global (localStorage,
+    // matchMedia) opt back in with a `@vitest-environment jsdom` docblock.
+    environment: "node",
+    include: ["src/**/__tests__/**/*.test.ts"],
     // Fills jsdom's layout-shaped gaps (see the file) so a component that
     // observes its own box on mount is testable without every one of its test
     // files hand-rolling the same stub.
