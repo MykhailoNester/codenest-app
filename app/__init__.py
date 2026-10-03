@@ -14,7 +14,7 @@ from .database import close_db, get_db, init_db
 if TYPE_CHECKING:
     import aiosqlite
 
-_APP_VERSION = "0.1.0"
+_APP_VERSION = "0.2.0"
 
 logger = logging.getLogger(__name__)
 
