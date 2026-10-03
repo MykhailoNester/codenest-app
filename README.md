@@ -10,14 +10,14 @@ teams — built and tested on macOS first.
 [![CI](https://img.shields.io/github/actions/workflow/status/MykhailoNester/codenest-app/ci.yml?branch=master&label=CI)](https://github.com/MykhailoNester/codenest-app/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="docs/media/hero.gif" alt="Codenest walkthrough — Command Center, Overview, Projects, Agents, Terminal, and Settings" width="860">
+  <img src="docs/media/deck-home.png" alt="Codenest Deck — what needs you, what is running, what it costs, and what changed since you last looked" width="860">
 </p>
 
 ## What is Codenest
 
 Codenest is a local-first desktop app for running and supervising teams of
 AI coding agents. It hosts embedded terminals that run real Claude Code CLI
-sessions, tracks their work on a kanban Work Board, and runs agents on cron
+sessions, tracks their work on a Work board, and runs agents on cron
 Schedules — all from a single window, with every bit of state kept in a local
 SQLite database on your machine.
 
@@ -48,98 +48,117 @@ lives, and how to reset the app.
 
 ## Features
 
-Codenest's sidebar is organized into groups. The features below ship today and
-are visible by default; Needs You, Work Board, Schedules, Budgets and Hooks can
-be toggled under **Settings → Features**.
+Codenest's rail is organised into four groups. Needs You, Work, Schedules,
+Budgets and Hooks can each be switched off under **Settings → Features**.
 
-**Attention**
+**Now**
 
-- **Mission Control** — current activity and status at a glance.
+- **Deck** — the home screen: what needs you, what is running, what it is
+  costing today, and what changed since you last looked.
 - **Needs You** — the intervention queue: stalled sessions, failed scheduled
-  runs, budget thresholds and blocked tasks in one list.
-- **Work Board** — a kanban board of tasks and workflow items.
-
-**Record**
-
-- **Projects** — the repositories and workspaces your agents work in.
-
-**Agents**
-
-- **Agents** — your team of agent definitions.
-- **Schedules** — cron-scheduled agent runs.
-- **Run a session** — two halves of one surface: **panes**, where a session runs
+  runs, budget thresholds, blocked tasks and unread notifications in one list.
+  Every row offers the one action that gets you to the problem — focus the live
+  pane, open the session, start one seeded from the ticket, or jump to the
+  surface that owns it.
+- **Work** — tasks grouped by status, with a detail page carrying subtasks,
+  comments, blockers, activity, agent runs and what the task has cost.
+- **Sessions** — two halves of one surface: **panes**, where a session runs
   (native agent panes and PTY-backed xterm.js terminals), and **runs**, where
   every run is listed, filtered, focused, stopped and inspected.
 
+**Record**
+
+- **Projects** — the repositories your agents work in, each with a context
+  panel showing what ran there and what it cost.
+- **Agents** — your team of agent definitions, and what each has been invoked
+  for.
+
+**Automate**
+
+- **Schedules** — cron- and event-triggered agent runs, with their run history
+  and transcripts.
+
 **System**
 
-- **Hooks** — what is on each Claude Code hook event, and which file put it
-  there.
-- **Budgets** — usage and cost budgets.
-- **Settings** — app, provider and feature configuration.
+- **Budgets** — usage and cost budgets by workspace or project.
+- **Hooks** — what is on each Claude Code hook event, and which of the eight
+  possible sources put it there.
+- **Settings** — app, provider, profile and feature configuration.
 
 ## Screenshots
 
+**Needs You** — the intervention queue. Each row names what is wrong, where it
+is, how long it has waited, and offers the single action that takes you there.
+
+<p align="center">
+  <img src="docs/media/needs-you.png" alt="Codenest Needs You — blocked tasks and waiting inbox items, each with the action that reaches it" width="860">
+</p>
+
 **Sessions → runs** — every agent run in one list, with its provider, project,
-model, current tool, elapsed time and cost, plus a running activity feed. Focus
+model, current tool, elapsed time and cost, plus a live activity feed. Focus
 jumps straight to the pane the run is in; it is the same page.
 
 <p align="center">
-  <img src="docs/media/command-center.png" alt="Codenest run supervision — session counters, running agents, and live activity feed" width="860">
+  <img src="docs/media/sessions-runs.png" alt="Codenest run supervision — filters, the run list, and the live hook-event feed" width="860">
 </p>
 
-Open the constellation full screen to pull agents and projects apart, pin
-nodes where you want them, and scrub across the last hour, day, or week.
+**Work** — tasks grouped by status, filterable by project and assignee.
 
 <p align="center">
-  <img src="docs/media/live-constellation.png" alt="Full-screen live constellation — you, your projects, and their agents as a force-directed graph" width="860">
+  <img src="docs/media/work-board.png" alt="Codenest Work — tasks grouped by status with priority, assignee and project" width="860">
 </p>
 
-**Overview** — a 24-hour pulse of cost, sessions, and completed tasks, plus an
-attention queue, budget burn, and a momentum timeline of commits and sessions.
+**Launch a session** — pick a recipe or a saved preset, then edit an ordered
+list of agent and shell panes, each with its own provider, model and permission
+mode. One shared prompt feeds every agent pane that opts in; choose a project,
+profile and target, then launch or save the composition as a preset.
 
 <p align="center">
-  <img src="docs/media/overview.png" alt="Codenest Overview — activity pulse, active tasks, attention queue, budget burn, and momentum timeline" width="860">
+  <img src="docs/media/launch-session.png" alt="Launch session composer — recipes, pane layout, per-pane provider and model, shared prompt, project and target" width="860">
+</p>
+
+<details>
+<summary>More screenshots — Projects, Agents, Schedules, Budgets, Settings, first run</summary>
+
+<br>
+
+**Projects** — the repositories your agents work in. Imported projects stay
+read-only sources; nothing is ever written into their folders.
+
+<p align="center">
+  <img src="docs/media/projects.png" alt="Codenest Projects — the workspace alongside imported projects, with stack, status, open tasks and 30-day spend" width="860">
 </p>
 
 **Agents** — your team of agent definitions, grouped by scope. Codenest ships
 with three org agents (Atlas, Orion, Vega) shared across the workspace.
 
 <p align="center">
-  <img src="docs/media/agents.png" alt="Codenest Agents — Atlas, Orion, and Vega listed with their models and shared workspace scope" width="860">
+  <img src="docs/media/agents.png" alt="Codenest Agents — agent definitions with their scope, model and invocation history" width="860">
 </p>
 
-<details>
-<summary>More screenshots — Launch, Projects, Budgets, first-run setup</summary>
-
-<br>
-
-**Launch Agent** — pick a built-in recipe or a saved preset, then edit an
-ordered list of agent and shell panes, each with its own provider, model, and
-permission mode. A shared prompt with per-section ticket-context toggles feeds
-every agent pane that opts in; pick a project, profile, and target (embedded
-tab or popout window), then launch or save the composition as a preset.
+**Schedules** — cron- and event-triggered runs, with their history and
+transcripts.
 
 <p align="center">
-  <img src="docs/media/launch-agent.png" alt="Launch session composer — recipe row, editable agent/shell pane list, shared prompt with ticket-context toggles, project, profile, and target" width="520">
-</p>
-
-**Projects** — the repositories your agents work in. Imported projects stay
-read-only sources; nothing is ever written into their folders.
-
-<p align="center">
-  <img src="docs/media/projects.png" alt="Codenest Projects — the Command Center workspace alongside an imported project" width="860">
+  <img src="docs/media/schedules.png" alt="Codenest Schedules — scheduled agent runs with their triggers and run history" width="860">
 </p>
 
 **Budgets** — per-workspace or per-project spend caps by period, with an
 optional hard stop that blocks new sessions at 100%.
 
 <p align="center">
-  <img src="docs/media/budgets.png" alt="Codenest Budgets — new budget form and a monthly workspace budget with usage bar" width="860">
+  <img src="docs/media/budgets.png" alt="Codenest Budgets — budget list with period, cap and usage" width="860">
+</p>
+
+**Settings** — providers, profiles, workflow vocabulary, terminal, telemetry
+and the feature toggles.
+
+<p align="center">
+  <img src="docs/media/settings.png" alt="Codenest Settings — sectioned configuration for providers, profiles, workflow, interface and system" width="860">
 </p>
 
 **First-run setup** — a seven-step wizard that creates the app-managed
-workspace, imports your projects, and connects your AI provider.
+workspace, imports your projects and connects your AI provider.
 
 <p align="center">
   <img src="docs/media/first-run-setup.png" alt="Codenest first-run setup — step one explaining workspace and project session modes" width="860">
