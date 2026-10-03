@@ -174,7 +174,7 @@ beforeEach(() => {
   resetExplorerStore();
   mockProjects = [
     project({ id: 1, name: "codenest-app" }),
-    project({ id: 2, name: "miragold" }),
+    project({ id: 2, name: "mercury" }),
   ];
   mockGetWorkspacePath.mockClear().mockResolvedValue("/repo/workspace");
   mockGitStatusForRoots.mockClear().mockResolvedValue([]);
@@ -305,8 +305,8 @@ describe("WorkspaceNavigator", () => {
         error: null,
       },
       {
-        root: "/repo/miragold",
-        repoRoot: "/repo/miragold",
+        root: "/repo/mercury",
+        repoRoot: "/repo/mercury",
         isRepo: true,
         branch: "main",
         detached: false,
@@ -359,8 +359,8 @@ describe("WorkspaceNavigator", () => {
         error: null,
       },
       {
-        root: "/repo/miragold",
-        repoRoot: "/repo/miragold",
+        root: "/repo/mercury",
+        repoRoot: "/repo/mercury",
         isRepo: true,
         branch: "feature/x",
         detached: false,
@@ -395,7 +395,7 @@ describe("WorkspaceNavigator", () => {
 
     // Dirty marker on the dirty root only.
     expect(findRootRow("codenest-app").textContent).toContain("*");
-    expect(findRootRow("miragold").textContent?.includes("*")).toBe(false);
+    expect(findRootRow("mercury").textContent?.includes("*")).toBe(false);
     // The non-repo shared root renders no branch node at all — no guessed
     // "main", no placeholder dash.
     const sharedRow = findRootRow("Agents & skills");
@@ -405,7 +405,7 @@ describe("WorkspaceNavigator", () => {
     expect(mockGitStatusForRoots).toHaveBeenCalledTimes(1);
     expect(mockGitStatusForRoots.mock.calls[0]?.[0]).toEqual([
       "/repo/codenest-app",
-      "/repo/miragold",
+      "/repo/mercury",
       "/repo/workspace/.claude",
     ]);
   });
@@ -479,7 +479,7 @@ describe("WorkspaceNavigator", () => {
     // closure that would have called it with `[]` or not at all.
     expect(mockGitStatusForRoots.mock.calls.at(-1)?.[0]).toEqual([
       "/repo/codenest-app",
-      "/repo/miragold",
+      "/repo/mercury",
       "/repo/workspace/.claude",
     ]);
   });

@@ -479,7 +479,7 @@ describe("in progress (#272 — folded off pages/in-progress.tsx)", () => {
             id: 12,
             title: "Ship the migration",
             project_name: "codenest",
-            assignee_name: "Maks",
+            assignee_name: "Orion",
             priority: "high",
             started_date: "2026-09-30",
           },

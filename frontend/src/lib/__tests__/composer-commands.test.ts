@@ -296,15 +296,15 @@ describe("matchCommands — two groups, never interleaved", () => {
 
   it("matches a discovered command on a substring, so a slug prefix is findable", () => {
     // Two projects both shipping `ship` are linked as `<slug>--ship`, and
-    // `/miragold--ship` is not a name anyone types.
+    // `/mercury--ship` is not a name anyone types.
     const contested = source({
-      name: "miragold--ship",
-      label: "miragold:ship",
-      insertText: "/miragold--ship",
-      projectName: "miragold",
+      name: "mercury--ship",
+      label: "mercury:ship",
+      insertText: "/mercury--ship",
+      projectName: "mercury",
     });
     expect(matchCommands("ship", [contested]).map((c) => c.name)).toEqual([
-      "miragold--ship",
+      "mercury--ship",
     ]);
     expect(matchCommands("zzz", [contested])).toEqual([]);
   });
@@ -337,13 +337,13 @@ describe("a discovered command forwards verbatim", () => {
   it("sends the workspace's aliased token, never a token rebuilt from the label", async () => {
     const sendRaw = vi.fn(async () => undefined);
     const contested = source({
-      name: "miragold--ship",
-      label: "miragold:ship",
-      insertText: "/miragold--ship",
-      projectName: "miragold",
+      name: "mercury--ship",
+      label: "mercury:ship",
+      insertText: "/mercury--ship",
+      projectName: "mercury",
     });
-    await runCommandLine("/miragold--ship", ctx({ commands: [contested] }, { sendRaw }));
-    expect(sendRaw).toHaveBeenCalledWith("/miragold--ship");
+    await runCommandLine("/mercury--ship", ctx({ commands: [contested] }, { sendRaw }));
+    expect(sendRaw).toHaveBeenCalledWith("/mercury--ship");
   });
 
   it("refuses on a dead session rather than writing to a closed stdin", async () => {

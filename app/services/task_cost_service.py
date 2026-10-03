@@ -43,7 +43,7 @@ DEFAULT_SESSION_LIMIT = 50
 # The branch arm is `'%/' || ? || '-%'`: one path segment, then the bare id,
 # then the slug separator. It matches `feature/267-x` and `fix/267-y`, and
 # does not match `feature/1267-x` (no `/267-` in it), `prep/release/0.2.0`, or
-# the `task/OW-41631-…` shape of a Jira-keyed branch. A LIKE `_` wildcard
+# the `task/ABC-1234-…` shape of a Jira-keyed branch. A LIKE `_` wildcard
 # cannot be smuggled in — the parameter is the integer id rendered as text.
 _SESSIONS_SQL = """
 SELECT s.session_id,

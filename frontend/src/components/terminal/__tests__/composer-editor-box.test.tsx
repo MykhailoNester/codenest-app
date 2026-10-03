@@ -232,20 +232,20 @@ describe("mention highlight", () => {
   it("highlights an `@token` and leaves the prose around it alone", () => {
     renderComposer();
 
-    fireEvent.change(editor(), { target: { value: "ask @oleg about it" } });
+    fireEvent.change(editor(), { target: { value: "ask @vega about it" } });
 
-    expect(highlighted()).toEqual(["@oleg"]);
+    expect(highlighted()).toEqual(["@vega"]);
     // The unhighlighted text is still painted — the overlay is the only copy
     // of the draft the user can see.
-    expect(overlay().textContent).toBe("ask @oleg about it");
+    expect(overlay().textContent).toBe("ask @vega about it");
   });
 
   it("highlights every token, not just the first", () => {
     renderComposer();
 
-    fireEvent.change(editor(), { target: { value: "@oleg and @igor" } });
+    fireEvent.change(editor(), { target: { value: "@vega and @atlas" } });
 
-    expect(highlighted()).toEqual(["@oleg", "@igor"]);
+    expect(highlighted()).toEqual(["@vega", "@atlas"]);
   });
 });
 

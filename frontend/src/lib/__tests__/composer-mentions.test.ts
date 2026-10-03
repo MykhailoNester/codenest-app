@@ -64,10 +64,10 @@ describe("buildMentionRows", () => {
     const s = sources({
       agents: [
         {
-          name: "miragold--code-reviewer",
-          label: "miragold:code-reviewer",
-          insertText: "@agent-miragold--code-reviewer",
-          projectName: "miragold",
+          name: "mercury--code-reviewer",
+          label: "mercury:code-reviewer",
+          insertText: "@agent-mercury--code-reviewer",
+          projectName: "mercury",
           description: null,
         },
       ],
@@ -75,9 +75,9 @@ describe("buildMentionRows", () => {
     const [row] = buildMentionRows(s, "code-rev");
     expect(row).toEqual({
       kind: "agent",
-      label: "miragold:code-reviewer",
-      meta: "miragold",
-      insertText: "@agent-miragold--code-reviewer",
+      label: "mercury:code-reviewer",
+      meta: "mercury",
+      insertText: "@agent-mercury--code-reviewer",
     });
   });
 
@@ -86,39 +86,39 @@ describe("buildMentionRows", () => {
       agents: [
         agent("codenest-app--code-reviewer", "codenest-app"),
         agent("networa--code-reviewer", "Networa"),
-        agent("miragold--code-reviewer", "miragold"),
+        agent("mercury--code-reviewer", "mercury"),
       ],
     });
     const rows = buildMentionRows(s, "code-rev");
     expect(rows.map((r) => r.kind === "agent" && r.insertText)).toEqual([
       "@agent-codenest-app--code-reviewer",
       "@agent-networa--code-reviewer",
-      "@agent-miragold--code-reviewer",
+      "@agent-mercury--code-reviewer",
     ]);
   });
 
   it("ranks a name prefix above a name substring above a project match", () => {
     const s = sources({
       agents: [
-        agent("test-engineer", "miragold"),
+        agent("test-engineer", "mercury"),
         agent("planner", "debug-tools"),
-        agent("api-debugger", "miragold"),
-        agent("debugger", "miragold"),
+        agent("api-debugger", "mercury"),
+        agent("debugger", "mercury"),
       ],
     });
     expect(buildMentionRows(s, "debug").map((r) => r.label)).toEqual([
-      "miragold:debugger",
-      "miragold:api-debugger",
+      "mercury:debugger",
+      "mercury:api-debugger",
       "debug-tools:planner",
     ]);
   });
 
   it("narrows to a project by name, because the label carries it", () => {
     const s = sources({
-      agents: [agent("debugger", "miragold"), agent("coder-agent", "codenest-app")],
+      agents: [agent("debugger", "mercury"), agent("coder-agent", "codenest-app")],
     });
-    expect(buildMentionRows(s, "mira").map((r) => r.label)).toEqual([
-      "miragold:debugger",
+    expect(buildMentionRows(s, "merc").map((r) => r.label)).toEqual([
+      "mercury:debugger",
     ]);
   });
 
@@ -162,13 +162,13 @@ describe("buildMentionRows", () => {
 
   it("carries a skill's name beside its `/` token, for the mid-sentence case", () => {
     const rows = buildMentionRows(
-      sources({ skills: [skill("frontend-design", "miragold")] }),
+      sources({ skills: [skill("frontend-design", "mercury")] }),
       "front",
     );
     expect(rows[0]).toEqual({
       kind: "skill",
-      label: "miragold:frontend-design",
-      meta: "miragold",
+      label: "mercury:frontend-design",
+      meta: "mercury",
       insertText: "/frontend-design",
       name: "frontend-design",
     });
@@ -241,7 +241,7 @@ describe("invocableMeta", () => {
   });
 
   it("falls back to the project when a file carries no description", () => {
-    expect(invocableMeta(agent("debugger", "miragold"))).toBe("miragold");
+    expect(invocableMeta(agent("debugger", "mercury"))).toBe("mercury");
     expect(invocableMeta(agent("orion-ops"))).toBe("");
   });
 });

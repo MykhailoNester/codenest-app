@@ -84,61 +84,61 @@ const group = (label, n, note, body, s) =>
 /* ── Data ─────────────────────────────────────────────────────────── */
 
 const NEEDS = [
-  { s: "block", t: "Permission prompt — write <span class='dim'>src-tauri/tauri.conf.json</span>", who: "maks-it", w: "codenest-app", age: "2h 04m", v: "jump", g: "block" },
-  { s: "block", t: "Task #218 blocked on #211", who: "—", w: "miragold", age: "51m", v: "open", g: "block" },
-  { s: "stall", t: "Session idle 23m with an unfinished turn", who: "serhii", w: "Networa", age: "23m", v: "jump", g: "stall" },
-  { s: "wait", t: "Inbox item ready to promote — “extraction timer drift”", who: "—", w: "RAID-2D", age: "12m", v: "promote", g: "wait" },
+  { s: "block", t: "Permission prompt — write <span class='dim'>src-tauri/tauri.conf.json</span>", who: "orion-ops", w: "codenest-app", age: "2h 04m", v: "jump", g: "block" },
+  { s: "block", t: "Task #218 blocked on #211", who: "—", w: "mercury", age: "51m", v: "open", g: "block" },
+  { s: "stall", t: "Session idle 23m with an unfinished turn", who: "dana", w: "Networa", age: "23m", v: "jump", g: "stall" },
+  { s: "wait", t: "Inbox item ready to promote — “extraction timer drift”", who: "—", w: "Orbit", age: "12m", v: "promote", g: "wait" },
 ];
 
 const RUNS = [
-  { s: "run", t: "serhii-godot-dev <span class='dim'>opus-5 · claude-code · 14 turns · compacted 1×</span>", w: "RAID-2D", age: "4:12", v: "$2.14" },
-  { s: "run", t: "maks-it <span class='dim'>sonnet-5.5 · desktop · 6 turns</span>", w: "codenest-app", age: "1:48", v: "$0.31" },
-  { s: "run", t: "oleg-researcher <span class='dim'>opus-5 · claude-code · 22 turns · compacted 2×</span>", w: "miragold", age: "9:03", v: "$5.80" },
-  { s: "idle", t: "tanya-android <span class='dim'>haiku-4.5 · idle 23m</span>", w: "DailyMotivation", age: "—", v: "$0.04" },
+  { s: "run", t: "game-dev <span class='dim'>opus-5 · claude-code · 14 turns · compacted 1×</span>", w: "Orbit", age: "4:12", v: "$2.14" },
+  { s: "run", t: "orion-ops <span class='dim'>sonnet-5.5 · desktop · 6 turns</span>", w: "codenest-app", age: "1:48", v: "$0.31" },
+  { s: "run", t: "vega-research <span class='dim'>opus-5 · claude-code · 22 turns · compacted 2×</span>", w: "mercury", age: "9:03", v: "$5.80" },
+  { s: "idle", t: "android-dev <span class='dim'>haiku-4.5 · idle 23m</span>", w: "DailyMotivation", age: "—", v: "$0.04" },
 ];
 
 const TASKS = {
   block: [
-    { id: 218, t: "Inventory reconciliation job", who: "oleg", w: "miragold", age: "51m", v: "on #211", s: "block" },
-    { id: 244, t: "Packaged DB migration 015", who: "maks-it", w: "codenest-app", age: "12m", v: "on #206", s: "block", fresh: 1 },
+    { id: 218, t: "Inventory reconciliation job", who: "vega", w: "mercury", age: "51m", v: "on #211", s: "block" },
+    { id: 244, t: "Packaged DB migration 015", who: "orion-ops", w: "codenest-app", age: "12m", v: "on #206", s: "block", fresh: 1 },
   ],
   run: [
-    { id: 224, t: "Chalk theme — rebuild the component layer", who: "maks-it", w: "codenest-app", age: "1:48", v: "P1", s: "run", go: "task" },
-    { id: 231, t: "Loot table rebalance — phase 9", who: "serhii", w: "RAID-2D", age: "4:12", v: "P2", s: "run" },
+    { id: 224, t: "Chalk theme — rebuild the component layer", who: "orion-ops", w: "codenest-app", age: "1:48", v: "P1", s: "run", go: "task" },
+    { id: 231, t: "Loot table rebalance — phase 9", who: "dana", w: "Orbit", age: "4:12", v: "P2", s: "run" },
   ],
   todo: [
-    { id: 226, t: "Sidecar: expose session aggregate for 24h tile", who: "maks-it", w: "codenest-app", age: "2d", v: "P1", s: "todo" },
-    { id: 229, t: "Gold price feed retry + backoff", who: "oleg", w: "miragold", age: "3d", v: "P2", s: "todo" },
+    { id: 226, t: "Sidecar: expose session aggregate for 24h tile", who: "orion-ops", w: "codenest-app", age: "2d", v: "P1", s: "todo" },
+    { id: 229, t: "Gold price feed retry + backoff", who: "vega", w: "mercury", age: "3d", v: "P2", s: "todo" },
     { id: 233, t: "Interview KB — coroutines chapter", who: "katia", w: "android-kb", age: "4d", v: "P3", s: "todo" },
-    { id: 240, t: "Garmin sync: handle 401 refresh", who: "—", w: "Readiness", age: "6d", v: "P3", s: "todo" },
+    { id: 240, t: "Garmin sync: handle 401 refresh", who: "—", w: "Vitals", age: "6d", v: "P3", s: "todo" },
   ],
   idle: [
-    { id: 245, t: "Extraction timer drift under 30fps", who: "—", w: "RAID-2D", age: "1d", v: "P2", s: "idle" },
+    { id: 245, t: "Extraction timer drift under 30fps", who: "—", w: "Orbit", age: "1d", v: "P2", s: "idle" },
     { id: 246, t: "Net-worth CSV import", who: "—", w: "Networa", age: "2d", v: "P3", s: "idle" },
   ],
   done: [
-    { id: 211, t: "Org-agent rename + manifest sha256", who: "maks-it", w: "codenest-app", age: "2h", v: "done", s: "done" },
-    { id: 209, t: "Needs You page — severity grouping", who: "maks-it", w: "codenest-app", age: "1d", v: "done", s: "done" },
-    { id: 204, t: "AGPL release checklist", who: "oleg", w: "Networa", age: "3d", v: "done", s: "done" },
+    { id: 211, t: "Org-agent rename + manifest sha256", who: "orion-ops", w: "codenest-app", age: "2h", v: "done", s: "done" },
+    { id: 209, t: "Needs You page — severity grouping", who: "orion-ops", w: "codenest-app", age: "1d", v: "done", s: "done" },
+    { id: 204, t: "AGPL release checklist", who: "vega", w: "Networa", age: "3d", v: "done", s: "done" },
   ],
 };
 
 const PROJECTS = [
   { s: "run", t: "codenest-app <span class='dim'>Tauri 2 · React · FastAPI</span>", w: "shipping", a: "19", b: "41", v: "$62.10" },
-  { s: "run", t: "miragold <span class='dim'>Next.js 14 · Prisma</span>", w: "active", a: "7", b: "18", v: "$24.80" },
-  { s: "run", t: "RAID-2D <span class='dim'>Godot 4.4 · C#</span>", w: "post-mvp", a: "6", b: "22", v: "$31.40" },
+  { s: "run", t: "mercury <span class='dim'>Next.js 14 · Prisma</span>", w: "active", a: "7", b: "18", v: "$24.80" },
+  { s: "run", t: "Orbit <span class='dim'>Godot 4.4 · C#</span>", w: "post-mvp", a: "6", b: "22", v: "$31.40" },
   { s: "idle", t: "Networa <span class='dim'>FastAPI · HTMX · SQLite</span>", w: "stable v1", a: "3", b: "6", v: "$4.20" },
-  { s: "idle", t: "Readiness <span class='dim'>Python · Click · Claude API</span>", w: "mvp", a: "2", b: "3", v: "$2.90" },
-  { s: "idle", t: "android-interview-kb <span class='dim'>Markdown · agents</span>", w: "33%", a: "2", b: "9", v: "$7.60" },
+  { s: "idle", t: "Vitals <span class='dim'>Python · Click · Claude API</span>", w: "mvp", a: "2", b: "3", v: "$2.90" },
+  { s: "idle", t: "studykit <span class='dim'>Markdown · agents</span>", w: "33%", a: "2", b: "9", v: "$7.60" },
   { s: "idle", t: "DailyMotivation <span class='dim'>Kotlin · Compose · Hilt</span>", w: "production", a: "0", b: "1", v: "$0.40" },
 ];
 
 const AGENTS = [
-  { s: "run", t: "maks-it <span class='dim'>IT &amp; Workflow Operations</span>", who: "sonnet-5.5", w: "codenest-app", age: "1:48", v: "$18.20" },
-  { s: "run", t: "oleg-researcher <span class='dim'>Lead Researcher</span>", who: "opus-5", w: "miragold", age: "9:03", v: "$34.70" },
-  { s: "stall", t: "serhii-godot-dev <span class='dim'>Godot 4.4 / C# — RAID-2D</span>", who: "opus-5", w: "Networa", age: "23m", v: "$31.40" },
-  { s: "idle", t: "igor-recruiter <span class='dim'>Recruiting &amp; Team Architect</span>", who: "opus-5", w: "—", age: "2d", v: "$5.10" },
-  { s: "idle", t: "tanya-android <span class='dim'>Senior Android — DailyMotivation</span>", who: "haiku-4.5", w: "—", age: "6d", v: "$0.40" },
+  { s: "run", t: "orion-ops <span class='dim'>IT &amp; Workflow Operations</span>", who: "sonnet-5.5", w: "codenest-app", age: "1:48", v: "$18.20" },
+  { s: "run", t: "vega-research <span class='dim'>Lead Researcher</span>", who: "opus-5", w: "mercury", age: "9:03", v: "$34.70" },
+  { s: "stall", t: "game-dev <span class='dim'>Godot 4.4 / C# — Orbit</span>", who: "opus-5", w: "Networa", age: "23m", v: "$31.40" },
+  { s: "idle", t: "atlas-recruiter <span class='dim'>Recruiting &amp; Team Architect</span>", who: "opus-5", w: "—", age: "2d", v: "$5.10" },
+  { s: "idle", t: "android-dev <span class='dim'>Senior Android — DailyMotivation</span>", who: "haiku-4.5", w: "—", age: "6d", v: "$0.40" },
 ];
 
 /* ── Screens ──────────────────────────────────────────────────────── */
@@ -172,7 +172,7 @@ const SCREENS = {
     ${group("changed", 4, "", `<div class="dk-list tasks">
       ${head(["", "what", "who", "where", "r when", "r "])}
       ${taskLine(TASKS.block[1])}
-      ${taskLine({ id: 221, t: "Mission Control honest-tile audit", who: "maks-it", w: "codenest-app", age: "14:02", v: "done", s: "done", fresh: 1 })}
+      ${taskLine({ id: 221, t: "Mission Control honest-tile audit", who: "orion-ops", w: "codenest-app", age: "14:02", v: "done", s: "done", fresh: 1 })}
       <div class="dk-since">since you last looked</div>
       ${taskLine(TASKS.done[0])}
       ${taskLine({ id: 205, t: "Budget crossed 25% of daily cap", who: "—", w: "workspace", age: "11:20", v: "noted", s: "wait" })}
@@ -217,7 +217,7 @@ const SCREENS = {
       ${head(["field", "r value"])}
       ${line([["status", "sub"], ["in progress", "r"]], { s: "run" })}
       ${line([["priority", "sub"], ["P1", "r"]], { s: "block" })}
-      ${line([["assignee", "sub"], ["maks-it", "r"]], {})}
+      ${line([["assignee", "sub"], ["orion-ops", "r"]], {})}
       ${line([["project", "sub"], ["codenest-app", "r"]], {})}
       ${line([["created", "sub"], ["2026-09-27", "r"]], {})}
       ${line([["blockers", "sub"], ["none", "r"]], {})}
@@ -228,8 +228,8 @@ const SCREENS = {
       </div>`)}
     ${group("runs", 2, "", `<div class="dk-list">
       ${head(["agent", "model", "where", "r elapsed", "r cost"])}
-      ${line([["maks-it", "sub"], "sonnet-5.5", "codenest-app", ["1:48", "r"], ["$0.31", "r"]], { s: "run" })}
-      ${line([["maks-it", "sub"], "opus-5", "codenest-app", ["6:22", "r"], ["$1.90", "r"]], { s: "done" })}
+      ${line([["orion-ops", "sub"], "sonnet-5.5", "codenest-app", ["1:48", "r"], ["$0.31", "r"]], { s: "run" })}
+      ${line([["orion-ops", "sub"], "opus-5", "codenest-app", ["6:22", "r"], ["$1.90", "r"]], { s: "done" })}
       </div>`)}`,
 
   projects: () => `
@@ -260,8 +260,8 @@ SCREENS.session = () => `
         ${line([["&nbsp;&nbsp;&nbsp;&nbsp;pages/mission-control.tsx"]], { on: 1 })}
         ${line([["&nbsp;&nbsp;app/services"]], {})}
         ${line([["&nbsp;&nbsp;CLAUDE.md"]], {})}
-        ${line([["miragold"]], { s: "run" })}
-        ${line([["RAID-2D"]], { s: "run" })}
+        ${line([["mercury"]], { s: "run" })}
+        ${line([["Orbit"]], { s: "run" })}
         ${line([["Networa"]], { s: "stall" })}
       </div>
       <div style="border-top:1px solid var(--line);padding:var(--u2)"><button class="dk-btn" style="width:100%;justify-content:center">+ pane</button></div>
@@ -269,8 +269,8 @@ SCREENS.session = () => `
 
     <div class="dk-term">
       <div class="dk-tabs">
-        <button class="dk-tab on"><span class="dk-s" data-s="run"></span> maks-it</button>
-        <button class="dk-tab"><span class="dk-s" data-s="run"></span> serhii</button>
+        <button class="dk-tab on"><span class="dk-s" data-s="run"></span> orion-ops</button>
+        <button class="dk-tab"><span class="dk-s" data-s="run"></span> dana</button>
         <button class="dk-tab"><span class="dk-s" data-s="idle"></span> zsh</button>
       </div>
       <div class="dk-term__h">
@@ -313,7 +313,7 @@ stylesheet, so removing them is a change to shell.tsx as well.</span>
           <span class="dk-tag" data-s="run">@ styles/tokens.css</span>
           <span class="dk-tag" data-s="run">@ shell.tsx</span>
           <span class="dk-tag" data-s="done">✦ code-review</span>
-          <span class="dk-tag">~ maks-it</span>
+          <span class="dk-tag">~ orion-ops</span>
           <span class="dk-tag">CLAUDE.md</span>
           <button class="dk-btn bare" style="height:18px">+ context</button>
         </div>
@@ -427,16 +427,16 @@ SCREENS.schedules = () => `
 
   ${group("would run", 3, "proposed, not real", `<div class="dk-list wide">
     ${head(["schedule", "agent · model", "r next", "r last", "r cost 7d"])}
-    ${line([["nightly roadmap sweep <span class='dim'>cron 0 2 * * * · codenest-app</span>", "sub"], "maks-it · sonnet-5.5", ["02:00", "r"], ["—", "r"], ["—", "r"]], { s: "wait" })}
+    ${line([["nightly roadmap sweep <span class='dim'>cron 0 2 * * * · codenest-app</span>", "sub"], "orion-ops · sonnet-5.5", ["02:00", "r"], ["—", "r"], ["—", "r"]], { s: "wait" })}
     ${line([["top-priority task, hourly <span class='dim'>interval 1h · any project</span>", "sub"], "from task · from task", ["15:00", "r"], ["—", "r"], ["—", "r"]], { s: "wait" })}
-    ${line([["stalled-session nudge <span class='dim'>event session.stalled</span>", "sub"], "maks-it · haiku-4.5", ["on event", "r"], ["—", "r"], ["—", "r"]], { s: "wait" })}
+    ${line([["stalled-session nudge <span class='dim'>event session.stalled</span>", "sub"], "orion-ops · haiku-4.5", ["on event", "r"], ["—", "r"], ["—", "r"]], { s: "wait" })}
     </div>`, "stall")}
 
   ${group("the shape of one", "", "", `<div class="dk-list simple" style="--cols:14px 150px minmax(0,1fr)">
     ${head(["field", "value"])}
     ${line([["trigger", "sub"], "cron <code>0 2 * * *</code> · or interval · or event"], { s: "done" })}
     ${line([["project", "sub"], "codenest-app"], { s: "done" })}
-    ${line([["agent", "sub"], "maks-it — or taken from the task's assignee"], { s: "done" })}
+    ${line([["agent", "sub"], "orion-ops — or taken from the task's assignee"], { s: "done" })}
     ${line([["model", "sub"], "sonnet-5.5 — or the agent's saved default"], { s: "done" })}
     ${line([["prompt", "sub"], "the task body, or a fixed instruction"], { s: "done" })}
     ${line([["run mode", "sub"], "background · windowed"], { s: "done" })}
@@ -458,22 +458,22 @@ SCREENS.budgets = () => `
   ${group("by project", 7, "7 days", `<div class="dk-list wide">
     ${head(["project", "share", "r runs", "r tokens", "r spend"])}
     ${[["run","codenest-app","47%","41","1.8M","$62.10"],
-       ["run","RAID-2D","24%","22","0.9M","$31.40"],
-       ["run","miragold","19%","18","0.7M","$24.80"],
-       ["idle","android-interview-kb","6%","9","0.3M","$7.60"],
+       ["run","Orbit","24%","22","0.9M","$31.40"],
+       ["run","mercury","19%","18","0.7M","$24.80"],
+       ["idle","studykit","6%","9","0.3M","$7.60"],
        ["idle","Networa","3%","6","0.1M","$4.20"],
-       ["idle","Readiness","2%","3","0.1M","$2.90"],
+       ["idle","Vitals","2%","3","0.1M","$2.90"],
        ["idle","DailyMotivation","0%","1","0.0M","$0.40"]]
       .map(([st,n,share,runs,tok,sp]) => line([[n, "sub"], `<span class="dk-bar"><i style="width:${share}"></i></span> ${share}`, [runs, "r"], [tok, "r"], [sp, "r"]], { s: st })).join("")}
     </div>`)}
 
   ${group("by agent", 5, "7 days", `<div class="dk-list wide">
     ${head(["agent", "default model", "r runs", "r tokens", "r spend"])}
-    ${[["run","oleg-researcher","opus-5","11","1.1M","$34.70"],
-       ["stall","serhii-godot-dev","opus-5","22","0.9M","$31.40"],
-       ["run","maks-it","sonnet-5.5","24","1.4M","$18.20"],
-       ["idle","igor-recruiter","opus-5","3","0.2M","$5.10"],
-       ["idle","tanya-android","haiku-4.5","1","0.0M","$0.40"]]
+    ${[["run","vega-research","opus-5","11","1.1M","$34.70"],
+       ["stall","game-dev","opus-5","22","0.9M","$31.40"],
+       ["run","orion-ops","sonnet-5.5","24","1.4M","$18.20"],
+       ["idle","atlas-recruiter","opus-5","3","0.2M","$5.10"],
+       ["idle","android-dev","haiku-4.5","1","0.0M","$0.40"]]
       .map(([st,n,m,runs,tok,sp]) => line([[n, "sub"], m, [runs, "r"], [tok, "r"], [sp, "r"]], { s: st })).join("")}
     </div>`)}
 

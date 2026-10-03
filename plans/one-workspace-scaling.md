@@ -30,7 +30,7 @@ Collisions are handled at two levels today:
 
 **Claude Code resolves an agent by its frontmatter `name:`, not by its
 filename.** Renaming the *link* therefore does not disambiguate anything: both
-`code-reviewer.md` and `miragold--code-reviewer.md` still declare
+`code-reviewer.md` and `mercury--code-reviewer.md` still declare
 `name: code-reviewer`, so the CLI sees two agents with one name and silently
 picks one. The user gets no signal, and which one wins is not something this app
 controls.
@@ -52,7 +52,7 @@ touching content.
   file the CLI will ignore anyway.
 * Report them: bootstrap and `regenerate_workspace_links` return a
   `conflicts` list (`name`, winner project, shadowed project), and a read
-  endpoint exposes it so the UI can say *"miragold's `code-reviewer` is shadowed
+  endpoint exposes it so the UI can say *"mercury's `code-reviewer` is shadowed
   by codenest-app's — rename or disable one"*.
 * Winner stays "org agents first, then lowest project id", which is the current
   behaviour; A2 makes it a choice.

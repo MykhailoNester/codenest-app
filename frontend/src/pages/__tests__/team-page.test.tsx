@@ -115,7 +115,7 @@ function conflict(
   return {
     name: "code-reviewer",
     kind: "project_agent",
-    project: "miragold",
+    project: "mercury",
     canonical_path: "/m/.claude/agents/code-reviewer.md",
     shadowed_by: "codenest-app",
     shadowed_by_kind: "project_agent",
@@ -160,7 +160,7 @@ describe("Agents page — workspace list", () => {
       catalog: catalog({
         agents: [
           aliased("codenest-app", 1),
-          aliased("miragold", 2),
+          aliased("mercury", 2),
           aliased("networa", 3),
         ],
       }),
@@ -168,7 +168,7 @@ describe("Agents page — workspace list", () => {
 
     // Three claimants to one name, three distinct rows — not three "Code reviewer".
     expect(screen.getByText("codenest-app:code-reviewer")).toBeTruthy();
-    expect(screen.getByText("miragold:code-reviewer")).toBeTruthy();
+    expect(screen.getByText("mercury:code-reviewer")).toBeTruthy();
     expect(screen.getByText("networa:code-reviewer")).toBeTruthy();
     expect(screen.queryByText("Code reviewer")).toBeNull();
 
@@ -177,7 +177,7 @@ describe("Agents page — workspace list", () => {
     expect(screen.getByText("@agent-networa--code-reviewer")).toBeTruthy();
 
     // Origin is on the row, once per claimant.
-    expect(screen.getAllByText("miragold").length).toBe(1);
+    expect(screen.getAllByText("mercury").length).toBe(1);
   });
 
   it("shows skills and commands alongside agents", () => {
@@ -264,7 +264,7 @@ describe("Agents page — name conflicts", () => {
         by_project: [
           {
             project_id: 2,
-            project_name: "miragold",
+            project_name: "mercury",
             agents: [
               {
                 id: 77,

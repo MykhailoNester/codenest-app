@@ -111,7 +111,7 @@ export function invocableMeta(item: InvocableSource): string {
  *
  * A prefix of the resolved name wins outright, so `@debug` puts `debugger`
  * first among the dozens of rows whose description happens to mention debugging.
- * The label is matched too, which is what makes `@mira` narrow to miragold's
+ * The label is matched too, which is what makes `@merc` narrow to mercury's
  * agents: the label is `project:name`. Descriptions are deliberately *not*
  * matched — they are long enough that every needle would hit something.
  */

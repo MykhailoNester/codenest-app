@@ -146,7 +146,7 @@ async def test_duplicate_runs_for_one_session_do_not_double_count(
     [
         "main",
         "prep/release/0.2.0",
-        "task/OW-{tid}-featured-message-sdk",  # a Jira key, not a board id
+        "task/ABC-{tid}-some-feature",  # a Jira key, not a board id
         "feature/1{tid}-longer-number",
         "feature/{tid}0-longer-number",
         "feature/{tid}",  # no slug: the convention always appends one

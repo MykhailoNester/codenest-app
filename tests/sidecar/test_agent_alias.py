@@ -34,13 +34,13 @@ More body.
 
 
 def test_alias_name_joins_with_a_double_dash():
-    assert alias.alias_name("miragold", "code-reviewer") == "miragold--code-reviewer"
+    assert alias.alias_name("mercury", "code-reviewer") == "mercury--code-reviewer"
 
 
 def test_rewrite_replaces_only_the_name():
-    out = alias.rewrite_frontmatter_name(AGENT, "miragold--code-reviewer", "/p/cr.md")
+    out = alias.rewrite_frontmatter_name(AGENT, "mercury--code-reviewer", "/p/cr.md")
 
-    assert "name: miragold--code-reviewer" in out
+    assert "name: mercury--code-reviewer" in out
     assert "name: code-reviewer\n" not in out
     # Everything else survives: the alias is the same agent under a second name.
     assert "description: Reviews the branch." in out
