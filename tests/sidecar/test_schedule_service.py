@@ -1029,3 +1029,178 @@ async def test_prune_safety_guard_outside_runs_dir(
         row = await cur.fetchone()
     assert row is not None
     assert row["transcript_path"] is None
+
+
+# ---------------------------------------------------------------------------
+# Session closing on terminal run transitions (#46)
+# ---------------------------------------------------------------------------
+
+
+async def _session_row(
+    db: aiosqlite.Connection, session_id: str
+) -> aiosqlite.Row | None:
+    async with db.execute(
+        "SELECT status, ended_at FROM agent_sessions WHERE session_id = ?",
+        (session_id,),
+    ) as cur:
+        return await cur.fetchone()
+
+
+async def _run_with_live_session(
+    db: aiosqlite.Connection, *, status: str = "running"
+) -> dict[str, Any]:
+    """A run whose spawned CLI registered an `active` session, as in real life."""
+    schedule = await _make_cron_schedule(db)
+    run = await svc._insert_run(db, schedule["id"], "cron", "scheduled", status=status)
+    await db.execute(
+        "INSERT INTO agent_sessions (session_id, profile, status, cwd) "
+        "VALUES (?, 'scheduled', 'active', '/w')",
+        (run["session_id"],),
+    )
+    await db.execute(
+        "UPDATE schedule_runs SET started_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (run["id"],),
+    )
+    await db.commit()
+    return run
+
+
+@pytest.mark.asyncio
+async def test_failed_run_closes_its_session(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """The #46 regression: a failed run must not leave its session `active`."""
+    run = await _run_with_live_session(migrated_db)
+
+    result = await svc.finish_run(migrated_db, run["id"], exit_code=1)
+    assert result["status"] == "failed"
+
+    row = await _session_row(migrated_db, run["session_id"])
+    assert row is not None
+    assert row["status"] == "ended"
+    assert row["ended_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_successful_run_closes_its_session(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    run = await _run_with_live_session(migrated_db)
+
+    await svc.finish_run(migrated_db, run["id"], exit_code=0)
+
+    row = await _session_row(migrated_db, run["session_id"])
+    assert row is not None
+    assert row["status"] == "ended"
+    assert row["ended_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_timeout_and_cancel_close_their_sessions(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    timed_out = await _run_with_live_session(migrated_db)
+    await svc.timeout_run(migrated_db, timed_out["id"])
+    row = await _session_row(migrated_db, timed_out["session_id"])
+    assert row is not None
+    assert row["status"] == "ended"
+
+    cancelled = await _run_with_live_session(migrated_db)
+    await svc.cancel_run(migrated_db, cancelled["id"])
+    row = await _session_row(migrated_db, cancelled["session_id"])
+    assert row is not None
+    assert row["status"] == "ended"
+
+
+@pytest.mark.asyncio
+async def test_reap_orphaned_runs_closes_stranded_sessions(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """Startup reaping must clear the sessions too, not just the run rows."""
+    run = await _run_with_live_session(migrated_db)
+
+    reaped = await svc.reap_orphaned_runs(migrated_db)
+    assert reaped >= 1
+
+    row = await _session_row(migrated_db, run["session_id"])
+    assert row is not None
+    assert row["status"] == "ended"
+    assert row["ended_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_stale_sweep_closes_stranded_sessions(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    run = await _run_with_live_session(migrated_db)
+    # Backdate well past max_runtime + grace so the sweep claims it.
+    stale = datetime.now() - timedelta(  # noqa: DTZ005
+        seconds=svc._DEFAULT_MAX_RUNTIME_SEC + svc._STALE_RUN_GRACE_SEC + 600
+    )
+    await migrated_db.execute(
+        "UPDATE schedule_runs SET started_at = ? WHERE id = ?",
+        (stale.isoformat(sep=" ", timespec="seconds"), run["id"]),
+    )
+    await migrated_db.commit()
+
+    swept = await svc.sweep_stale_runs(migrated_db)
+    assert swept == 1
+
+    row = await _session_row(migrated_db, run["session_id"])
+    assert row is not None
+    assert row["status"] == "ended"
+
+
+@pytest.mark.asyncio
+async def test_closing_preserves_an_already_ended_session(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A session that ended cleanly keeps its own `ended_at`, untouched."""
+    run = await _run_with_live_session(migrated_db)
+    original_end = "2026-01-01 00:00:00"
+    await migrated_db.execute(
+        "UPDATE agent_sessions SET status = 'ended', ended_at = ? WHERE session_id = ?",
+        (original_end, run["session_id"]),
+    )
+    await migrated_db.commit()
+
+    await svc.finish_run(migrated_db, run["id"], exit_code=0)
+
+    row = await _session_row(migrated_db, run["session_id"])
+    assert row is not None
+    assert row["status"] == "ended"
+    assert row["ended_at"] == original_end
+
+
+@pytest.mark.asyncio
+async def test_finishing_does_not_touch_unrelated_sessions(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """An interactive pane's session must survive a scheduled run finishing."""
+    run = await _run_with_live_session(migrated_db)
+    await migrated_db.execute(
+        "INSERT INTO agent_sessions (session_id, profile, status, cwd) "
+        "VALUES ('interactive-pane', 'work', 'active', '/w')"
+    )
+    await migrated_db.commit()
+
+    await svc.finish_run(migrated_db, run["id"], exit_code=1)
+
+    row = await _session_row(migrated_db, "interactive-pane")
+    assert row is not None
+    assert row["status"] == "active"
+    assert row["ended_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_finish_run_survives_a_run_without_a_session_row(
+    migrated_db: aiosqlite.Connection,
+) -> None:
+    """A run that never got far enough to register a session still finishes."""
+    schedule = await _make_cron_schedule(migrated_db)
+    run = await svc._insert_run(
+        migrated_db, schedule["id"], "cron", "scheduled", status="running"
+    )
+
+    result = await svc.finish_run(migrated_db, run["id"], exit_code=1)
+    assert result["status"] == "failed"

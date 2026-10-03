@@ -27,7 +27,7 @@ from typing import Any, Literal
 import aiosqlite
 from fastapi import HTTPException
 
-from . import _cron, _cron_helpers
+from . import _cron, _cron_helpers, agent_service
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +446,77 @@ async def get_run(db: aiosqlite.Connection, run_id: int) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Session closing
+# ---------------------------------------------------------------------------
+
+
+async def _close_run_session(
+    db: aiosqlite.Connection, run: dict[str, Any] | None, reason: str
+) -> None:
+    """Close the `agent_sessions` row a now-terminal run owns.
+
+    Reaping the `schedule_runs` row was never enough: the session the spawned
+    CLI registered stays `status='active'` with `ended_at` NULL, so a run that
+    failed before emitting its own `SessionEnd` hook counts as "running" on the
+    Deck forever.
+
+    This lives on the run-finish path rather than in a liveness sweep because
+    the sidecar deliberately knows nothing about processes (spawning is the
+    Rust shell's job) — it has no PID to test and no way to tell a dead
+    scheduled session from a live interactive one. The finishing run, by
+    contrast, already owns the `session_id` and fires exactly once per terminal
+    transition, so the close is deterministic and needs no new polling.
+
+    Never raises: a schedule's bookkeeping must not be undone by a failure to
+    tidy up a session row.
+    """
+    if not run:
+        return
+    session_id = run.get("session_id")
+    if not session_id:
+        return
+    try:
+        await agent_service.close_session_for_run(db, str(session_id), reason)
+    except Exception:  # tidy-up must never fail the transition
+        logger.exception(
+            "failed to close session %s for run %s", session_id, run.get("id")
+        )
+
+
+async def _close_sessions_for_runs(
+    db: aiosqlite.Connection, session_ids: list[str], reason: str
+) -> None:
+    """Close each session belonging to a batch of bulk-reaped runs."""
+    for session_id in session_ids:
+        try:
+            await agent_service.close_session_for_run(db, session_id, reason)
+        except Exception:  # see _close_run_session
+            logger.exception("failed to close session %s", session_id)
+
+
+async def _open_session_ids_for_runs(
+    db: aiosqlite.Connection, where: str, params: tuple[Any, ...] = ()
+) -> list[str]:
+    """Session ids of runs matching `where` that still hold an open session.
+
+    Called *before* a bulk status UPDATE, while the rows still match it, so the
+    same predicate selects exactly the runs that update will reap.
+    """
+    async with db.execute(
+        f"""
+        SELECT r.session_id
+        FROM schedule_runs r
+        JOIN agent_sessions s ON s.session_id = r.session_id
+        WHERE {where}
+          AND r.session_id IS NOT NULL
+          AND s.status != 'ended'
+        """,  # `where` is a module-local literal; values are always bound
+        params,
+    ) as cur:
+        return [str(r["session_id"]) for r in await cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
 # Startup reaper
 # ---------------------------------------------------------------------------
 
@@ -459,6 +530,8 @@ async def reap_orphaned_runs(db: aiosqlite.Connection) -> int:
     Returns the number of rows reaped.
     """
     now_str = _now().isoformat(sep=" ", timespec="seconds")
+    # Collected before the UPDATE, while the rows still match.
+    stranded = await _open_session_ids_for_runs(db, "r.status IN ('running', 'queued')")
     cur = await db.execute(
         """
         UPDATE schedule_runs
@@ -470,6 +543,7 @@ async def reap_orphaned_runs(db: aiosqlite.Connection) -> int:
         (now_str,),
     )
     await db.commit()
+    await _close_sessions_for_runs(db, stranded, "schedule_run_reaped")
     count = cur.rowcount or 0
     if count:
         logger.warning("reap_orphaned_runs: reaped %d stuck run(s)", count)
@@ -488,6 +562,20 @@ async def sweep_stale_runs(db: aiosqlite.Connection) -> int:
     watchdog report first in the normal case. Returns the number of rows swept.
     """
     now_str = _now().isoformat(sep=" ", timespec="seconds")
+    stale_predicate = """
+          r.status = 'running'
+          AND r.started_at IS NOT NULL
+          AND (julianday(?) - julianday(r.started_at)) * 86400.0 >
+              COALESCE(
+                  (SELECT max_runtime_sec FROM schedules WHERE id = r.schedule_id),
+                  ?
+              ) + ?
+    """
+    stranded = await _open_session_ids_for_runs(
+        db,
+        stale_predicate,
+        (now_str, _DEFAULT_MAX_RUNTIME_SEC, _STALE_RUN_GRACE_SEC),
+    )
     cur = await db.execute(
         """
         UPDATE schedule_runs
@@ -506,6 +594,7 @@ async def sweep_stale_runs(db: aiosqlite.Connection) -> int:
         (now_str, now_str, _DEFAULT_MAX_RUNTIME_SEC, _STALE_RUN_GRACE_SEC),
     )
     await db.commit()
+    await _close_sessions_for_runs(db, stranded, "schedule_run_stale_swept")
     count = cur.rowcount or 0
     if count:
         logger.warning("sweep_stale_runs: timed out %d stale run(s)", count)
@@ -608,6 +697,7 @@ async def finish_run(
         ),
     )
     await db.commit()
+    await _close_run_session(db, run, f"schedule_run_{status}")
     logger.info("finish_run: run %d → %s (exit %d)", run_id, status, exit_code)
     return await get_run(db, run_id)
 
@@ -624,6 +714,7 @@ async def timeout_run(db: aiosqlite.Connection, run_id: int) -> dict[str, Any]:
         (now_str, run_id),
     )
     await db.commit()
+    await _close_run_session(db, await get_run(db, run_id), "schedule_run_timed_out")
     return await get_run(db, run_id)
 
 
@@ -639,6 +730,7 @@ async def cancel_run(db: aiosqlite.Connection, run_id: int) -> dict[str, Any]:
         (now_str, run_id),
     )
     await db.commit()
+    await _close_run_session(db, await get_run(db, run_id), "schedule_run_cancelled")
     return await get_run(db, run_id)
 
 

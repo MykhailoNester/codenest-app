@@ -1366,6 +1366,59 @@ async def cleanup_stale_sessions(db: aiosqlite.Connection) -> dict:
     return {"closed": len(stale), "session_ids": stale}
 
 
+async def close_session_for_run(
+    db: aiosqlite.Connection, session_id: str, reason: str
+) -> bool:
+    """Close the one session a finished scheduled run owns.
+
+    A scheduled run that fails before the CLI emits its ``SessionEnd`` hook —
+    an auth failure, a kill, a crash — leaves its ``agent_sessions`` row at
+    ``status='active'`` with ``ended_at`` NULL forever, permanently inflating
+    the "running" count. The run-finish path knows the ``session_id`` and runs
+    exactly once per terminal transition, so it closes its own row here.
+
+    Deliberately narrow, unlike :func:`cleanup_stale_sessions`: it touches one
+    session by id and only while it is still open, so a session that already
+    ended cleanly keeps its real ``ended_at`` and an interactive pane's session
+    is never collateral. Returns whether a row was actually closed.
+
+    The caller is expected to commit; this mirrors ``record_session_end`` by
+    appending a synthetic ``SessionEnd`` so replay and history stay consistent.
+    """
+    if not session_id:
+        return False
+    row = await db.execute(
+        "SELECT status FROM agent_sessions WHERE session_id = ?", (session_id,)
+    )
+    existing = await row.fetchone()
+    if existing is None or existing["status"] == "ended":
+        return False
+
+    now = _now()
+    await db.execute(
+        """UPDATE agent_sessions
+           SET status='ended', ended_at=COALESCE(ended_at, ?), last_event_at=?,
+               current_tool=NULL, current_tool_use_id=NULL,
+               current_tool_started_at=NULL
+           WHERE session_id=? AND status != 'ended'""",
+        (now, now, session_id),
+    )
+    event_id = await _append_event(
+        db,
+        session_id,
+        "SessionEnd",
+        None,
+        None,
+        f"Session ended ({reason})",
+        {"session_id": session_id, "reason": reason},
+    )
+    _stats_cache.clear()
+    await db.commit()
+    await _broadcast(db, session_id, event_id, "session_ended")
+    logger.info("close_session_for_run: closed %s (%s)", session_id, reason)
+    return True
+
+
 # ─── Read API ───────────────────────────────────────────────────────────────
 
 
