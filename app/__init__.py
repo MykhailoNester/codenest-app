@@ -384,6 +384,7 @@ def create_app() -> FastAPI:
         launch_presets,
         launch_seed,
         library,
+        mcp,
         metrics,
         notifications,
         otlp,
@@ -434,6 +435,7 @@ def create_app() -> FastAPI:
     app.include_router(budgets.router)
     app.include_router(workspace.router)
     app.include_router(usage.router)
+    app.include_router(mcp.router)
     # Lane B ingest (#175). Mounted last and, unlike every other router here,
     # outside `/api/v1` — the OTLP/HTTP spec fixes the path an exporter posts
     # to, so `/v1/metrics` is not ours to rename. See app/routers/otlp.py.

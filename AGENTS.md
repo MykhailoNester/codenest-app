@@ -71,6 +71,13 @@ Scheduling is split by design: the sidecar queues due cron runs in SQLite; the R
 polls for pending runs and spawns headless `claude` processes. The Command Center bootstrap
 (deferred, idempotent) creates the app-data workspace and installs the bundled org-agents.
 
+The sidecar also serves a stateless MCP endpoint at `POST /mcp` (`app/routers/mcp.py`, tool
+catalogue in `app/services/mcp_service.py`) so external `claude` sessions can manage the
+workboard. Tools call the same services as the REST routers. The catalogue deliberately has no
+delete tools and no way to change a project's path, profile or provider, and
+`tests/sidecar/test_mcp.py` pins both. The route refuses any request with an `Origin` header
+or a non-loopback `Host`. User docs: `docs/mcp.md`.
+
 ## Environment variables
 
 | Var | Effect | Default |

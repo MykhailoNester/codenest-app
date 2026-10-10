@@ -85,6 +85,10 @@ Budgets and Hooks can each be switched off under **Settings → Features**.
   possible sources put it there.
 - **Settings** — app, provider, profile and feature configuration.
 
+**Workboard MCP** — while the app runs, any MCP client on your machine (a
+`claude` session in another terminal, an IDE) can read and manage projects,
+tasks and the inbox at `http://127.0.0.1:8002/mcp`. See [docs/mcp.md](docs/mcp.md).
+
 ## Screenshots
 
 **Needs You** — the intervention queue. Each row names what is wrong, where it
