@@ -8,7 +8,7 @@ is built and tested only on macOS (Apple Silicon).
 
 ## Setup (fresh clone)
 
-Prerequisites: macOS (Apple Silicon for dev), Xcode Command Line Tools, Rust (stable),
+Prerequisites: macOS (Apple Silicon for dev), Xcode Command Line Tools, Rust (stable, 1.88+),
 Node 20+ with pnpm, Python 3.12.
 
 ```bash
@@ -34,7 +34,7 @@ There is one verification gate: **`make check-all`** must pass before any change
 | `make check-python` | `ruff format --check .` + `ruff check .` + `mypy app/` |
 | `make test-python` | `python -m pytest app/tests tests/sidecar -q` |
 | `make check-frontend` | `tsc -b --noEmit` + eslint |
-| `make test-frontend` | `vitest run` (jsdom; tests in `src/**/__tests__/`) |
+| `make test-frontend` | `vitest run` (node env, unit tests only: `frontend/src/**/__tests__/*.test.ts`; a file needing DOM globals opts in with `// @vitest-environment jsdom`) |
 | `make seed-demo` | Seed `data/codenest.demo.db` with synthetic demo data (`ARGS=--reset` to wipe) |
 | `bash scripts/build-sidecar.sh` | PyInstaller onedir sidecar → `src-tauri/resources/sidecar.tar.gz` (host arch only) |
 | Sidecar standalone | venv active: `uvicorn main:app --port 8002` (rare — API testing in isolation) |
@@ -46,14 +46,18 @@ main.py               # sidecar entrypoint (frozen PyInstaller binary runs the _
 app/                  # FastAPI sidecar: routers/ (thin HTTP), services/ (all business logic),
                       #   models/, config.py (env + DB paths), database.py (migration runner)
 frontend/src/         # React app: pages/, components/, lib/ (api.ts, ipc.ts, nav-items.ts),
-                      #   stores/ (zustand), hooks/, styles/ (design tokens)
+                      #   stores/ (zustand), hooks/, styles/ (tokens.css + generated deck.css)
 src-tauri/src/        # Rust shell: lib.rs (commands/wiring), sidecar/ (spawn + health),
                       #   pty/ (terminals), agent/ (duplex claude stdio), session/,
-                      #   scheduler/, tray/, workspace/, commands/,
+                      #   scheduler/, tray/, workspace/, commands/ (fs, git, hooks, docs),
+                      #   dev_env.rs (.env.local loader), window.rs,
                       #   fswatch/ (live filesystem watcher for the workspace navigator;
                       #     fswatch/catalog.rs watches each project's .claude/ and asks
                       #     the sidecar to rescan it, on its own root set)
 src-tauri/resources/org-agents/   # bundled org agents + manifest.json (sha256 per file)
+design/deck/          # Deck design system source; build_app_css.py generates
+                      #   frontend/src/styles/deck.css
+docs/                 # user docs (install, faq, mcp)
 migrations/           # append-only NNN_*.sql; 000_baseline_schema.sql is the initial DB state
 scripts/              # build-sidecar.sh, pyinstaller.spec, seed_demo.py
 tests/sidecar/        # pytest integration suite (fresh migrated SQLite per test)
@@ -92,6 +96,7 @@ or a non-loopback `Host`. User docs: `docs/mcp.md`.
 | `VITE_SIDECAR_URL` | Frontend override for the sidecar base URL | `http://127.0.0.1:8002` |
 
 DB locations: dev demo `data/codenest.demo.db`; dev prod `data/codenest.db`;
+`work` profile `~/Library/Application Support/com.codenest.dev/codenest.db`;
 packaged `~/Library/Application Support/com.codenest.dashboard/codenest.db`.
 
 ### `.env.local` and the `work` profile
@@ -121,7 +126,8 @@ derive that directory independently and must agree: `DEV_APP_DATA_DIR_NAME` in
   content is never re-checked. Never edit an applied migration; never rename
   `000_baseline_schema.sql`. **Never reuse the stems** `000_baseline_schema`,
   `001_agent_sessions_pane_id`, `001_workflow_labels`, `002_schedule_artifact_dir`
-  (recorded in existing installs) — start new migrations at `003_`.
+  (recorded in existing installs) — number a new migration after the highest file in
+  `migrations/`.
 - **A freshly migrated DB ships empty** apart from functional reference data (settings defaults,
   taxonomies, catalog). No people, no projects, no history. `make seed-demo` is the only way
   demo data enters a DB, and only the repo-local demo DB.
@@ -142,6 +148,9 @@ derive that directory independently and must agree: `DEV_APP_DATA_DIR_NAME` in
   `src-tauri/resources/org-agents/` requires recomputing its sha256 in `manifest.json`
   (and bumping the manifest `version`). Installs are idempotent, per-file-hash-diffed;
   user edits are reverted on next launch.
+- **`frontend/src/styles/deck.css` is generated** — edit `design/deck/tokens.css` /
+  `design/deck/deck.css`, then run `python3 design/deck/build_app_css.py`. A UI surface joins
+  Deck by carrying `className="deck"`. `app/tests/test_deck_css_generated.py` fails on drift.
 - **`sidecar.tar.gz` is a build artifact** (gitignored). Rebuild with `scripts/build-sidecar.sh`
   after sidecar changes and before `pnpm tauri:build`.
 - The Rust binary name `Codenest` (Cargo `[[bin]]`) must match `mainBinaryName` in
@@ -169,12 +178,13 @@ Python: `make test-python` (unit in `app/tests/`, integration in `tests/sidecar/
 gets a fresh migrated SQLite via the `migrated_db` fixture). Bare `pytest` from the repo
 root works too — test paths come from `pytest.ini`. Frontend: `make test-frontend`
 plus `make check-frontend` for types/lint. Rust: `cargo test` in `src-tauri/` (unit tests in
-pty, window, scheduler, docs modules). New services/routers should land with tests; schema
-changes must keep `tests/sidecar/test_migrations` green.
+agent, commands, fswatch, pty, scheduler, sidecar, window). New services/routers should land
+with tests; schema changes must keep `tests/sidecar/test_migrations` green.
 
 ## Commits & PRs
 
-- Small, focused commits; short imperative subject lines. No `Co-Authored-By` trailers.
+- Small, focused commits; short imperative subject lines prefixed with the issue or kind:
+  `[#123] - ...`, `[fix] - ...`, `[chore] - ...`, `[docs] - ...`. No `Co-Authored-By` trailers.
 - One layer per PR where possible (sidecar / frontend / shell); cross-layer changes should
   explain the contract change in the description.
 - `make check-all` must pass before requesting review.
